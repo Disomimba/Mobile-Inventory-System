@@ -3,6 +3,9 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../../data/inventory.dart';
 import '../../logic/inventory_controller.dart';
 import 'store_map.dart';
+import 'package:image_picker/image_picker.dart';
+import 'dart:io';
+import 'package:flutter/foundation.dart' show kIsWeb;
 
 class ItemDetailPage extends StatefulWidget {
   final InventoryItem item;
@@ -31,6 +34,11 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
 
   bool _isEditing = false;
   bool _showMap = false;
+
+  bool _isSaving = false;
+  String? _newImageUrl;
+  XFile? _selectedImage;
+  final ImagePicker _picker = ImagePicker();
 
   late TextEditingController _nameController;
   late TextEditingController _priceController;
@@ -116,30 +124,156 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
     super.dispose();
   }
 
-  Future<void> _handleSave() async {
-    final updated = widget.controller.prepareUpdatedItem(
-      originalItem: _currentItem,
-      newName: _nameController.text,
-      newSku: _skuController.text,
-      newPrice: _priceController.text,
-      newStock: _stockController.text,
-      newDesc: _descController.text,
-      locationId: _currentItem.locationId,
-      manufacturer: _manufacturerController.text,
-      model: _modelController.text,
-      productSize: _sizeController.text,
-      shelfLevel: _shelfLevelController.text,
-      binNumber: _binNumberController.text,
-    );
+  Future<void> _pickImage() async {
+    if (!_isEditing) return;
 
-    await widget.onUpdate(updated);
-    if (mounted) {
-      setState(() {
-        _currentItem = updated;
-        _isEditing = false;
-      });
-      await _loadHistory();
-      _showSnackBar('Item updated successfully', Colors.green);
+    showModalBottomSheet(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Wrap(
+          children: [
+            ListTile(
+              leading: const Icon(LucideIcons.camera),
+              title: const Text('Take Photo'),
+              onTap: () async {
+                Navigator.pop(context);
+                final XFile? photo = await _picker.pickImage(
+                  source: ImageSource.camera,
+                );
+                if (photo != null) {
+                  setState(() {
+                    _selectedImage = photo;
+                    _newImageUrl = photo.path;
+                  });
+                }
+              },
+            ),
+            ListTile(
+              leading: const Icon(LucideIcons.image),
+              title: const Text('Choose from Gallery'),
+              onTap: () async {
+                Navigator.pop(context);
+                final XFile? image = await _picker.pickImage(
+                  source: ImageSource.gallery,
+                );
+                if (image != null) {
+                  setState(() {
+                    _selectedImage = image;
+                    _newImageUrl = image.path;
+                  });
+                }
+              },
+            ),
+            ListTile(
+              leading: const Icon(LucideIcons.link),
+              title: const Text('Enter Image URL'),
+              onTap: () {
+                Navigator.pop(context);
+                _showUrlInputDialog();
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showUrlInputDialog() {
+    final urlController = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("Image URL"),
+        content: TextField(
+          controller: urlController,
+          decoration: const InputDecoration(hintText: "Paste link here"),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("Cancel"),
+          ),
+          TextButton(
+            onPressed: () {
+              setState(() {
+                _newImageUrl = urlController.text;
+                _selectedImage = null;
+              });
+              Navigator.pop(context);
+            },
+            child: const Text("OK"),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _handleSave() async {
+    setState(() => _isSaving = true);
+
+    try {
+      String finalImageUrl = _currentItem.imageUrl;
+
+      if (_newImageUrl != null && _newImageUrl != _currentItem.imageUrl) {
+        if (!_newImageUrl!.startsWith('http')) {
+          final String fileName = _nameController.text.isNotEmpty
+              ? '${_nameController.text}_image.jpg'
+              : 'updated_product_image.jpg';
+          String? uploadedUrl;
+          if (kIsWeb && _selectedImage != null) {
+            final bytes = await _selectedImage!.readAsBytes();
+            uploadedUrl = await widget.controller.uploadImageBytes(
+              bytes,
+              fileName,
+            );
+          } else if (_newImageUrl != null) {
+            final File imageFile = File(_newImageUrl!);
+            uploadedUrl = await widget.controller.uploadProductImage(
+              imageFile,
+              fileName,
+            );
+          }
+          if (uploadedUrl != null) finalImageUrl = uploadedUrl;
+        } else {
+          finalImageUrl = _newImageUrl!;
+        }
+      }
+
+      final updated = widget.controller.prepareUpdatedItem(
+        originalItem: _currentItem,
+        newName: _nameController.text,
+        newSku: _skuController.text,
+        newPrice: _priceController.text,
+        newStock: _stockController.text,
+        newDesc: _descController.text,
+        locationId: _currentItem.locationId,
+        manufacturer: _manufacturerController.text,
+        model: _modelController.text,
+        productSize: _sizeController.text,
+        shelfLevel: _shelfLevelController.text,
+        binNumber: _binNumberController.text,
+        imageUrl: finalImageUrl,
+      );
+
+      await widget.onUpdate(updated);
+      if (mounted) {
+        setState(() {
+          _currentItem = updated;
+          _isEditing = false;
+          _newImageUrl = null;
+          _selectedImage = null;
+        });
+        await _loadHistory();
+        _showSnackBar('Item updated successfully', Colors.green);
+      }
+    } catch (e) {
+      if (mounted) {
+        _showSnackBar('Error updating item: $e', Colors.red);
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isSaving = false);
+      }
     }
   }
 
@@ -229,7 +363,16 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
         onPressed: widget.onBack,
       ),
       actions: [
-        if (_isEditing)
+        if (_isSaving)
+          const Padding(
+            padding: EdgeInsets.all(16.0),
+            child: SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+            ),
+          )
+        else if (_isEditing)
           IconButton(
             icon: const Icon(LucideIcons.check, color: Colors.greenAccent),
             onPressed: _handleSave,
@@ -241,22 +384,13 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
           ),
       ],
       flexibleSpace: FlexibleSpaceBar(
-        background: Stack(
-          fit: StackFit.expand,
-          children: [
-            Image.network(
-              _currentItem.imageUrl,
-              fit: BoxFit.cover,
-              errorBuilder: (context, error, stackTrace) => Container(
-                color: Colors.grey.shade200,
-                child: const Icon(
-                  Icons.image_not_supported,
-                  color: Colors.grey,
-                  size: 50,
-                ),
-              ),
-            ),
-            Container(
+        background: GestureDetector(
+          onTap: _isEditing ? _pickImage : null,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              _buildImage(),
+              Container(
               decoration: BoxDecoration(
                 gradient: LinearGradient(
                   begin: Alignment.topCenter,
@@ -265,6 +399,17 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                 ),
               ),
             ),
+              if (_isEditing)
+                Center(
+                  child: Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: const BoxDecoration(
+                      color: Colors.black54,
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(LucideIcons.camera, color: Colors.white, size: 32),
+                  ),
+                ),
             Positioned(
               bottom: 16,
               left: 16,
@@ -292,9 +437,41 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
               ),
             ),
           ],
+          ),
         ),
       ),
     );
+  }
+
+  Widget _buildImage() {
+    final imageUrl = _newImageUrl ?? _currentItem.imageUrl;
+    if (kIsWeb || imageUrl.startsWith('http')) {
+      return Image.network(
+        imageUrl,
+        fit: BoxFit.cover,
+        errorBuilder: (context, error, stackTrace) => Container(
+          color: Colors.grey.shade200,
+          child: const Icon(
+            Icons.image_not_supported,
+            color: Colors.grey,
+            size: 50,
+          ),
+        ),
+      );
+    } else {
+      return Image.file(
+        File(imageUrl),
+        fit: BoxFit.cover,
+        errorBuilder: (context, error, stackTrace) => Container(
+          color: Colors.grey.shade200,
+          child: const Icon(
+            Icons.image_not_supported,
+            color: Colors.grey,
+            size: 50,
+          ),
+        ),
+      );
+    }
   }
 
   Widget _buildStatCard(

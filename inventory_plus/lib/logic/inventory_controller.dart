@@ -322,6 +322,7 @@ class InventoryController {
     String? productSize,
     String? shelfLevel,
     String? binNumber,
+    String? imageUrl,
   }) {
     return originalItem.copyWith(
       name: newName,
@@ -335,6 +336,7 @@ class InventoryController {
       productSize: productSize,
       shelfLevel: shelfLevel,
       binNumber: binNumber,
+      imageUrl: imageUrl,
     );
   }
 
