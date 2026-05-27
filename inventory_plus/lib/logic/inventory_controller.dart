@@ -254,7 +254,7 @@ class InventoryController {
     }
   }
 
-  Future<void> assignItemToLocation(String itemId, String rackId) async {
+  Future<void> assignItemToLocation(String itemId, String? rackId) async {
     try {
       await supabase
           .from('products')
@@ -263,10 +263,84 @@ class InventoryController {
 
       final index = _items.indexWhere((item) => item.id == itemId);
       if (index != -1) {
-        _items[index] = _items[index].copyWith(locationId: rackId);
+        final current = _items[index];
+        _items[index] = InventoryItem(
+          id: current.id,
+          name: current.name,
+          sku: current.sku,
+          price: current.price,
+          quantity: current.quantity,
+          category: current.category,
+          description: current.description,
+          locationId: rackId,
+          manufacturer: current.manufacturer,
+          model: current.model,
+          productSize: current.productSize,
+          shelfLevel: current.shelfLevel,
+          binNumber: current.binNumber,
+          imageUrl: current.imageUrl,
+        );
       }
     } catch (e) {
       print("Error assigning location: $e");
+    }
+  }
+
+  Future<void> deleteMapElement(String elementId) async {
+    try {
+      storeLayout.removeWhere((item) => item.id == elementId);
+      await saveLayout();
+
+      // Unassign all items that were assigned to this element
+      final itemsToUnassign = _items.where((item) => item.locationId == elementId).toList();
+      for (var item in itemsToUnassign) {
+        await assignItemToLocation(item.id, null);
+      }
+    } catch (e) {
+      print("Error deleting map element: $e");
+    }
+  }
+
+  Future<void> clearMapLayout() async {
+    try {
+      storeLayout.clear();
+      await saveLayout();
+
+      // Unassign all items that have a locationId
+      final itemsToUnassign = _items.where((item) => item.locationId != null).toList();
+      for (var item in itemsToUnassign) {
+        await assignItemToLocation(item.id, null);
+      }
+    } catch (e) {
+      print("Error clearing map layout: $e");
+    }
+  }
+
+  Future<void> updateItemLocationDetails(
+    String itemId, {
+    required String aisle,
+    required int shelf,
+    required String section,
+    required String layer,
+  }) async {
+    try {
+      await supabase
+          .from('products')
+          .update({
+            // NOTE: You may need to add 'aisle' and 'section' columns to your Supabase table if you want to save them!
+            // 'aisle': aisle,
+            'shelf_level': shelf.toString(),
+            // 'section': section,
+            'bin_number': layer, // Using bin_number to store the layer in this example
+          })
+          .eq('id', itemId);
+
+      final index = _items.indexWhere((item) => item.id == itemId);
+      if (index != -1) {
+        _items[index] = _items[index].copyWith(shelfLevel: shelf.toString(), binNumber: layer);
+      }
+    } catch (e) {
+      print("Error updating location details: $e");
     }
   }
 

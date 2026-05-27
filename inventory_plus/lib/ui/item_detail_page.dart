@@ -33,7 +33,6 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
   bool _isLoadingHistory = true;
 
   bool _isEditing = false;
-  bool _showMap = false;
 
   bool _isSaving = false;
   String? _newImageUrl;
@@ -745,6 +744,46 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
     );
   }
 
+  void _showAssignLocationMap() {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return Dialog(
+          insetPadding: const EdgeInsets.all(16),
+          clipBehavior: Clip.antiAlias,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          child: Column(
+            children: [
+              AppBar(
+                title: const Text("Select New Location"),
+                backgroundColor: const Color(0xFF0F172A),
+                foregroundColor: Colors.white,
+                leading: IconButton(
+                  icon: const Icon(LucideIcons.x),
+                  onPressed: () => Navigator.pop(context),
+                ),
+              ),
+              Expanded(
+                child: StoreMap(
+                  controller: widget.controller,
+                  mode: MapMode.selection,
+                  selectedItemId: _currentItem.id,
+                  onSelectionAssigned: () {
+                    Navigator.pop(context); // Close dialog
+                    setState(() {
+                      _currentItem = widget.controller.allItems.firstWhere((item) => item.id == _currentItem.id);
+                    });
+                    _showSnackBar("Location updated successfully", Colors.green);
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   Widget _buildMapBox() {
     final bool hasMapId = _currentItem.locationId != null;
 
@@ -763,17 +802,17 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                 ),
               ],
             ),
-            if (hasMapId)
+            if (_isEditing)
               TextButton(
-                onPressed: () => setState(() => _showMap = !_showMap),
+                onPressed: _showAssignLocationMap,
                 child: Text(
-                  _showMap ? "Hide Map" : "View Map",
-                  style: const TextStyle(color: Colors.orange),
+                  hasMapId ? "Change Location" : "Assign Location",
+                  style: const TextStyle(color: Colors.blue),
                 ),
               ),
           ],
         ),
-        if (_showMap && hasMapId)
+        if (hasMapId)
           StoreMap(
             controller: widget.controller,
             highlightId: _currentItem.locationId,

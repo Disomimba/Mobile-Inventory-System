@@ -47,7 +47,11 @@ class _MainScreenState extends State<MainScreen> {
               onBack: () => Navigator.pop(context),
               // Add 'async' right here ->
               onUpdate: (updatedItem) async {
-                setState(() => widget.controller.updateItem(updatedItem));
+               // setState(() => widget.controller.updateItem(updatedItem));
+                await widget.controller.updateItem(updatedItem);
+                if(mounted){
+                  setState(() {});
+                }
               },
               onDelete: (id) {
                 setState(() => widget.controller.deleteItem(id));
@@ -74,10 +78,16 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   Future<void> _handleUpdateItem(InventoryItem item) async {
-    setState(() {
-      widget.controller.updateItem(item);
-      _selectedItem = item;
-    });
+    // setState(() {
+    //   widget.controller.updateItem(item);
+    //   _selectedItem = item;
+    // });
+    await widget.controller.updateItem(item);
+    if(mounted){
+      setState((){
+        _selectedItem = item;
+      });
+    }
   }
 
   void _handleDeleteItem(String id) {

@@ -28,8 +28,11 @@ class _MapEditorPageState extends State<MapEditorPage> {
           IconButton(
             icon: const Icon(LucideIcons.trash2),
             onPressed: () {
-              setState(() => widget.controller.storeLayout.clear());
-              widget.controller.saveLayout();
+              widget.controller.clearMapLayout().then((_) {
+                if (mounted) {
+                  setState(() {});
+                }
+              });
             },
           ),
           IconButton(
@@ -181,7 +184,12 @@ class _MapEditorPageState extends State<MapEditorPage> {
   }
 
   Widget _buildSelectionToolbar() {
-    final unassigned = widget.controller.unassignedItems;
+    final items = widget.controller.allItems.toList()
+      ..sort((a, b) {
+        if (a.locationId == null && b.locationId != null) return -1;
+        if (a.locationId != null && b.locationId == null) return 1;
+        return a.name.compareTo(b.name);
+      });
     return Container(
       padding: const EdgeInsets.all(12),
       color: const Color(0xFF1E293B),
@@ -196,12 +204,13 @@ class _MapEditorPageState extends State<MapEditorPage> {
                 dropdownColor: const Color(0xFF1E293B),
                 isExpanded: true,
                 iconEnabledColor: Colors.orange,
-                hint: const Text("Choose unassigned item...", style: TextStyle(color: Colors.white70, fontSize: 13)),
+                hint: const Text("Choose item to assign...", style: TextStyle(color: Colors.white70, fontSize: 13)),
                 value: _selectedItemId,
-                items: unassigned.map((item) {
+                items: items.map((item) {
+                  final status = item.locationId == null ? "Unassigned" : "Assigned";
                   return DropdownMenuItem<String>(
                     value: item.id,
-                    child: Text("${item.name} (${item.sku})", style: const TextStyle(color: Colors.white, fontSize: 13)),
+                    child: Text("${item.name} ($status)", style: const TextStyle(color: Colors.white, fontSize: 13)),
                   );
                 }).toList(),
                 onChanged: (val) {

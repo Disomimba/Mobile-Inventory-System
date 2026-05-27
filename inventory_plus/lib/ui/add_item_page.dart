@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../../data/inventory.dart';
 import '../../logic/inventory_controller.dart';
-import 'widgets/location_picker_dialog.dart';
+import 'store_map.dart';
 import 'package:image_picker/image_picker.dart';
 import 'dart:io';
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -139,7 +139,33 @@ class _AddItemPageState extends State<AddItemPage> {
   void _showLocationPicker() async {
     final MapElement? result = await showDialog<MapElement>(
       context: context,
-      builder: (context) => LocationPickerDialog(controller: widget.controller),
+      builder: (context) {
+        return Dialog(
+          insetPadding: const EdgeInsets.all(16),
+          clipBehavior: Clip.antiAlias,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          child: Column(
+            children: [
+              AppBar(
+                title: const Text("Select Store Location"),
+                backgroundColor: const Color(0xFF0F172A),
+                foregroundColor: Colors.white,
+                leading: IconButton(
+                  icon: const Icon(LucideIcons.x),
+                  onPressed: () => Navigator.pop(context),
+                ),
+              ),
+              Expanded(
+                child: StoreMap(
+                  controller: widget.controller,
+                  mode: MapMode.pick,
+                  onElementSelected: (element) => Navigator.pop(context, element),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
     if (result != null) setState(() => _selectedMapElement = result);
   }
@@ -418,8 +444,8 @@ class _AddItemPageState extends State<AddItemPage> {
             Expanded(
               child: Text(
                 _selectedMapElement != null
-                    ? "Assigned to: ${_selectedMapElement!.label}"
-                    : "No location selected",
+                    ? "Assign location to ${_selectedMapElement!.label}"
+                    : "Assign Location",
                 style: TextStyle(
                   color: _selectedMapElement != null
                       ? Colors.black87

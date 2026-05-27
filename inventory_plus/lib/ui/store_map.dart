@@ -4,7 +4,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../../data/inventory.dart';
 import '../../logic/inventory_controller.dart';
 
-enum MapMode { view, manage, selection }
+enum MapMode { view, manage, selection, pick }
 
 class StoreMap extends StatefulWidget {
   final InventoryController controller;
@@ -14,6 +14,7 @@ class StoreMap extends StatefulWidget {
   final MapMode mode;
   final String? selectedItemId;
   final VoidCallback? onSelectionAssigned;
+  final Function(MapElement)? onElementSelected;
 
   const StoreMap({
     super.key,
@@ -24,6 +25,7 @@ class StoreMap extends StatefulWidget {
     this.mode = MapMode.view,
     this.selectedItemId,
     this.onSelectionAssigned,
+    this.onElementSelected,
   });
 
   @override
@@ -33,6 +35,9 @@ class StoreMap extends StatefulWidget {
 class _StoreMapState extends State<StoreMap> with SingleTickerProviderStateMixin {
   late AnimationController _animController;
   late Animation<double> _bounceAnimation;
+  String? _activeElementId;
+  final TransformationController _transformationController = TransformationController();
+  bool _isInitialScaleSet = false;
 
   @override
   void initState() {
@@ -50,6 +55,7 @@ class _StoreMapState extends State<StoreMap> with SingleTickerProviderStateMixin
   @override
   void dispose() {
     _animController.dispose();
+    _transformationController.dispose();
     super.dispose();
   }
 
@@ -119,41 +125,67 @@ class _StoreMapState extends State<StoreMap> with SingleTickerProviderStateMixin
     // Depth sort: Elements furthest away (smaller X + Y in this rotated view) must paint first
     var sortedLayout = List<MapElement>.from(widget.controller.storeLayout);
     sortedLayout.sort((a, b) {
+      if (a.id == _activeElementId) return 1;
+      if (b.id == _activeElementId) return -1;
       double distA = a.position.dx + a.position.dy;
       double distB = b.position.dx + b.position.dy;
       return distA.compareTo(distB);
     });
 
-    Widget map = InteractiveViewer(
+    Widget map = LayoutBuilder(
+      builder: (context, constraints) {
+        if (!_isInitialScaleSet && constraints.maxWidth > 0) {
+          _isInitialScaleSet = true;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) {
+              double scaleX = constraints.maxWidth / mapWidth;
+              double scaleY = constraints.maxHeight / mapHeight;
+              double scale = math.min(scaleX, scaleY) * 0.9; // 90% of screen to add padding
+              scale = scale.clamp(0.1, 2.5);
+
+              double dx = (constraints.maxWidth - (mapWidth * scale)) / 2;
+              double dy = (constraints.maxHeight - (mapHeight * scale)) / 2;
+
+              _transformationController.value = Matrix4.identity()
+                ..translate(dx, dy)
+                ..scale(scale);
+            }
+          });
+        }
+
+        return InteractiveViewer(
+              transformationController: _transformationController,
               constrained: false,
               minScale: 0.1,
               maxScale: 2.5,
               boundaryMargin: const EdgeInsets.all(200),
-              child: Transform(
-                transform: Matrix4.identity()
-                  ..setEntry(3, 2, 0.001)
-                  ..rotateX(-30 * math.pi / 180)
-                  ..rotateZ(-45 * math.pi / 180),
-                alignment: FractionalOffset.center,
-                child: Builder(
-                  builder: (BuildContext dropContext) {
-                    return DragTarget<ElementType>(
-                      onAcceptWithDetails: (details) {
-                        final RenderBox box = dropContext.findRenderObject() as RenderBox;
-                        final Offset localOffset = box.globalToLocal(details.offset);
+              child: Builder(
+                builder: (BuildContext dropContext) {
+                  return DragTarget<ElementType>(
+                    onAcceptWithDetails: (details) {
+                      final RenderBox box = dropContext.findRenderObject() as RenderBox;
+                      final Offset localOffset = box.globalToLocal(details.offset);
 
-                        setState(() {
-                          widget.controller.storeLayout.add(MapElement(
-                            id: DateTime.now().millisecondsSinceEpoch.toString(),
-                            type: details.data,
-                            position: localOffset,
-                            label: details.data.name.toUpperCase(),
-                          ));
-                        });
-                        widget.controller.saveLayout();
-                      },
-                      builder: (context, candidateData, rejectedData) {
-                        return Container(
+                      setState(() {
+                        widget.controller.storeLayout.add(MapElement(
+                          id: DateTime.now().millisecondsSinceEpoch.toString(),
+                          type: details.data,
+                          position: localOffset,
+                          label: details.data.name.toUpperCase(),
+                        ));
+                      });
+                      widget.controller.saveLayout();
+                    },
+                    builder: (context, candidateData, rejectedData) {
+                      return GestureDetector(
+                        onTap: () {
+                          if (widget.mode == MapMode.manage) {
+                            setState(() {
+                              _activeElementId = null;
+                            });
+                          }
+                        },
+                        child: Container(
                           width: mapWidth,
                           height: mapHeight,
                           decoration: BoxDecoration(
@@ -161,7 +193,7 @@ class _StoreMapState extends State<StoreMap> with SingleTickerProviderStateMixin
                             border: Border.all(color: Colors.blueGrey, width: 2),
                           ),
                           child: Stack(
-                            clipBehavior: Clip.none,
+                            clipBehavior: Clip.hardEdge,
                             children: [
                               CustomPaint(
                                 painter: GridPainter(),
@@ -170,13 +202,15 @@ class _StoreMapState extends State<StoreMap> with SingleTickerProviderStateMixin
                               ...sortedLayout.map((el) => _buildPhysicalElement(el)),
                             ],
                           ),
-                        );
-                      },
-                    );
-                  },
-                ),
+                        ),
+                      );
+                    },
+                  );
+                },
               ),
             );
+      },
+    );
 
     if (widget.mode == MapMode.view) {
       return Container(
@@ -209,110 +243,94 @@ class _StoreMapState extends State<StoreMap> with SingleTickerProviderStateMixin
 
   Widget _buildPhysicalElement(MapElement el) {
     final bool isHighlighted = el.id == widget.highlightId;
+    final bool isActive = el.id == _activeElementId && widget.mode == MapMode.manage;
 
     String displayLabel = el.label; 
     
-    try {
-      final assignedItem = widget.controller.allItems.firstWhere(
-        (item) => item.locationId == el.id,
-      );
-      displayLabel = assignedItem.name; 
-    } catch (e) {
+    final assignedItems = widget.controller.allItems
+        .where((item) => item.locationId == el.id)
+        .toList();
+
+    if (assignedItems.isNotEmpty) {
+      // Sort items by shelfLevel to display hierarchically
+      assignedItems.sort((a, b) => (a.shelfLevel ?? '').compareTo(b.shelfLevel ?? ''));
+      displayLabel = assignedItems.map((item) {
+        final level = (item.shelfLevel != null && item.shelfLevel!.trim().isNotEmpty) ? " (Lvl ${item.shelfLevel})" : "";
+        return "- ${item.name}$level";
+      }).join("\n");
     }
 
     Color baseColor = _getElementColor(el.type, isHighlighted);
-    
-    List<Widget> shelves = [];
-    int numShelves = 4;
-    double shelfSpacing = 15.0;
-    bool isSolid = false;
 
-    // Define different 3D characteristics for each element type
-    switch (el.type) {
-      case ElementType.pathway:
-        numShelves = 1;
-        shelfSpacing = 0;
-        break;
-      case ElementType.door:
-        numShelves = 1;
-        shelfSpacing = 0;
-        break;
-      case ElementType.cashier:
-        numShelves = 10;
-        shelfSpacing = 3.0; // Tightly stacked to look like a solid block
-        isSolid = true;
-        break;
-      case ElementType.shelf:
-      case ElementType.rack:
-      default:
-        numShelves = 4;     // Spaced out to look like actual shelving units
-        shelfSpacing = 15.0;
-        break;
-    }
-
-    for (int i = 0; i < numShelves; i++) {
-      bool isTop = i == numShelves - 1;
-      bool isBottom = i == 0;
-      
-      shelves.add(
-        Transform(
-          // Extrude by pushing it into the negative Z space relative to the floor
-          transform: Matrix4.translationValues(0, 0, -i * shelfSpacing),
-          child: Container(
-            width: el.size.width,
-            height: el.size.height,
-            decoration: BoxDecoration(
-              color: baseColor.withOpacity(isSolid && !isTop ? 0.9 : 0.7),
-              borderRadius: BorderRadius.circular(4),
-              border: Border.all(
-                color: isTop || isBottom || !isSolid ? baseColor : Colors.transparent,
-                width: 1,
-              ),
-              boxShadow: isBottom ? [BoxShadow(color: Colors.black.withOpacity(0.5), offset: const Offset(5, 5), blurRadius: 5)] : null,
-            ),
-            child: isTop
-                ? Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(4.0),
-                      child: Text(
-                        displayLabel, 
-                        textAlign: TextAlign.center,
-                        style: TextStyle(fontSize: 10, fontWeight: isHighlighted ? FontWeight.bold : FontWeight.normal, color: Colors.white),
-                        maxLines: 2, overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  )
-                : null,
-          ),
-        ),
-      );
-    }
-
-    double topZ = -(numShelves - 1) * shelfSpacing;
-
-    return Positioned(
-      left: el.position.dx,
-      top: el.position.dy,
+    Widget shelf = Container(
       width: el.size.width,
       height: el.size.height,
+      decoration: BoxDecoration(
+        color: baseColor.withOpacity(0.7),
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(
+          color: isActive ? Colors.yellowAccent : baseColor,
+          width: isActive ? 3 : 1,
+        ),
+        boxShadow: const [BoxShadow(color: Colors.black26, offset: Offset(2, 2), blurRadius: 3)],
+      ),
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(4.0),
+          child: Text(
+            displayLabel,
+            textAlign: assignedItems.isNotEmpty ? TextAlign.left : TextAlign.center,
+            style: TextStyle(fontSize: 10, fontWeight: isHighlighted ? FontWeight.bold : FontWeight.normal, color: Colors.white),
+            maxLines: 10,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      ),
+    );
+
+    return Positioned(
+      key: ValueKey(el.id),
+      left: el.position.dx - 20,
+      top: el.position.dy - 20,
+      width: el.size.width + 40,
+      height: el.size.height + 40,
       child: Stack(
         clipBehavior: Clip.none,
         children: [
-          GestureDetector(
-            onTap: () {
-              if (widget.mode == MapMode.selection && widget.selectedItemId != null) {
-                widget.controller.assignItemToLocation(widget.selectedItemId!, el.id);
-                if (widget.onSelectionAssigned != null) {
-                  widget.onSelectionAssigned!();
+          Positioned(
+            left: 20,
+            top: 20,
+            child: GestureDetector(
+            onTap: () async {
+              if (widget.mode == MapMode.manage) {
+                setState(() {
+                  _activeElementId = el.id;
+                });
+              } else if (widget.mode == MapMode.selection && widget.selectedItemId != null) {
+                await widget.controller.assignItemToLocation(widget.selectedItemId!, el.id);
+                
+                if (mounted) {
+                  if (widget.onSelectionAssigned != null) {
+                    widget.onSelectionAssigned!();
+                  }
+                  setState(() {}); // Force the map element to instantly redraw its text
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text("Item assigned to location!", style: TextStyle(color: Colors.white)),
+                      backgroundColor: Colors.green,
+                    ),
+                  );
                 }
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text("Item assigned to location!", style: TextStyle(color: Colors.white)), backgroundColor: Colors.green),
-                );
+              } else if (widget.mode == MapMode.pick) {
+                if (widget.onElementSelected != null) {
+                  widget.onElementSelected!(el);
+                }
               }
             },
             onPanUpdate: widget.mode == MapMode.manage
                 ? (details) {
                     setState(() {
+                      _activeElementId = el.id;
                       el.position += details.delta;
                     });
                   }
@@ -322,74 +340,77 @@ class _StoreMapState extends State<StoreMap> with SingleTickerProviderStateMixin
                     widget.controller.saveLayout();
                   }
                 : null,
-            onLongPress: widget.mode == MapMode.manage
-                ? () {
-                    setState(() {
-                      widget.controller.storeLayout.remove(el);
-                    });
-                    widget.controller.saveLayout();
-                  }
-                : null,
-            child: Container(
-              child: Stack(
-                clipBehavior: Clip.none,
-                children: shelves,
-              ),
-            ),
+            onLongPress: null,
+            child: shelf,
+          ),
           ),
           
           if (isHighlighted)
             Positioned.fill(
-              child: Transform(
-                transform: Matrix4.translationValues(0, 0, topZ - 20.0) // Hover above 3D object
-                  ..rotateZ(45 * math.pi / 180)
-                  ..rotateX(30 * math.pi / 180),
+              child: Align(
                 alignment: Alignment.center,
-                child: Align(
-                  alignment: Alignment.center,
-                  child: AnimatedBuilder(
-                    animation: _bounceAnimation,
-                    builder: (context, child) {
-                      return Transform.translate(
-                        offset: Offset(0, _bounceAnimation.value),
-                        child: const Icon(LucideIcons.mapPin, color: Colors.orange, size: 28),
-                      );
-                    },
+                child: AnimatedBuilder(
+                  animation: _bounceAnimation,
+                  builder: (context, child) {
+                    return Transform.translate(
+                      offset: Offset(0, _bounceAnimation.value - 20.0), // Hover above 2D object
+                      child: const Icon(LucideIcons.mapPin, color: Colors.orange, size: 28),
+                    );
+                  },
+                ),
+              ),
+            ),
+
+          if (isActive)
+            Positioned(
+              left: 5,
+              top: 5,
+              child: GestureDetector(
+                onTap: () {
+                  widget.controller.deleteMapElement(el.id);
+                  setState(() {
+                    _activeElementId = null;
+                  });
+                },
+                child: Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: const BoxDecoration(
+                    color: Colors.redAccent,
+                    shape: BoxShape.circle,
+                    boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 4)],
                   ),
+                  child: const Icon(LucideIcons.x, size: 14, color: Colors.white),
                 ),
               ),
             ),
             
-          if (widget.mode == MapMode.manage)
+          if (widget.mode == MapMode.manage && isActive)
             Positioned(
-              right: -10,
-              bottom: -10,
-              child: Transform(
-                transform: Matrix4.translationValues(0, 0, topZ), // Position resize handle at top of 3D object
-                child: GestureDetector(
-                  onPanUpdate: (details) {
-                    setState(() {
-                      double newWidth = el.size.width + details.delta.dx;
-                      double newHeight = el.size.height + details.delta.dy;
-  
-                      el.size = Size(
-                        newWidth < 40 ? 40 : newWidth,
-                        newHeight < 40 ? 40 : newHeight,
-                      );
-                    });
-                  },
-                  onPanEnd: (details) {
-                    widget.controller.saveLayout();
-                  },
-                  child: Container(
-                    padding: const EdgeInsets.all(6),
-                    decoration: const BoxDecoration(
-                      color: Colors.white,
-                      shape: BoxShape.circle,
-                      boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 4)],
-                    ),
-                    child: const Icon(Icons.open_in_full, size: 12, color: Colors.black),
+              right: 10,
+              bottom: 10,
+              child: GestureDetector(
+                onPanUpdate: (details) {
+                  setState(() {
+                    double newWidth = el.size.width + details.delta.dx;
+                    double newHeight = el.size.height + details.delta.dy;
+
+                    el.size = Size(
+                      newWidth < 40 ? 40 : newWidth,
+                      newHeight < 40 ? 40 : newHeight,
+                    );
+                  });
+                },
+                onPanEnd: (details) {
+                  widget.controller.saveLayout();
+                },
+                child: Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: const BoxDecoration(
+                    color: Colors.white,
+                    shape: BoxShape.circle,
+                    boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 4)],
                   ),
+                  child: const Icon(Icons.open_in_full, size: 12, color: Colors.black),
                 ),
               ),
             ),
@@ -409,6 +430,8 @@ class _StoreMapState extends State<StoreMap> with SingleTickerProviderStateMixin
           _buildDetailItem("Shelf", widget.location?.shelf.toString() ?? "N/A"),
           const SizedBox(width: 8),
           _buildDetailItem("Section", widget.location?.section ?? "N/A"),
+          const SizedBox(width: 8),
+          _buildDetailItem("Layer", (widget.location as dynamic)?.layer?.toString() ?? "N/A"),
         ],
       ),
     );
