@@ -8,8 +8,8 @@ enum MapMode { view, manage, selection, pick }
 
 class StoreMap extends StatefulWidget {
   final InventoryController controller;
-  final String? highlightId;    
-  final ItemLocation? location; 
+  final String? highlightId;
+  final ItemLocation? location;
   final String? itemName;
   final MapMode mode;
   final String? selectedItemId;
@@ -32,11 +32,13 @@ class StoreMap extends StatefulWidget {
   State<StoreMap> createState() => _StoreMapState();
 }
 
-class _StoreMapState extends State<StoreMap> with SingleTickerProviderStateMixin {
+class _StoreMapState extends State<StoreMap>
+    with SingleTickerProviderStateMixin {
   late AnimationController _animController;
   late Animation<double> _bounceAnimation;
   String? _activeElementId;
-  final TransformationController _transformationController = TransformationController();
+  final TransformationController _transformationController =
+      TransformationController();
   bool _isInitialScaleSet = false;
 
   @override
@@ -62,11 +64,17 @@ class _StoreMapState extends State<StoreMap> with SingleTickerProviderStateMixin
   @override
   Widget build(BuildContext context) {
     return Container(
-      margin: widget.mode == MapMode.view ? const EdgeInsets.symmetric(vertical: 8) : EdgeInsets.zero,
+      margin: widget.mode == MapMode.view
+          ? const EdgeInsets.symmetric(vertical: 8)
+          : EdgeInsets.zero,
       decoration: BoxDecoration(
         color: const Color(0xFF0F172A),
-        borderRadius: widget.mode == MapMode.view ? BorderRadius.circular(12) : BorderRadius.zero,
-        border: widget.mode == MapMode.view ? Border.all(color: Colors.grey.shade800) : null,
+        borderRadius: widget.mode == MapMode.view
+            ? BorderRadius.circular(12)
+            : BorderRadius.zero,
+        border: widget.mode == MapMode.view
+            ? Border.all(color: Colors.grey.shade800)
+            : null,
       ),
       clipBehavior: Clip.antiAlias,
       child: Column(
@@ -85,25 +93,29 @@ class _StoreMapState extends State<StoreMap> with SingleTickerProviderStateMixin
       color: const Color(0xFF0F172A),
       child: Row(
         children: [
-                const Icon(LucideIcons.mapPin, color: Colors.orange, size: 20),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        "Store Map",
-                        style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
-                      ),
-                      if (widget.itemName != null)
-                        Text(
-                          widget.itemName!,
-                          style: TextStyle(color: Colors.grey.shade400, fontSize: 12),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                    ],
+          const Icon(LucideIcons.mapPin, color: Colors.orange, size: 20),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  "Store Map",
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
                   ),
                 ),
+                if (widget.itemName != null)
+                  Text(
+                    widget.itemName!,
+                    style: TextStyle(color: Colors.grey.shade400, fontSize: 12),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+              ],
+            ),
+          ),
         ],
       ),
     );
@@ -140,7 +152,9 @@ class _StoreMapState extends State<StoreMap> with SingleTickerProviderStateMixin
             if (mounted) {
               double scaleX = constraints.maxWidth / mapWidth;
               double scaleY = constraints.maxHeight / mapHeight;
-              double scale = math.min(scaleX, scaleY) * 0.9; // 90% of screen to add padding
+              double scale =
+                  math.min(scaleX, scaleY) *
+                  0.9; // 90% of screen to add padding
               scale = scale.clamp(0.1, 2.5);
 
               double dx = (constraints.maxWidth - (mapWidth * scale)) / 2;
@@ -154,61 +168,66 @@ class _StoreMapState extends State<StoreMap> with SingleTickerProviderStateMixin
         }
 
         return InteractiveViewer(
-              transformationController: _transformationController,
-              constrained: false,
-              minScale: 0.1,
-              maxScale: 2.5,
-              boundaryMargin: const EdgeInsets.all(200),
-              child: Builder(
-                builder: (BuildContext dropContext) {
-                  return DragTarget<ElementType>(
-                    onAcceptWithDetails: (details) {
-                      final RenderBox box = dropContext.findRenderObject() as RenderBox;
-                      final Offset localOffset = box.globalToLocal(details.offset);
+          transformationController: _transformationController,
+          constrained: false,
+          minScale: 0.1,
+          maxScale: 2.5,
+          boundaryMargin: const EdgeInsets.all(200),
+          child: Builder(
+            builder: (BuildContext dropContext) {
+              return DragTarget<ElementType>(
+                onAcceptWithDetails: (details) {
+                  final RenderBox box =
+                      dropContext.findRenderObject() as RenderBox;
+                  final Offset localOffset = box.globalToLocal(details.offset);
 
-                      setState(() {
-                        widget.controller.storeLayout.add(MapElement(
-                          id: DateTime.now().millisecondsSinceEpoch.toString(),
-                          type: details.data,
-                          position: localOffset,
-                          label: details.data.name.toUpperCase(),
-                        ));
-                      });
-                      widget.controller.saveLayout();
+                  setState(() {
+                    widget.controller.storeLayout.add(
+                      MapElement(
+                        id: DateTime.now().millisecondsSinceEpoch.toString(),
+                        type: details.data,
+                        position: localOffset,
+                        label: details.data.name.toUpperCase(),
+                      ),
+                    );
+                  });
+                  widget.controller.saveLayout();
+                },
+                builder: (context, candidateData, rejectedData) {
+                  return GestureDetector(
+                    onTap: () {
+                      if (widget.mode == MapMode.manage) {
+                        setState(() {
+                          _activeElementId = null;
+                        });
+                      }
                     },
-                    builder: (context, candidateData, rejectedData) {
-                      return GestureDetector(
-                        onTap: () {
-                          if (widget.mode == MapMode.manage) {
-                            setState(() {
-                              _activeElementId = null;
-                            });
-                          }
-                        },
-                        child: Container(
-                          width: mapWidth,
-                          height: mapHeight,
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF1E293B),
-                            border: Border.all(color: Colors.blueGrey, width: 2),
+                    child: Container(
+                      width: mapWidth,
+                      height: mapHeight,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF1E293B),
+                        border: Border.all(color: Colors.blueGrey, width: 2),
+                      ),
+                      child: Stack(
+                        clipBehavior: Clip.hardEdge,
+                        children: [
+                          CustomPaint(
+                            painter: GridPainter(),
+                            size: Size(mapWidth, mapHeight),
                           ),
-                          child: Stack(
-                            clipBehavior: Clip.hardEdge,
-                            children: [
-                              CustomPaint(
-                                painter: GridPainter(),
-                                size: Size(mapWidth, mapHeight),
-                              ),
-                              ...sortedLayout.map((el) => _buildPhysicalElement(el)),
-                            ],
+                          ...sortedLayout.map(
+                            (el) => _buildPhysicalElement(el),
                           ),
-                        ),
-                      );
-                    },
+                        ],
+                      ),
+                    ),
                   );
                 },
-              ),
-            );
+              );
+            },
+          ),
+        );
       },
     );
 
@@ -233,41 +252,53 @@ class _StoreMapState extends State<StoreMap> with SingleTickerProviderStateMixin
   Color _getElementColor(ElementType type, bool isHighlighted) {
     if (isHighlighted) return Colors.orange;
     switch (type) {
-      case ElementType.door: return Colors.green;
-      case ElementType.rack: return Colors.blue;
-      case ElementType.shelf: return Colors.brown;
-      case ElementType.cashier: return Colors.purple;
-      case ElementType.pathway: return Colors.blueGrey;
+      case ElementType.door:
+        return Colors.green;
+      case ElementType.rack:
+        return Colors.blue;
+      case ElementType.shelf:
+        return Colors.brown;
+      case ElementType.cashier:
+        return Colors.purple;
+      case ElementType.pathway:
+        return Colors.blueGrey;
     }
   }
 
   Widget _buildPhysicalElement(MapElement el) {
     final bool isHighlighted = el.id == widget.highlightId;
-    final bool isActive = el.id == _activeElementId && widget.mode == MapMode.manage;
+    final bool isActive =
+        el.id == _activeElementId && widget.mode == MapMode.manage;
 
-    String displayLabel = el.label; 
-    
-<<<<<<< Updated upstream
+    String displayLabel = el.label;
+
     final assignedItems = widget.controller.allItems
         .where((item) => item.locationId == el.id)
         .toList();
 
     if (assignedItems.isNotEmpty) {
       // Sort items by shelfLevel to display hierarchically
-      assignedItems.sort((a, b) => (a.shelfLevel ?? '').compareTo(b.shelfLevel ?? ''));
-      displayLabel = assignedItems.map((item) {
-        final level = (item.shelfLevel != null && item.shelfLevel!.trim().isNotEmpty) ? " (Lvl ${item.shelfLevel})" : "";
-        return "- ${item.name}$level";
-      }).join("\n");
-=======
+      assignedItems.sort(
+        (a, b) => (a.shelfLevel ?? '').compareTo(b.shelfLevel ?? ''),
+      );
+      displayLabel = assignedItems
+          .map((item) {
+            final level =
+                (item.shelfLevel != null && item.shelfLevel!.trim().isNotEmpty)
+                ? " (Lvl ${item.shelfLevel})"
+                : "";
+            return "- ${item.name}$level";
+          })
+          .join("\n");
+    } // <--- FIX: This closing brace was missing in your code!
+
     try {
       final assignedItem = widget.controller.allItems.firstWhere(
         (item) => item.locationId == el.id,
       );
-      displayLabel = assignedItem.name; 
+      displayLabel = assignedItem.name;
     } catch (e) {
       // fdsfsd
->>>>>>> Stashed changes
     }
 
     Color baseColor = _getElementColor(el.type, isHighlighted);
@@ -282,15 +313,23 @@ class _StoreMapState extends State<StoreMap> with SingleTickerProviderStateMixin
           color: isActive ? Colors.yellowAccent : baseColor,
           width: isActive ? 3 : 1,
         ),
-        boxShadow: const [BoxShadow(color: Colors.black26, offset: Offset(2, 2), blurRadius: 3)],
+        boxShadow: const [
+          BoxShadow(color: Colors.black26, offset: Offset(2, 2), blurRadius: 3),
+        ],
       ),
       child: Center(
         child: Padding(
           padding: const EdgeInsets.all(4.0),
           child: Text(
             displayLabel,
-            textAlign: assignedItems.isNotEmpty ? TextAlign.left : TextAlign.center,
-            style: TextStyle(fontSize: 10, fontWeight: isHighlighted ? FontWeight.bold : FontWeight.normal, color: Colors.white),
+            textAlign: assignedItems.isNotEmpty
+                ? TextAlign.left
+                : TextAlign.center,
+            style: TextStyle(
+              fontSize: 10,
+              fontWeight: isHighlighted ? FontWeight.bold : FontWeight.normal,
+              color: Colors.white,
+            ),
             maxLines: 10,
             overflow: TextOverflow.ellipsis,
           ),
@@ -311,50 +350,59 @@ class _StoreMapState extends State<StoreMap> with SingleTickerProviderStateMixin
             left: 20,
             top: 20,
             child: GestureDetector(
-            onTap: () async {
-              if (widget.mode == MapMode.manage) {
-                setState(() {
-                  _activeElementId = el.id;
-                });
-              } else if (widget.mode == MapMode.selection && widget.selectedItemId != null) {
-                await widget.controller.assignItemToLocation(widget.selectedItemId!, el.id);
-                
-                if (mounted) {
-                  if (widget.onSelectionAssigned != null) {
-                    widget.onSelectionAssigned!();
-                  }
-                  setState(() {}); // Force the map element to instantly redraw its text
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text("Item assigned to location!", style: TextStyle(color: Colors.white)),
-                      backgroundColor: Colors.green,
-                    ),
+              onTap: () async {
+                if (widget.mode == MapMode.manage) {
+                  setState(() {
+                    _activeElementId = el.id;
+                  });
+                } else if (widget.mode == MapMode.selection &&
+                    widget.selectedItemId != null) {
+                  await widget.controller.assignItemToLocation(
+                    widget.selectedItemId!,
+                    el.id,
                   );
-                }
-              } else if (widget.mode == MapMode.pick) {
-                if (widget.onElementSelected != null) {
-                  widget.onElementSelected!(el);
-                }
-              }
-            },
-            onPanUpdate: widget.mode == MapMode.manage
-                ? (details) {
-                    setState(() {
-                      _activeElementId = el.id;
-                      el.position += details.delta;
-                    });
+
+                  if (mounted) {
+                    if (widget.onSelectionAssigned != null) {
+                      widget.onSelectionAssigned!();
+                    }
+                    setState(
+                      () {},
+                    ); // Force the map element to instantly redraw its text
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text(
+                          "Item assigned to location!",
+                          style: TextStyle(color: Colors.white),
+                        ),
+                        backgroundColor: Colors.green,
+                      ),
+                    );
                   }
-                : null,
-            onPanEnd: widget.mode == MapMode.manage
-                ? (details) {
-                    widget.controller.saveLayout();
+                } else if (widget.mode == MapMode.pick) {
+                  if (widget.onElementSelected != null) {
+                    widget.onElementSelected!(el);
                   }
-                : null,
-            onLongPress: null,
-            child: shelf,
+                }
+              },
+              onPanUpdate: widget.mode == MapMode.manage
+                  ? (details) {
+                      setState(() {
+                        _activeElementId = el.id;
+                        el.position += details.delta;
+                      });
+                    }
+                  : null,
+              onPanEnd: widget.mode == MapMode.manage
+                  ? (details) {
+                      widget.controller.saveLayout();
+                    }
+                  : null,
+              onLongPress: null,
+              child: shelf,
+            ),
           ),
-          ),
-          
+
           if (isHighlighted)
             Positioned.fill(
               child: Align(
@@ -363,8 +411,15 @@ class _StoreMapState extends State<StoreMap> with SingleTickerProviderStateMixin
                   animation: _bounceAnimation,
                   builder: (context, child) {
                     return Transform.translate(
-                      offset: Offset(0, _bounceAnimation.value - 20.0), // Hover above 2D object
-                      child: const Icon(LucideIcons.mapPin, color: Colors.orange, size: 28),
+                      offset: Offset(
+                        0,
+                        _bounceAnimation.value - 20.0,
+                      ), // Hover above 2D object
+                      child: const Icon(
+                        LucideIcons.mapPin,
+                        color: Colors.orange,
+                        size: 28,
+                      ),
                     );
                   },
                 ),
@@ -387,13 +442,19 @@ class _StoreMapState extends State<StoreMap> with SingleTickerProviderStateMixin
                   decoration: const BoxDecoration(
                     color: Colors.redAccent,
                     shape: BoxShape.circle,
-                    boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 4)],
+                    boxShadow: [
+                      BoxShadow(color: Colors.black26, blurRadius: 4),
+                    ],
                   ),
-                  child: const Icon(LucideIcons.x, size: 14, color: Colors.white),
+                  child: const Icon(
+                    LucideIcons.x,
+                    size: 14,
+                    color: Colors.white,
+                  ),
                 ),
               ),
             ),
-            
+
           if (widget.mode == MapMode.manage && isActive)
             Positioned(
               right: 10,
@@ -418,9 +479,15 @@ class _StoreMapState extends State<StoreMap> with SingleTickerProviderStateMixin
                   decoration: const BoxDecoration(
                     color: Colors.white,
                     shape: BoxShape.circle,
-                    boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 4)],
+                    boxShadow: [
+                      BoxShadow(color: Colors.black26, blurRadius: 4),
+                    ],
                   ),
-                  child: const Icon(Icons.open_in_full, size: 12, color: Colors.black),
+                  child: const Icon(
+                    Icons.open_in_full,
+                    size: 12,
+                    color: Colors.black,
+                  ),
                 ),
               ),
             ),
@@ -428,7 +495,7 @@ class _StoreMapState extends State<StoreMap> with SingleTickerProviderStateMixin
       ),
     );
   }
- 
+
   Widget _buildFooter() {
     return Container(
       padding: const EdgeInsets.all(16),
@@ -441,7 +508,10 @@ class _StoreMapState extends State<StoreMap> with SingleTickerProviderStateMixin
           const SizedBox(width: 8),
           _buildDetailItem("Section", widget.location?.section ?? "N/A"),
           const SizedBox(width: 8),
-          _buildDetailItem("Layer", (widget.location as dynamic)?.layer?.toString() ?? "N/A"),
+          _buildDetailItem(
+            "Layer",
+            (widget.location as dynamic)?.layer?.toString() ?? "N/A",
+          ),
         ],
       ),
     );
@@ -451,11 +521,25 @@ class _StoreMapState extends State<StoreMap> with SingleTickerProviderStateMixin
     return Expanded(
       child: Container(
         padding: const EdgeInsets.all(8),
-        decoration: BoxDecoration(color: const Color(0xFF0F172A), borderRadius: BorderRadius.circular(8)),
+        decoration: BoxDecoration(
+          color: const Color(0xFF0F172A),
+          borderRadius: BorderRadius.circular(8),
+        ),
         child: Column(
           children: [
-            Text(label, style: const TextStyle(fontSize: 10, color: Colors.grey)),
-            Text(value, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.white), overflow: TextOverflow.ellipsis),
+            Text(
+              label,
+              style: const TextStyle(fontSize: 10, color: Colors.grey),
+            ),
+            Text(
+              value,
+              style: const TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 13,
+                color: Colors.white,
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
           ],
         ),
       ),
@@ -469,9 +553,9 @@ class GridPainter extends CustomPainter {
     final paint = Paint()
       ..color = Colors.blueGrey.withOpacity(0.3)
       ..strokeWidth = 1;
-      
+
     const double step = 50;
-    
+
     for (double i = 0; i <= size.width; i += step) {
       canvas.drawLine(Offset(i, 0), Offset(i, size.height), paint);
     }

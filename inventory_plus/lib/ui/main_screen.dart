@@ -36,7 +36,9 @@ class _MainScreenState extends State<MainScreen> {
       showDialog(
         context: context,
         builder: (context) => Dialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
           clipBehavior: Clip.antiAlias,
           child: SizedBox(
             width: 500, // Prevents full-screen stretching on Web
@@ -45,18 +47,10 @@ class _MainScreenState extends State<MainScreen> {
               item: item,
               controller: widget.controller,
               onBack: () => Navigator.pop(context),
-              // Add 'async' right here ->
               onUpdate: (updatedItem) async {
-<<<<<<< Updated upstream
-               // setState(() => widget.controller.updateItem(updatedItem));
                 await widget.controller.updateItem(updatedItem);
-                if(mounted){
-=======
-                await widget.controller.updateItem(updatedItem);
-
-                // 2. Synchronously trigger a UI rebuild once the work is done
+                // Synchronously trigger a UI rebuild once the work is done
                 if (mounted) {
->>>>>>> Stashed changes
                   setState(() {});
                 }
               },
@@ -85,19 +79,9 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   Future<void> _handleUpdateItem(InventoryItem item) async {
-<<<<<<< Updated upstream
-    // setState(() {
-    //   widget.controller.updateItem(item);
-    //   _selectedItem = item;
-    // });
-    await widget.controller.updateItem(item);
-    if(mounted){
-      setState((){
-=======
     await widget.controller.updateItem(item);
     if (mounted) {
       setState(() {
->>>>>>> Stashed changes
         _selectedItem = item;
       });
     }
@@ -148,7 +132,7 @@ class _MainScreenState extends State<MainScreen> {
             userName: widget.controller.currentUserName ?? "Unknown User",
             userId: widget.controller.currentUserId ?? "Unknown ID",
             userRole: widget.controller.currentUserRole ?? "staff",
-          ) // Index 3
+          ), // Index 3
         ];
 
         // ==========================================
@@ -167,22 +151,48 @@ class _MainScreenState extends State<MainScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       const Padding(
-                        padding: EdgeInsets.symmetric(horizontal: 30.0, vertical: 40.0),
+                        padding: EdgeInsets.symmetric(
+                          horizontal: 30.0,
+                          vertical: 40.0,
+                        ),
                         child: Row(
                           children: [
-                            Icon(Icons.inventory_2_rounded, color: _primaryOrange, size: 28),
+                            Icon(
+                              Icons.inventory_2_rounded,
+                              color: _primaryOrange,
+                              size: 28,
+                            ),
                             SizedBox(width: 16),
                             Text(
                               'Inventory Plus',
-                              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18),
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 18,
+                              ),
                             ),
                           ],
                         ),
                       ),
-                      _buildSidebarItem(0, Icons.dashboard_outlined, 'Dashboard', activeIcon: Icons.dashboard),
+                      _buildSidebarItem(
+                        0,
+                        Icons.dashboard_outlined,
+                        'Dashboard',
+                        activeIcon: Icons.dashboard,
+                      ),
                       _buildSidebarItem(1, Icons.qr_code_scanner, 'Scan'),
-                      _buildSidebarItem(2, Icons.inventory_2_outlined, 'Inventory', activeIcon: Icons.inventory_2),
-                      _buildSidebarItem(3, Icons.settings_outlined, 'Settings', activeIcon: Icons.settings),
+                      _buildSidebarItem(
+                        2,
+                        Icons.inventory_2_outlined,
+                        'Inventory',
+                        activeIcon: Icons.inventory_2,
+                      ),
+                      _buildSidebarItem(
+                        3,
+                        Icons.settings_outlined,
+                        'Settings',
+                        activeIcon: Icons.settings,
+                      ),
                     ],
                   ),
                 ),
@@ -198,9 +208,9 @@ class _MainScreenState extends State<MainScreen> {
         // ==========================================
         // MOBILE LAYOUT (Bottom Navigation)
         // ==========================================
-        
+
         // Map the overall page index to the Bottom Nav (which only has 3 items)
-        int mobileNavIndex = 0; 
+        int mobileNavIndex = 0;
         if (_currentIndex == 2) mobileNavIndex = 1; // Inventory page
         if (_currentIndex == 3) mobileNavIndex = 2; // Settings page
 
@@ -227,9 +237,18 @@ class _MainScreenState extends State<MainScreen> {
               });
             },
             items: const [
-              BottomNavigationBarItem(icon: Icon(Icons.qr_code_scanner), label: 'Scanner'),
-              BottomNavigationBarItem(icon: Icon(Icons.list), label: 'Inventory'),
-              BottomNavigationBarItem(icon: Icon(Icons.settings), label: 'Settings'),
+              BottomNavigationBarItem(
+                icon: Icon(Icons.qr_code_scanner),
+                label: 'Scanner',
+              ),
+              BottomNavigationBarItem(
+                icon: Icon(Icons.list),
+                label: 'Inventory',
+              ),
+              BottomNavigationBarItem(
+                icon: Icon(Icons.settings),
+                label: 'Settings',
+              ),
             ],
           ),
         );
@@ -238,7 +257,12 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   // --- SIDEBAR HELPER WIDGET ---
-  Widget _buildSidebarItem(int index, IconData icon, String label, {IconData? activeIcon}) {
+  Widget _buildSidebarItem(
+    int index,
+    IconData icon,
+    String label, {
+    IconData? activeIcon,
+  }) {
     final isSelected = _currentIndex == index;
     final currentColor = isSelected ? _primaryOrange : const Color(0xFF94A3B8);
 
@@ -247,10 +271,16 @@ class _MainScreenState extends State<MainScreen> {
       child: Container(
         width: double.infinity,
         padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 30),
-        color: isSelected ? _primaryOrange.withOpacity(0.05) : Colors.transparent,
+        color: isSelected
+            ? _primaryOrange.withOpacity(0.05)
+            : Colors.transparent,
         child: Row(
           children: [
-            Icon(isSelected ? (activeIcon ?? icon) : icon, color: currentColor, size: 28),
+            Icon(
+              isSelected ? (activeIcon ?? icon) : icon,
+              color: currentColor,
+              size: 28,
+            ),
             const SizedBox(width: 16),
             Text(
               label,
