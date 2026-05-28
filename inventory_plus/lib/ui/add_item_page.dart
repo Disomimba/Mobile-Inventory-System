@@ -70,11 +70,12 @@ class _AddItemPageState extends State<AddItemPage> {
                 final XFile? photo = await _picker.pickImage(
                   source: ImageSource.camera,
                 );
-                if (photo != null)
+                if (photo != null) {
                   setState(() {
                     _selectedImage = photo;
                     _imageUrl = photo.path;
                   });
+                }
               },
             ),
             ListTile(
@@ -85,11 +86,12 @@ class _AddItemPageState extends State<AddItemPage> {
                 final XFile? image = await _picker.pickImage(
                   source: ImageSource.gallery,
                 );
-                if (image != null)
+                if (image != null) {
                   setState(() {
                     _selectedImage = image;
                     _imageUrl = image.path;
                   });
+                }
               },
             ),
             ListTile(
@@ -235,10 +237,11 @@ class _AddItemPageState extends State<AddItemPage> {
         errorMessage =
             "An item with this SKU already exists! Please enter a unique SKU.";
       }
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(errorMessage), backgroundColor: Colors.red),
         );
+      }
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -289,10 +292,12 @@ class _AddItemPageState extends State<AddItemPage> {
                             "SKU / Barcode",
                             LucideIcons.hash,
                             customValidator: (v) {
-                              if (v == null || v.trim().isEmpty)
+                              if (v == null || v.trim().isEmpty) {
                                 return 'SKU is required';
-                              if (v.contains(' '))
+                              }
+                              if (v.contains(' ')) {
                                 return 'SKU cannot contain spaces';
+                              }
                               return null;
                             },
                           ),
@@ -544,13 +549,15 @@ class _AddItemPageState extends State<AddItemPage> {
       validator:
           customValidator ??
           (value) {
-            if (isRequired && (value == null || value.trim().isEmpty))
+            if (isRequired && (value == null || value.trim().isEmpty)) {
               return 'Required';
+            }
             if (isNumber &&
                 value != null &&
                 value.trim().isNotEmpty &&
-                double.tryParse(value.trim()) == null)
+                double.tryParse(value.trim()) == null) {
               return 'Must be a number';
+            }
             return null;
           },
       decoration: InputDecoration(

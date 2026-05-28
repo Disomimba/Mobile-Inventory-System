@@ -247,6 +247,7 @@ class _StoreMapState extends State<StoreMap> with SingleTickerProviderStateMixin
 
     String displayLabel = el.label; 
     
+<<<<<<< Updated upstream
     final assignedItems = widget.controller.allItems
         .where((item) => item.locationId == el.id)
         .toList();
@@ -258,6 +259,15 @@ class _StoreMapState extends State<StoreMap> with SingleTickerProviderStateMixin
         final level = (item.shelfLevel != null && item.shelfLevel!.trim().isNotEmpty) ? " (Lvl ${item.shelfLevel})" : "";
         return "- ${item.name}$level";
       }).join("\n");
+=======
+    try {
+      final assignedItem = widget.controller.allItems.firstWhere(
+        (item) => item.locationId == el.id,
+      );
+      displayLabel = assignedItem.name; 
+    } catch (e) {
+      // fdsfsd
+>>>>>>> Stashed changes
     }
 
     Color baseColor = _getElementColor(el.type, isHighlighted);

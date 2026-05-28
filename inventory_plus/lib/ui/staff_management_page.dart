@@ -97,7 +97,7 @@ class _StaffManagementPageState extends State<StaffManagementPage> {
           style: const TextStyle(fontWeight: FontWeight.bold),
         ),
         subtitle: Text(
-          "${staff['role'].toString().toUpperCase()}",
+          staff['role'].toString().toUpperCase(),
           style: const TextStyle(
             color: Colors.grey,
             fontSize: 12,
@@ -167,12 +167,15 @@ class _StaffManagementPageState extends State<StaffManagementPage> {
                   TextFormField(
                     controller: userCtrl,
                     validator: (val) {
-                      if (val == null || val.trim().isEmpty)
+                      if (val == null || val.trim().isEmpty) {
                         return 'Username is required';
-                      if (val.contains(' '))
+                      }
+                      if (val.contains(' ')) {
                         return 'Username cannot contain spaces';
-                      if (val.trim().length < 3)
+                      }
+                      if (val.trim().length < 3) {
                         return 'Username must be at least 3 characters';
+                      }
                       return null;
                     },
                     decoration: const InputDecoration(
@@ -196,7 +199,7 @@ class _StaffManagementPageState extends State<StaffManagementPage> {
                   ),
                   const SizedBox(height: 16),
                   DropdownButtonFormField<String>(
-                    value: selectedRole,
+                    initialValue: selectedRole,
                     decoration: const InputDecoration(
                       labelText: "Role",
                       border: OutlineInputBorder(),
@@ -285,7 +288,7 @@ class _StaffManagementPageState extends State<StaffManagementPage> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 DropdownButtonFormField<String>(
-                  value: selectedRole,
+                  initialValue: selectedRole,
                   decoration: const InputDecoration(
                     labelText: "Role",
                     border: OutlineInputBorder(),

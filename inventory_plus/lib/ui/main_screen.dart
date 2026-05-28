@@ -47,9 +47,16 @@ class _MainScreenState extends State<MainScreen> {
               onBack: () => Navigator.pop(context),
               // Add 'async' right here ->
               onUpdate: (updatedItem) async {
+<<<<<<< Updated upstream
                // setState(() => widget.controller.updateItem(updatedItem));
                 await widget.controller.updateItem(updatedItem);
                 if(mounted){
+=======
+                await widget.controller.updateItem(updatedItem);
+
+                // 2. Synchronously trigger a UI rebuild once the work is done
+                if (mounted) {
+>>>>>>> Stashed changes
                   setState(() {});
                 }
               },
@@ -78,6 +85,7 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   Future<void> _handleUpdateItem(InventoryItem item) async {
+<<<<<<< Updated upstream
     // setState(() {
     //   widget.controller.updateItem(item);
     //   _selectedItem = item;
@@ -85,6 +93,11 @@ class _MainScreenState extends State<MainScreen> {
     await widget.controller.updateItem(item);
     if(mounted){
       setState((){
+=======
+    await widget.controller.updateItem(item);
+    if (mounted) {
+      setState(() {
+>>>>>>> Stashed changes
         _selectedItem = item;
       });
     }
@@ -117,9 +130,7 @@ class _MainScreenState extends State<MainScreen> {
 
         // 1. SET LANDING PAGES
         // Desktop defaults to Dashboard (0). Mobile defaults to Scan (1).
-        if (_currentIndex == null) {
-          _currentIndex = isDesktop ? 0 : 1;
-        }
+        _currentIndex ??= isDesktop ? 0 : 1;
 
         // 2. THE MASTER PAGE LIST
         final pages = [

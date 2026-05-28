@@ -117,12 +117,12 @@ class InventoryItem {
     String? binNumber,
   }) {
     return InventoryItem(
-      id: this.id,
+      id: id,
       name: name ?? this.name,
       sku: sku ?? this.sku,
       price: price ?? this.price,
       quantity: quantity ?? this.quantity,
-      category: this.category,
+      category: category,
       imageUrl: imageUrl ?? this.imageUrl,
       description: description ?? this.description,
       locationId: locationId ?? this.locationId,

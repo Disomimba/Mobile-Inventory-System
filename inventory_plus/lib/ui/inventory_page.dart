@@ -180,8 +180,9 @@ class _InventoryPageState extends State<InventoryPage> {
                     padding: const EdgeInsets.all(16),
                     itemCount: filteredInventory.length + 1,
                     itemBuilder: (context, index) {
-                      if (index == 0)
+                      if (index == 0) {
                         return _buildListHeader(filteredInventory.length);
+                      }
                       return Padding(
                         padding: const EdgeInsets.only(bottom: 12),
                         child: ItemCard(
