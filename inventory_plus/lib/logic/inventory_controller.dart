@@ -504,4 +504,115 @@ class InventoryController {
       return [];
     }
   }
+
+  // ==========================================
+  // AI ANALYTICS & FORECASTING ENGINE
+  // ==========================================
+
+  /// Analyzes transaction history to generate actionable AI stock recommendations and demand forecasts.
+  /// 1. AI Demand Forecasting -> Calculates "Predicted Stockout Date" based on sales velocity.
+  /// 2. AI Stock Recommendation -> Classifies items (Fast/Slow/Dead) and calculates dynamic reorder points.
+  Future<List<Map<String, dynamic>>> generateInventoryAnalytics({int days = 30, int leadTimeDays = 7}) async {
+    final locId = activeLocationId;
+    if (locId == null) return [];
+
+    try {
+      final cutoffDate = DateTime.now().subtract(Duration(days: days)).toIso8601String();
+
+      // Fetch checkout transactions in the past `days` to calculate velocity
+      final response = await supabase
+          .from('transaction_history')
+          .select('product_id, quantity_change, created_at')
+          .eq('location_id', locId)
+          .eq('transaction_type', 'checkout')
+          .gte('created_at', cutoffDate);
+
+      final transactions = List<Map<String, dynamic>>.from(response);
+
+      // Aggregate sales volume per product
+      Map<String, int> salesData = {};
+      for (var tx in transactions) {
+        final String? pId = tx['product_id'];
+        if (pId != null) {
+          // 'checkout' transactions log negative quantity changes, use absolute value
+          final int qty = (tx['quantity_change'] as num).abs().toInt();
+          salesData[pId] = (salesData[pId] ?? 0) + qty;
+        }
+      }
+
+      List<Map<String, dynamic>> analyticsList = [];
+
+      for (var item in _items) {
+        final totalSold = salesData[item.id] ?? 0;
+        final dailySalesVelocity = totalSold / days;
+        
+        // SOLUTION 2: AI Stock Recommendation (Classify based on velocity to solve Overstocking)
+        String classification;
+        if (totalSold == 0) {
+          classification = 'Dead Stock';
+        } else if (dailySalesVelocity >= 1.0) {
+          classification = 'Fast-Moving';
+        } else {
+          classification = 'Slow-Moving';
+        }
+
+        // SOLUTION 1: AI Demand Forecasting (Predict Stockout Date to solve Delayed Procurement)
+        int daysUntilStockout = -1;
+        DateTime? stockoutDate;
+        if (dailySalesVelocity > 0) {
+          daysUntilStockout = (item.quantity / dailySalesVelocity).floor();
+          stockoutDate = DateTime.now().add(Duration(days: daysUntilStockout));
+        }
+
+        // Dynamic Reorder Math (Calculates exact safety stock & prevents stockouts)
+        int safetyStock = 0;
+        int reorderPoint = 0;
+        int optimalReorderQuantity = 0;
+
+        if (classification == 'Fast-Moving') {
+          safetyStock = (leadTimeDays * dailySalesVelocity * 1.5).ceil(); // Increased safety buffer
+          reorderPoint = (leadTimeDays * dailySalesVelocity).ceil() + safetyStock;
+          optimalReorderQuantity = (dailySalesVelocity * 30).ceil(); // Restock 30 days worth
+        } else if (classification == 'Slow-Moving') {
+          safetyStock = (leadTimeDays * dailySalesVelocity * 1.0).ceil(); // Standard safety buffer
+          reorderPoint = (leadTimeDays * dailySalesVelocity).ceil() + safetyStock;
+          optimalReorderQuantity = (dailySalesVelocity * 15).ceil(); // Restock only 15 days worth to prevent tied capital
+        } else {
+          // Dead Stock: Restrict reordering to prevent overstocking
+          safetyStock = 0;
+          reorderPoint = 0;
+          optimalReorderQuantity = 0;
+        }
+
+        analyticsList.add({
+          'item': item,
+          'totalSoldLast30Days': totalSold,
+          'dailySalesVelocity': dailySalesVelocity,
+          'classification': classification,
+          'daysUntilStockout': daysUntilStockout,
+          'stockoutDate': stockoutDate,
+          'safetyStock': safetyStock,
+          'reorderPoint': reorderPoint,
+          'optimalReorderQuantity': optimalReorderQuantity,
+          'needsReorder': item.quantity <= reorderPoint && classification != 'Dead Stock',
+        });
+      }
+
+      // Sort by urgency: Items needing reorder first, then by days until stockout
+      analyticsList.sort((a, b) {
+        if (a['needsReorder'] && !b['needsReorder']) return -1;
+        if (!a['needsReorder'] && b['needsReorder']) return 1;
+        if (a['daysUntilStockout'] != -1 && b['daysUntilStockout'] != -1) {
+          return (a['daysUntilStockout'] as int).compareTo(b['daysUntilStockout'] as int);
+        }
+        return 0;
+      });
+
+      return analyticsList;
+
+    } catch (e) {
+      print("Error generating inventory analytics: $e");
+      return [];
+    }
+  }
 }

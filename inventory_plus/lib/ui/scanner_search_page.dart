@@ -20,16 +20,8 @@ class ScannerSearchPage extends StatefulWidget {
 }
 
 class _ScannerSearchPageState extends State<ScannerSearchPage> {
-  final TextEditingController _searchController = TextEditingController();
-  String _searchQuery = "";
   bool _isScanning = true;
   InventoryItem? _scannedItem;
-
-  @override
-  void dispose() {
-    _searchController.dispose();
-    super.dispose();
-  }
 
   void _handleRealScan(String scannedValue) {
     if (!_isScanning) return;
@@ -59,31 +51,23 @@ class _ScannerSearchPageState extends State<ScannerSearchPage> {
 
   @override
   Widget build(BuildContext context) {
-    final filteredInventory = widget.controller.searchInventory(_searchQuery);
-
     return Scaffold(
       body: Stack(
         children: [
           Positioned.fill(
-            child: _searchQuery.isNotEmpty
-                ? Container(
-                    color: Colors.grey[50],
-                    padding: const EdgeInsets.only(top: 140), 
-                    child: _buildSearchResults(filteredInventory),
-                  )
-                : AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 300),
-                    child: _scannedItem == null
-                        ? QRScanner(
-                            onScan: _handleRealScan,
-                            isScanning: _isScanning,
-                          )
-                        : Container(
-                            color: Colors.grey[50],
-                            padding: const EdgeInsets.only(top: 140, left: 16, right: 16),
-                            child: _buildScannedResultView(),
-                          ),
-                  ),
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 300),
+              child: _scannedItem == null
+                  ? QRScanner(
+                      onScan: _handleRealScan,
+                      isScanning: _isScanning,
+                    )
+                  : Container(
+                      color: Colors.grey[50],
+                      padding: const EdgeInsets.only(top: 140, left: 16, right: 16),
+                      child: _buildScannedResultView(),
+                    ),
+            ),
           ),
 
           Positioned(
@@ -91,7 +75,7 @@ class _ScannerSearchPageState extends State<ScannerSearchPage> {
             child: _buildHeader(),
           ),
           
-          if (_searchQuery.isEmpty && _scannedItem == null)
+          if (_scannedItem == null)
             _buildScannerInstructions(),
         ],
       ),
@@ -119,57 +103,7 @@ class _ScannerSearchPageState extends State<ScannerSearchPage> {
             "Hardware Inventory",
             style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
           ),
-          const SizedBox(height: 16),
-          TextField(
-            controller: _searchController,
-            onChanged: (val) => setState(() => _searchQuery = val),
-            style: const TextStyle(color: Colors.white),
-            decoration: InputDecoration(
-              hintText: "Search by name, SKU, or category...",
-              hintStyle: const TextStyle(color: Colors.grey),
-              prefixIcon: const Icon(LucideIcons.search, color: Colors.grey),
-              suffixIcon: _searchQuery.isNotEmpty
-                  ? IconButton(
-                      icon: const Icon(LucideIcons.x, color: Colors.grey),
-                      onPressed: () {
-                        _searchController.clear();
-                        setState(() => _searchQuery = "");
-                      },
-                    )
-                  : null,
-              filled: true,
-              fillColor: const Color(0xFF1E293B),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide.none,
-              ),
-              contentPadding: const EdgeInsets.symmetric(vertical: 12),
-            ),
-          ),
         ],
-      ),
-    );
-  }
-
-  Widget _buildSearchResults(List<InventoryItem> results) {
-    if (results.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(LucideIcons.search, size: 40, color: Colors.grey),
-            const SizedBox(height: 12),
-            Text("No results for \"$_searchQuery\"", style: const TextStyle(color: Colors.grey)),
-          ],
-        ),
-      );
-    }
-    return ListView.builder(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      itemCount: results.length,
-      itemBuilder: (context, index) => Padding(
-        padding: const EdgeInsets.only(bottom: 12),
-        child: ItemCard(item: results[index], onClick: widget.onSelectItem),
       ),
     );
   }

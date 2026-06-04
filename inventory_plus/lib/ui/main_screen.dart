@@ -106,10 +106,15 @@ class _MainScreenState extends State<MainScreen> {
         final isDesktop = constraints.maxWidth >= 600;
 
         // 1. SET LANDING PAGES
+<<<<<<< Updated upstream
         // Desktop defaults to Dashboard (0). Mobile defaults to Scan (1).
         if (_currentIndex == null) {
           _currentIndex = isDesktop ? 0 : 1;
         }
+=======
+        // Both Desktop and Mobile default to Dashboard (0).
+        _currentIndex ??= 0;
+>>>>>>> Stashed changes
 
         // 2. THE MASTER PAGE LIST
         final pages = [
@@ -177,11 +182,14 @@ class _MainScreenState extends State<MainScreen> {
         // ==========================================
         // MOBILE LAYOUT (Bottom Navigation)
         // ==========================================
+<<<<<<< Updated upstream
         
         // Map the overall page index to the Bottom Nav (which only has 3 items)
         int mobileNavIndex = 0; 
         if (_currentIndex == 2) mobileNavIndex = 1; // Inventory page
         if (_currentIndex == 3) mobileNavIndex = 2; // Settings page
+=======
+>>>>>>> Stashed changes
 
         return Scaffold(
           backgroundColor: Colors.white,
@@ -194,21 +202,37 @@ class _MainScreenState extends State<MainScreen> {
           bottomNavigationBar: BottomNavigationBar(
             type: BottomNavigationBarType.fixed,
             backgroundColor: const Color(0xFF1E293B),
-            currentIndex: mobileNavIndex,
+            currentIndex: _currentIndex!,
             selectedItemColor: _primaryOrange,
             unselectedItemColor: Colors.grey,
             onTap: (index) {
               setState(() {
-                // Map the tapped Nav icon back to the correct Page index
-                if (index == 0) _currentIndex = 1; // Go to Scanner
-                if (index == 1) _currentIndex = 2; // Go to Inventory
-                if (index == 2) _currentIndex = 3; // Go to Settings
+                _currentIndex = index;
               });
             },
             items: const [
+<<<<<<< Updated upstream
               BottomNavigationBarItem(icon: Icon(Icons.qr_code_scanner), label: 'Scanner'),
               BottomNavigationBarItem(icon: Icon(Icons.list), label: 'Inventory'),
               BottomNavigationBarItem(icon: Icon(Icons.settings), label: 'Settings'),
+=======
+              BottomNavigationBarItem(
+                icon: Icon(Icons.dashboard),
+                label: 'Dashboard',
+              ),
+              BottomNavigationBarItem(
+                icon: Icon(Icons.qr_code_scanner),
+                label: 'Scanner',
+              ),
+              BottomNavigationBarItem(
+                icon: Icon(Icons.list),
+                label: 'Inventory',
+              ),
+              BottomNavigationBarItem(
+                icon: Icon(Icons.settings),
+                label: 'Settings',
+              ),
+>>>>>>> Stashed changes
             ],
           ),
         );

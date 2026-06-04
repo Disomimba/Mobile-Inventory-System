@@ -43,7 +43,45 @@ class _VisualSearchPageState extends State<VisualSearchPage> {
     final String topLabel = result.className ?? '';
     final double confidence = result.confidence ?? 0.0;
 
+<<<<<<< Updated upstream
     if (confidence > 0.50) {
+=======
+  @override
+  void dispose() {
+    _liveScanTimer?.cancel();
+    _cameraController?.dispose();
+    super.dispose();
+  }
+
+ // --- THE FINAL NETWORK BRIDGE ---
+  Future<void> _captureAndAnalyze() async {
+    if (_cameraController == null || !_cameraController!.value.isInitialized) {
+      return;
+    }
+
+    // In live mode, if we are already processing a frame, just skip this timer tick
+    if (_isLiveMode && _isProcessing) return;
+
+    if (mounted) {
+      setState(() => _isProcessing = true);
+    }
+
+    try {
+      final XFile imageFile = await _cameraController!.takePicture();
+      var request = http.MultipartRequest(
+        'POST',
+        Uri.parse('http://127.0.0.1:8000/analyze-frame'),
+      );
+      final imageBytes = await imageFile.readAsBytes();
+      request.files.add(
+        http.MultipartFile.fromBytes('image', imageBytes, filename: 'scan.jpg'),
+      );
+
+      var response = await request.send();
+      var responseData = await response.stream.bytesToString();
+
+      Map<String, dynamic>? data;
+>>>>>>> Stashed changes
       try {
         final searchLabel = topLabel.toLowerCase().trim();
         final matchedItem = widget.controller.allItems.firstWhere(
