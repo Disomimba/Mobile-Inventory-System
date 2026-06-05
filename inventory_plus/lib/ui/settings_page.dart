@@ -3,7 +3,6 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../logic/inventory_controller.dart';
 import 'map_editor_page.dart';
@@ -123,8 +122,9 @@ class SettingsPage extends StatelessWidget {
             onTap: () async {
               final prefs = await SharedPreferences.getInstance();
               await prefs.clear();
-              if (context.mounted)
+              if (context.mounted) {
                 Navigator.pushReplacementNamed(context, '/login');
+              }
             },
           ),
 
@@ -328,6 +328,13 @@ class SettingsPage extends StatelessWidget {
                               confirmPasswordController.text.isEmpty) {
                             setState(
                               () => errorMessage = "Please fill in all fields.",
+                            );
+                            return;
+                          }
+                          if (newPasswordController.text.trim().length <= 6) {
+                            setState(
+                              () => errorMessage =
+                                  "Password must be more than 6 characters.",
                             );
                             return;
                           }

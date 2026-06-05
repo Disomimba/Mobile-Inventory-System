@@ -2,8 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:inventory_plus/ui/widgets/qr_scanner.dart';
 import 'package:inventory_plus/ui/widgets/item_card.dart';
-import '../../data/inventory.dart'; 
-import '../../logic/inventory_controller.dart';
+import '../data/inventory.dart'; 
+import '../logic/inventory_controller.dart';
+import 'package:inventory_plus/ui/visual_search_page.dart';
 
 class ScannerSearchPage extends StatefulWidget {
   final InventoryController controller; 
@@ -99,9 +100,52 @@ class _ScannerSearchPageState extends State<ScannerSearchPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            "Hardware Inventory",
-            style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
+          // UPDATED: Placed the Title and the new Object Scanner Button in a Row
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                "Hardware Inventory",
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              ElevatedButton.icon(
+                onPressed: () {
+                  // This opens your new Object Scanner
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => VisualSearchPage(
+                        controller: widget.controller,
+                        onSelectItem: widget.onSelectItem,
+                      ),
+                    ),
+                  );
+                },
+                icon: const Icon(
+                  LucideIcons.scanLine,
+                  size: 16,
+                  color: Colors.white,
+                ),
+                label: const Text(
+                  "AI Scanner",
+                  style: TextStyle(color: Colors.white),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.orange,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
+                ),
+              ),
+            ],
           ),
         ],
       ),

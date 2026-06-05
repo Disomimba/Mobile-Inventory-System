@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
-import '../../data/inventory.dart';
-import '../../logic/inventory_controller.dart';
+import '../data/inventory.dart';
+import '../logic/inventory_controller.dart';
 import 'add_item_page.dart';
 import 'package:inventory_plus/ui/widgets/item_card.dart';
 
@@ -180,8 +180,9 @@ class _InventoryPageState extends State<InventoryPage> {
                     padding: const EdgeInsets.all(16),
                     itemCount: filteredInventory.length + 1,
                     itemBuilder: (context, index) {
-                      if (index == 0)
+                      if (index == 0) {
                         return _buildListHeader(filteredInventory.length);
+                      }
                       return Padding(
                         padding: const EdgeInsets.only(bottom: 12),
                         child: ItemCard(

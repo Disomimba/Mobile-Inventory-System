@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
-import '../../data/inventory.dart';
-import '../../logic/inventory_controller.dart';
-import 'widgets/location_picker_dialog.dart';
+import '../data/inventory.dart';
+import '../logic/inventory_controller.dart';
+import 'store_map.dart';
 import 'package:image_picker/image_picker.dart';
 import 'dart:io';
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -70,11 +70,12 @@ class _AddItemPageState extends State<AddItemPage> {
                 final XFile? photo = await _picker.pickImage(
                   source: ImageSource.camera,
                 );
-                if (photo != null)
+                if (photo != null) {
                   setState(() {
                     _selectedImage = photo;
                     _imageUrl = photo.path;
                   });
+                }
               },
             ),
             ListTile(
@@ -85,11 +86,12 @@ class _AddItemPageState extends State<AddItemPage> {
                 final XFile? image = await _picker.pickImage(
                   source: ImageSource.gallery,
                 );
-                if (image != null)
+                if (image != null) {
                   setState(() {
                     _selectedImage = image;
                     _imageUrl = image.path;
                   });
+                }
               },
             ),
             ListTile(
@@ -139,7 +141,33 @@ class _AddItemPageState extends State<AddItemPage> {
   void _showLocationPicker() async {
     final MapElement? result = await showDialog<MapElement>(
       context: context,
-      builder: (context) => LocationPickerDialog(controller: widget.controller),
+      builder: (context) {
+        return Dialog(
+          insetPadding: const EdgeInsets.all(16),
+          clipBehavior: Clip.antiAlias,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          child: Column(
+            children: [
+              AppBar(
+                title: const Text("Select Store Location"),
+                backgroundColor: const Color(0xFF0F172A),
+                foregroundColor: Colors.white,
+                leading: IconButton(
+                  icon: const Icon(LucideIcons.x),
+                  onPressed: () => Navigator.pop(context),
+                ),
+              ),
+              Expanded(
+                child: StoreMap(
+                  controller: widget.controller,
+                  mode: MapMode.pick,
+                  onElementSelected: (element) => Navigator.pop(context, element),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
     if (result != null) setState(() => _selectedMapElement = result);
   }
@@ -209,10 +237,11 @@ class _AddItemPageState extends State<AddItemPage> {
         errorMessage =
             "An item with this SKU already exists! Please enter a unique SKU.";
       }
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(errorMessage), backgroundColor: Colors.red),
         );
+      }
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -263,10 +292,12 @@ class _AddItemPageState extends State<AddItemPage> {
                             "SKU / Barcode",
                             LucideIcons.hash,
                             customValidator: (v) {
-                              if (v == null || v.trim().isEmpty)
+                              if (v == null || v.trim().isEmpty) {
                                 return 'SKU is required';
-                              if (v.contains(' '))
+                              }
+                              if (v.contains(' ')) {
                                 return 'SKU cannot contain spaces';
+                              }
                               return null;
                             },
                           ),
@@ -418,8 +449,8 @@ class _AddItemPageState extends State<AddItemPage> {
             Expanded(
               child: Text(
                 _selectedMapElement != null
-                    ? "Assigned to: ${_selectedMapElement!.label}"
-                    : "No location selected",
+                    ? "Assign location to ${_selectedMapElement!.label}"
+                    : "Assign Location",
                 style: TextStyle(
                   color: _selectedMapElement != null
                       ? Colors.black87
@@ -518,13 +549,15 @@ class _AddItemPageState extends State<AddItemPage> {
       validator:
           customValidator ??
           (value) {
-            if (isRequired && (value == null || value.trim().isEmpty))
+            if (isRequired && (value == null || value.trim().isEmpty)) {
               return 'Required';
+            }
             if (isNumber &&
                 value != null &&
                 value.trim().isNotEmpty &&
-                double.tryParse(value.trim()) == null)
+                double.tryParse(value.trim()) == null) {
               return 'Must be a number';
+            }
             return null;
           },
       decoration: InputDecoration(

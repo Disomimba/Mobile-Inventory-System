@@ -8,6 +8,7 @@ class MapElement {
   Offset position; 
   Size size;
   final String label;
+  double rotation;
 
   MapElement({
     required this.id,
@@ -15,6 +16,7 @@ class MapElement {
     required this.position,
     this.size = const Size(100, 100),
     this.label = "",
+    this.rotation = 0.0,
   });
 
   Map<String, dynamic> toJson() => {
@@ -25,6 +27,7 @@ class MapElement {
     'width': size.width,
     'height': size.height,
     'label': label,
+    'rotation': rotation,
   };
 
   factory MapElement.fromJson(Map<String, dynamic> json) => MapElement(
@@ -33,6 +36,7 @@ class MapElement {
     position: Offset((json['dx'] ?? 0.0).toDouble(), (json['dy'] ?? 0.0).toDouble()),
     size: Size((json['width'] ?? 100.0).toDouble(), (json['height'] ?? 100.0).toDouble()),
     label: json['label'] ?? "",
+    rotation: (json['rotation'] ?? 0.0).toDouble(),
   );
 }
 

@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:crypto/crypto.dart';
 import '../data/inventory.dart';
 
 class InventoryController {
@@ -26,6 +27,12 @@ class InventoryController {
     currentUserName = name;
     currentUserId = id;
     currentUserRole = role;
+  }
+
+  // Helper method to hash the password using SHA-256
+  String _hashPassword(String password) {
+    final bytes = utf8.encode(password);
+    return sha256.convert(bytes).toString();
   }
 
   Future<void> loadAppData(String userLocationId) async {
@@ -254,7 +261,7 @@ class InventoryController {
     }
   }
 
-  Future<void> assignItemToLocation(String itemId, String rackId) async {
+  Future<void> assignItemToLocation(String itemId, String? rackId) async {
     try {
       await supabase
           .from('products')
@@ -263,10 +270,82 @@ class InventoryController {
 
       final index = _items.indexWhere((item) => item.id == itemId);
       if (index != -1) {
-        _items[index] = _items[index].copyWith(locationId: rackId);
+        final current = _items[index];
+        _items[index] = InventoryItem(
+          id: current.id,
+          name: current.name,
+          sku: current.sku,
+          price: current.price,
+          quantity: current.quantity,
+          category: current.category,
+          description: current.description,
+          locationId: rackId,
+          manufacturer: current.manufacturer,
+          model: current.model,
+          productSize: current.productSize,
+          shelfLevel: current.shelfLevel,
+          binNumber: current.binNumber,
+          imageUrl: current.imageUrl,
+        );
       }
     } catch (e) {
       print("Error assigning location: $e");
+    }
+  }
+
+  Future<void> deleteMapElement(String elementId) async {
+    try {
+      storeLayout.removeWhere((item) => item.id == elementId);
+
+      // Unassign all items that were assigned to this element
+      final itemsToUnassign = _items.where((item) => item.locationId == elementId).toList();
+      for (var item in itemsToUnassign) {
+        await assignItemToLocation(item.id, null);
+      }
+    } catch (e) {
+      print("Error deleting map element: $e");
+    }
+  }
+
+  Future<void> clearMapLayout() async {
+    try {
+      storeLayout.clear();
+
+      // Unassign all items that have a locationId
+      final itemsToUnassign = _items.where((item) => item.locationId != null).toList();
+      for (var item in itemsToUnassign) {
+        await assignItemToLocation(item.id, null);
+      }
+    } catch (e) {
+      print("Error clearing map layout: $e");
+    }
+  }
+
+  Future<void> updateItemLocationDetails(
+    String itemId, {
+    required String aisle,
+    required int shelf,
+    required String section,
+    required String layer,
+  }) async {
+    try {
+      await supabase
+          .from('products')
+          .update({
+            // NOTE: You may need to add 'aisle' and 'section' columns to your Supabase table if you want to save them!
+            // 'aisle': aisle,
+            'shelf_level': shelf.toString(),
+            // 'section': section,
+            'bin_number': layer, // Using bin_number to store the layer in this example
+          })
+          .eq('id', itemId);
+
+      final index = _items.indexWhere((item) => item.id == itemId);
+      if (index != -1) {
+        _items[index] = _items[index].copyWith(shelfLevel: shelf.toString(), binNumber: layer);
+      }
+    } catch (e) {
+      print("Error updating location details: $e");
     }
   }
 
@@ -322,6 +401,7 @@ class InventoryController {
     String? productSize,
     String? shelfLevel,
     String? binNumber,
+    String? imageUrl,
   }) {
     return originalItem.copyWith(
       name: newName,
@@ -335,6 +415,7 @@ class InventoryController {
       productSize: productSize,
       shelfLevel: shelfLevel,
       binNumber: binNumber,
+      imageUrl: imageUrl,
     );
   }
 
@@ -418,10 +499,12 @@ class InventoryController {
     final locId = activeLocationId;
     if (locId == null) return false;
     try {
+      final hashedPassword = _hashPassword(password);
+      
       await supabase.from('profiles').insert({
         'name': name,
         'username': username,
-        'password': password,
+        'password': hashedPassword,
         'role': role,
         'location_id': locId,
       });
@@ -455,6 +538,9 @@ class InventoryController {
   Future<String?> changePassword(String currentPassword, String newPassword) async {
     if (currentUserId == null) return "User not logged in.";
     try {
+      final hashedCurrentPassword = _hashPassword(currentPassword);
+      final hashedNewPassword = _hashPassword(newPassword);
+
       // Verify current password
       final response = await supabase
           .from('profiles')
@@ -462,12 +548,12 @@ class InventoryController {
           .eq('id', currentUserId!)
           .single();
 
-      if (response['password'] != currentPassword) {
+      if (response['password'] != hashedCurrentPassword) {
         return "Incorrect current password.";
       }
 
       // Update to new password
-      await supabase.from('profiles').update({'password': newPassword}).eq('id', currentUserId!);
+      await supabase.from('profiles').update({'password': hashedNewPassword}).eq('id', currentUserId!);
       return null; // Returns null upon success
     } catch (e) {
       print("Error changing password: $e");

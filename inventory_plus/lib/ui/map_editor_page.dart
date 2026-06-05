@@ -1,7 +1,8 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
-import '../../data/inventory.dart';
-import '../../logic/inventory_controller.dart'; 
+import '../data/inventory.dart';
+import '../logic/inventory_controller.dart'; 
 import 'store_map.dart';
 
 class MapEditorPage extends StatefulWidget {
@@ -16,54 +17,149 @@ class MapEditorPage extends StatefulWidget {
 class _MapEditorPageState extends State<MapEditorPage> {
   MapMode _mode = MapMode.manage;
   String? _selectedItemId;
+  late String _initialLayoutJson;
+  bool _isSaved = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _initialLayoutJson = jsonEncode(widget.controller.storeLayout.map((e) => e.toJson()).toList());
+  }
+
+  @override
+  void dispose() {
+    if (!_isSaved) {
+      final List<dynamic> decoded = jsonDecode(_initialLayoutJson);
+      widget.controller.storeLayout = decoded.map((e) => MapElement.fromJson(e)).toList();
+    }
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text("Store Layout Designer"),
-        backgroundColor: const Color(0xFF0F172A),
-        foregroundColor: Colors.white,
-        actions: [
-          IconButton(
-            icon: const Icon(LucideIcons.trash2),
-            onPressed: () {
-              setState(() => widget.controller.storeLayout.clear());
-              widget.controller.saveLayout();
-            },
+    return WillPopScope(
+      onWillPop: () async {
+        final currentLayoutJson = jsonEncode(widget.controller.storeLayout.map((e) => e.toJson()).toList());
+        
+        // If no changes were made or changes were already saved, allow pop immediately
+        if (currentLayoutJson == _initialLayoutJson || _isSaved) {
+          return true;
+        }
+
+        // Prompt the user for confirmation
+        final shouldPop = await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text("Unsaved Changes"),
+            content: const Text("You have unsaved changes. Are you sure you want to leave? Your changes will be lost."),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text("Stay"),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text("Leave", style: TextStyle(color: Colors.white)),
+              ),
+            ],
           ),
-          IconButton(
-            icon: const Icon(LucideIcons.save),
-            onPressed: () async {
-              await widget.controller.saveLayout(); 
-              if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text("Store layout saved successfully!")),
+        );
+
+        return shouldPop ?? false;
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text("Store Layout Designer"),
+          backgroundColor: const Color(0xFF0F172A),
+          foregroundColor: Colors.white,
+          actions: [
+            IconButton(
+              icon: const Icon(LucideIcons.trash2),
+              onPressed: () {
+                showDialog(
+                  context: context,
+                  builder: (context) => AlertDialog(
+                    title: const Text("Clear Map?"),
+                    content: const Text("Are you sure you want to delete the entire map layout?"),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(context),
+                        child: const Text("Cancel"),
+                      ),
+                      ElevatedButton(
+                        style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+                        onPressed: () {
+                          Navigator.pop(context);
+                          widget.controller.clearMapLayout().then((_) {
+                            if (mounted) {
+                              setState(() {});
+                            }
+                          });
+                        },
+                        child: const Text("Delete", style: TextStyle(color: Colors.white)),
+                      ),
+                    ],
+                  ),
                 );
-                Navigator.pop(context);
-              }
-            },
-          ),
-        ],
-      ),
-      body: Column(
-        children: [
-          _buildModeSelector(),
-          if (_mode == MapMode.manage) _buildManageToolbar(),
-          if (_mode == MapMode.selection) _buildSelectionToolbar(),
-          Expanded(
-            child: StoreMap(
-              controller: widget.controller,
-              mode: _mode,
-              selectedItemId: _selectedItemId,
-              onSelectionAssigned: () {
-                setState(() {
-                  _selectedItemId = null;
-                });
               },
             ),
-          ),
-        ],
+            IconButton(
+              icon: const Icon(LucideIcons.save),
+              onPressed: () {
+                showDialog(
+                  context: context,
+                  builder: (context) => AlertDialog(
+                    title: const Text("Save Map?"),
+                    content: const Text("Are you sure you want to save the current map layout?"),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(context),
+                        child: const Text("Cancel"),
+                      ),
+                      ElevatedButton(
+                        style: ElevatedButton.styleFrom(backgroundColor: Colors.blue),
+                        onPressed: () async {
+                          Navigator.pop(context);
+                          setState(() {
+                            _isSaved = true;
+                          });
+                          await widget.controller.saveLayout(); 
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text("Store layout saved successfully!")),
+                            );
+                            Navigator.pop(context);
+                          }
+                        },
+                        child: const Text("Save", style: TextStyle(color: Colors.white)),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+          ],
+        ),
+        body: Column(
+          children: [
+            _buildModeSelector(),
+            if (_mode == MapMode.manage) _buildManageToolbar(),
+            if (_mode == MapMode.selection) _buildSelectionToolbar(),
+            Expanded(
+              child: StoreMap(
+                controller: widget.controller,
+                mode: _mode,
+                selectedItemId: _selectedItemId,
+                onSelectionAssigned: () {
+                  setState(() {
+                    _selectedItemId = null;
+                  });
+                },
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -181,7 +277,12 @@ class _MapEditorPageState extends State<MapEditorPage> {
   }
 
   Widget _buildSelectionToolbar() {
-    final unassigned = widget.controller.unassignedItems;
+    final items = widget.controller.allItems.toList()
+      ..sort((a, b) {
+        if (a.locationId == null && b.locationId != null) return -1;
+        if (a.locationId != null && b.locationId == null) return 1;
+        return a.name.compareTo(b.name);
+      });
     return Container(
       padding: const EdgeInsets.all(12),
       color: const Color(0xFF1E293B),
@@ -196,12 +297,13 @@ class _MapEditorPageState extends State<MapEditorPage> {
                 dropdownColor: const Color(0xFF1E293B),
                 isExpanded: true,
                 iconEnabledColor: Colors.orange,
-                hint: const Text("Choose unassigned item...", style: TextStyle(color: Colors.white70, fontSize: 13)),
+                hint: const Text("Choose item to assign...", style: TextStyle(color: Colors.white70, fontSize: 13)),
                 value: _selectedItemId,
-                items: unassigned.map((item) {
+                items: items.map((item) {
+                  final status = item.locationId == null ? "Unassigned" : "Assigned";
                   return DropdownMenuItem<String>(
                     value: item.id,
-                    child: Text("${item.name} (${item.sku})", style: const TextStyle(color: Colors.white, fontSize: 13)),
+                    child: Text("${item.name} ($status)", style: const TextStyle(color: Colors.white, fontSize: 13)),
                   );
                 }).toList(),
                 onChanged: (val) {
