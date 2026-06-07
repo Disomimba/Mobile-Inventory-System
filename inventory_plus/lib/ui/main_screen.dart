@@ -3,11 +3,12 @@ import '../data/inventory.dart';
 import '../logic/inventory_controller.dart';
 
 // Your UI Pages
-import 'scanner_search_page.dart';
 import 'inventory_page.dart';
 import 'item_detail_page.dart';
 import 'settings_page.dart';
 import 'dashboard_page.dart';
+import 'pos_cart_page.dart';
+import 'order_queue_page.dart';
 
 class MainScreen extends StatefulWidget {
   final InventoryController controller;
@@ -111,31 +112,47 @@ class _MainScreenState extends State<MainScreen> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final isDesktop = constraints.maxWidth >= 600;
+        final role = widget.controller.currentUserRole?.toLowerCase() ?? 'staff';
+        final isAdmin = role == 'admin';
+        final isCashier = role == 'staff';
+        final isHelper = role == 'helper';
 
         // 1. SET LANDING PAGES
-        // Both Desktop and Mobile default to Dashboard (0).
         _currentIndex ??= 0;
 
-        // 2. THE MASTER PAGE LIST
-        final pages = [
-          DashboardPage(controller: widget.controller), // Index 0
-          _currentIndex == 1
-              ? ScannerSearchPage(
-                  controller: widget.controller,
-                  onSelectItem: _handleSelectItem,
-                )
-              : const SizedBox(), // Index 1
+        // 2. DYNAMIC INDICES BASED ON ROLE
+        int pageIndex = 0;
+        final int dashboardIndex = isAdmin ? pageIndex++ : -1;
+        final int posIndex = isCashier ? pageIndex++ : -1;
+        final int orderQueueIndex = isHelper ? pageIndex++ : -1;
+        final int inventoryIndex = pageIndex++;
+        final int settingsIndex = pageIndex++;
+
+        // 3. THE MASTER PAGE LIST
+        final pages = <Widget>[];
+        
+        if (isAdmin) {
+          pages.add(DashboardPage(controller: widget.controller));
+        }
+        if (isCashier) {
+          pages.add(PosCartPage(controller: widget.controller));
+        }
+        if (isHelper) {
+          pages.add(OrderQueuePage(controller: widget.controller));
+        }
+        
+        pages.addAll([
           InventoryPage(
             controller: widget.controller,
             onSelectItem: _handleSelectItem,
-          ), // Index 2
+          ),
           SettingsPage(
             controller: widget.controller,
             userName: widget.controller.currentUserName ?? "Unknown User",
             userId: widget.controller.currentUserId ?? "Unknown ID",
             userRole: widget.controller.currentUserRole ?? "staff",
-          ), // Index 3
-        ];
+          ),
+        ]);
 
         // ==========================================
         // DESKTOP LAYOUT (Sidebar)
@@ -176,21 +193,35 @@ class _MainScreenState extends State<MainScreen> {
                           ],
                         ),
                       ),
+                      if (isAdmin)
+                        _buildSidebarItem(
+                          dashboardIndex,
+                          Icons.dashboard_outlined,
+                          'Dashboard',
+                          activeIcon: Icons.dashboard,
+                        ),
+                      if (isCashier)
+                        _buildSidebarItem(
+                          posIndex,
+                          Icons.point_of_sale_outlined,
+                          'POS System',
+                          activeIcon: Icons.point_of_sale,
+                        ),
+                      if (isHelper)
+                        _buildSidebarItem(
+                          orderQueueIndex,
+                          Icons.receipt_long_outlined,
+                          'Order Queue',
+                          activeIcon: Icons.receipt_long,
+                        ),
                       _buildSidebarItem(
-                        0,
-                        Icons.dashboard_outlined,
-                        'Dashboard',
-                        activeIcon: Icons.dashboard,
-                      ),
-                      _buildSidebarItem(1, Icons.qr_code_scanner, 'Scan'),
-                      _buildSidebarItem(
-                        2,
+                        inventoryIndex,
                         Icons.inventory_2_outlined,
                         'Inventory',
                         activeIcon: Icons.inventory_2,
                       ),
                       _buildSidebarItem(
-                        3,
+                        settingsIndex,
                         Icons.settings_outlined,
                         'Settings',
                         activeIcon: Icons.settings,
@@ -219,35 +250,57 @@ class _MainScreenState extends State<MainScreen> {
             elevation: 0,
           ),
           body: IndexedStack(index: _currentIndex, children: pages),
-          bottomNavigationBar: BottomNavigationBar(
-            type: BottomNavigationBarType.fixed,
-            backgroundColor: const Color(0xFF1E293B),
-            currentIndex: _currentIndex!,
-            selectedItemColor: _primaryOrange,
-            unselectedItemColor: Colors.grey,
-            onTap: (index) {
-              setState(() {
-                _currentIndex = index;
-              });
-            },
-            items: const [
-              BottomNavigationBarItem(
-                icon: Icon(Icons.dashboard),
-                label: 'Dashboard',
+          bottomNavigationBar: NavigationBarTheme(
+            data: NavigationBarThemeData(
+              indicatorColor: Colors.orange,
+              labelTextStyle: MaterialStateProperty.resolveWith<TextStyle>(
+                (Set<MaterialState> states) {
+                  if (states.contains(MaterialState.selected)) {
+                    return const TextStyle(color: Colors.orange, fontWeight: FontWeight.bold, fontSize: 12);
+                  }
+                  return const TextStyle(color: Colors.grey, fontSize: 12);
+                },
               ),
-              BottomNavigationBarItem(
-                icon: Icon(Icons.qr_code_scanner),
-                label: 'Scanner',
-              ),
-              BottomNavigationBarItem(
-                icon: Icon(Icons.list),
-                label: 'Inventory',
-              ),
-              BottomNavigationBarItem(
-                icon: Icon(Icons.settings),
-                label: 'Settings',
-              ),
-            ],
+            ),
+            child: NavigationBar(
+              backgroundColor: const Color(0xFF1E1E1E), // Dark brown/black theme
+              selectedIndex: _currentIndex!,
+              onDestinationSelected: (index) {
+                setState(() {
+                  _currentIndex = index;
+                });
+              },
+              destinations: [
+                if (isAdmin)
+                  const NavigationDestination(
+                    icon: Icon(Icons.dashboard_outlined, color: Colors.grey),
+                    selectedIcon: Icon(Icons.dashboard, color: Colors.white),
+                    label: 'Dashboard',
+                  ),
+                if (isCashier)
+                  const NavigationDestination(
+                    icon: Icon(Icons.point_of_sale_outlined, color: Colors.grey),
+                    selectedIcon: Icon(Icons.point_of_sale, color: Colors.white),
+                    label: 'POS',
+                  ),
+                if (isHelper)
+                  const NavigationDestination(
+                    icon: Icon(Icons.receipt_long_outlined, color: Colors.grey),
+                    selectedIcon: Icon(Icons.receipt_long, color: Colors.white),
+                    label: 'Queue',
+                  ),
+                const NavigationDestination(
+                  icon: Icon(Icons.assignment_outlined, color: Colors.grey),
+                  selectedIcon: Icon(Icons.assignment, color: Colors.white),
+                  label: 'Inventory',
+                ),
+                const NavigationDestination(
+                  icon: Icon(Icons.settings_outlined, color: Colors.grey),
+                  selectedIcon: Icon(Icons.settings, color: Colors.white),
+                  label: 'Settings',
+                ),
+              ],
+            ),
           ),
         );
       },

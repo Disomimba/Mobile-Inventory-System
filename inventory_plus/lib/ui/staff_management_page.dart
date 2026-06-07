@@ -213,6 +213,7 @@ class _StaffManagementPageState extends State<StaffManagementPage> {
                     items: const [
                       DropdownMenuItem(value: 'staff', child: Text('Staff')),
                       DropdownMenuItem(value: 'admin', child: Text('Admin')),
+                      DropdownMenuItem(value: 'helper', child: Text('Helper')),
                     ],
                     onChanged: (val) => setState(() => selectedRole = val!),
                   ),
@@ -302,6 +303,7 @@ class _StaffManagementPageState extends State<StaffManagementPage> {
                   items: const [
                     DropdownMenuItem(value: 'staff', child: Text('Staff')),
                     DropdownMenuItem(value: 'admin', child: Text('Admin')),
+                    DropdownMenuItem(value: 'helper', child: Text('Helper')),
                   ],
                   onChanged: (val) => setState(() => selectedRole = val!),
                 ),

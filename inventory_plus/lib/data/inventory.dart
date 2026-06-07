@@ -138,3 +138,57 @@ class InventoryItem {
     );
   }
 }
+
+class CustomerOrderItem {
+  final String productId;
+  final String productName;
+  final int quantity;
+
+  CustomerOrderItem({
+    required this.productId,
+    required this.productName,
+    required this.quantity,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'product_id': productId,
+        'product_name': productName,
+        'quantity': quantity,
+      };
+
+  factory CustomerOrderItem.fromJson(Map<String, dynamic> json) =>
+      CustomerOrderItem(
+        productId: json['product_id'],
+        productName: json['product_name'],
+        quantity: json['quantity'],
+      );
+}
+
+class CustomerOrder {
+  final String id;
+  final String status;
+  final DateTime createdAt;
+  final List<CustomerOrderItem> items;
+
+  CustomerOrder({
+    required this.id,
+    required this.status,
+    required this.createdAt,
+    required this.items,
+  });
+
+  factory CustomerOrder.fromSupabase(Map<String, dynamic> map) {
+    var itemsList = <CustomerOrderItem>[];
+    if (map['items'] != null) {
+      itemsList = (map['items'] as List)
+          .map((i) => CustomerOrderItem.fromJson(i as Map<String, dynamic>))
+          .toList();
+    }
+    return CustomerOrder(
+      id: map['id'].toString(),
+      status: map['status'] ?? 'pending',
+      createdAt: DateTime.parse(map['created_at']),
+      items: itemsList,
+    );
+  }
+}

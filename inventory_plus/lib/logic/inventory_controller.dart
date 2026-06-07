@@ -701,4 +701,61 @@ class InventoryController {
       return [];
     }
   }
+
+  // ==========================================
+  // ORDER FULFILLMENT WORKFLOW
+  // ==========================================
+
+  Future<void> createCustomerOrder(List<CustomerOrderItem> items) async {
+    final locId = activeLocationId;
+    if (locId == null) return;
+    try {
+      await supabase.from('orders').insert({
+        'location_id': locId,
+        'status': 'pending',
+        'items': items.map((i) => i.toJson()).toList(),
+      });
+    } catch (e) {
+      print("Error creating order: $e");
+    }
+  }
+
+  Stream<List<CustomerOrder>> streamOrders() {
+    final locId = activeLocationId;
+    if (locId == null) return Stream.value([]);
+
+    return supabase
+        .from('orders')
+        .stream(primaryKey: ['id'])
+        .eq('location_id', locId)
+        .order('created_at', ascending: false)
+        .map((list) => list.map((item) => CustomerOrder.fromSupabase(item)).toList());
+  }
+
+  Future<void> updateOrderStatus(String orderId, String newStatus) async {
+    try {
+      await supabase.from('orders').update({'status': newStatus}).eq('id', orderId);
+    } catch (e) {
+      print("Error updating order status: $e");
+    }
+  }
+
+  Future<void> completeOrder(CustomerOrder order) async {
+    try {
+      // 1. Update order status to completed
+      await updateOrderStatus(order.id, 'completed');
+
+      // 2. Deduct stock for each item in the order
+      for (var orderItem in order.items) {
+        final index = _items.indexWhere((i) => i.id == orderItem.productId);
+        if (index != -1) {
+          final currentItem = _items[index];
+          final updatedItem = calculateCheckout(currentItem, orderItem.quantity);
+          await updateItem(updatedItem); // This also handles logging the 'checkout' transaction
+        }
+      }
+    } catch (e) {
+      print("Error completing order and deducting stock: $e");
+    }
+  }
 }

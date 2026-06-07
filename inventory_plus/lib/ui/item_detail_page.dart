@@ -376,7 +376,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
             icon: const Icon(LucideIcons.check, color: Colors.greenAccent),
             onPressed: _handleSave,
           )
-        else
+        else if (widget.controller.currentUserRole?.toLowerCase() == 'admin')
           IconButton(
             icon: const Icon(LucideIcons.pencil, color: Colors.white, size: 20),
             onPressed: () => setState(() => _isEditing = true),
@@ -847,19 +847,21 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
         ),
         child: Row(
           children: [
-            Expanded(
-              child: OutlinedButton.icon(
-                onPressed: _showDeleteDialog,
-                icon: const Icon(LucideIcons.trash2, size: 18),
-                label: const Text("Delete"),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: Colors.red,
-                  side: const BorderSide(color: Colors.red),
-                  padding: const EdgeInsets.symmetric(vertical: 16),
+            if (widget.controller.currentUserRole?.toLowerCase() == 'admin') ...[
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: _showDeleteDialog,
+                  icon: const Icon(LucideIcons.trash2, size: 18),
+                  label: const Text("Delete"),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.red,
+                    side: const BorderSide(color: Colors.red),
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(width: 12),
+              const SizedBox(width: 12),
+            ],
             Expanded(
               flex: 2,
               child: ElevatedButton.icon(
