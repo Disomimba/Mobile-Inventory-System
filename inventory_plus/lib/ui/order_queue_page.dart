@@ -252,6 +252,7 @@ class _OrderChecklistPageState extends State<OrderChecklistPage> {
   }
 
   // SHOW DEDUCTION MODAL
+  // SHOW DEDUCTION MODAL
   void _showDeductionSheet(InventoryItem dbItem, int targetQuantity) {
     showModalBottomSheet(
       context: context,
@@ -261,11 +262,15 @@ class _OrderChecklistPageState extends State<OrderChecklistPage> {
         item: dbItem,
         targetQuantity: targetQuantity,
         onConfirm: (deductedQty) async {
-          // 1. Deduct from Database Live
-          final updated = widget.controller.calculateCheckout(dbItem, deductedQty);
-          await widget.controller.updateItem(updated);
           
-          // 2. Mark as checked off
+          // ==========================================================
+          // 🐛 FIX: LIVE DATABASE DEDUCTION REMOVED HERE
+          // ==========================================================
+          // We deleted `widget.controller.updateItem()` so the Helper 
+          // no longer deducts stock. The Cashier will deduct the stock 
+          // when they click "Complete" on their end.
+          
+          // Just mark the item as checked off on the Helper's UI
           if (mounted) {
             setState(() {
               _checkedItems[dbItem.id] = true;
@@ -279,7 +284,6 @@ class _OrderChecklistPageState extends State<OrderChecklistPage> {
       ),
     );
   }
-
   void _openScannerToCheckoff() {
     Navigator.push(
       context,

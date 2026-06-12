@@ -204,6 +204,9 @@ class InventoryController {
         final oldItem = _items[index];
         final quantityChange = updatedItem.quantity - oldItem.quantity;
 
+        // Optimistically update local state immediately to prevent race conditions
+        _items[index] = updatedItem;
+
         if (quantityChange != 0) {
           await _logTransaction(
             productId: updatedItem.id,
@@ -232,10 +235,6 @@ class InventoryController {
                 updatedItem.locationId, 
           })
           .eq('id', updatedItem.id);
-
-      if (index != -1) {
-        _items[index] = updatedItem;
-      }
     } catch (e) {
       print("Error updating item: $e");
     }
@@ -591,6 +590,17 @@ class InventoryController {
     }
   }
 
+  Future<void> clearTransactionHistory() async {
+    final locId = activeLocationId;
+    if (locId == null) return;
+    try {
+      // Wipes old/dirty transaction logs used during testing
+      await supabase.from('transaction_history').delete().eq('location_id', locId);
+    } catch (e) {
+      print("Error clearing transaction history: $e");
+    }
+  }
+
   // ==========================================
   // AI ANALYTICS & FORECASTING ENGINE
   // ==========================================
@@ -740,8 +750,20 @@ class InventoryController {
     }
   }
 
+  // Prevent duplicate concurrent processing of the same order
+  Set<String>? _processingOrders;
+
   Future<void> completeOrder(CustomerOrder order) async {
+    // Lazy initialization to survive Hot Reloads
+    _processingOrders ??= {};
+    if (_processingOrders!.contains(order.id)) return;
+    _processingOrders!.add(order.id);
+
     try {
+      // 0. Double-check order status on the server to prevent double-deduction
+      final checkOrder = await supabase.from('orders').select('status').eq('id', order.id).single();
+      if (checkOrder['status'] == 'completed') return;
+
       // 1. Update order status to completed
       await updateOrderStatus(order.id, 'completed');
 
@@ -756,6 +778,8 @@ class InventoryController {
       }
     } catch (e) {
       print("Error completing order and deducting stock: $e");
+    } finally {
+      _processingOrders!.remove(order.id);
     }
   }
 }

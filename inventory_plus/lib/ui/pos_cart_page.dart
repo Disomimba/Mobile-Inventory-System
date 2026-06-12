@@ -19,9 +19,11 @@ class _PosCartPageState extends State<PosCartPage> {
   String _searchQuery = '';
   final Map<String, int> _cart = {};
   bool _isGridView = true;
+  bool _isProcessingCart = false;
 
   List<InventoryItem> get _filteredItems => widget.controller.searchInventory(_searchQuery);
 
+  
   bool _addToCart(InventoryItem item) {
     if (item.quantity <= 0) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -79,26 +81,34 @@ class _PosCartPageState extends State<PosCartPage> {
   }
 
   Future<void> _processOrder() async {
-    if (_cart.isEmpty) return;
+    if (_cart.isEmpty || _isProcessingCart) return;
     
-    final items = _cart.entries.map((entry) {
-      final item = widget.controller.allItems.firstWhere((i) => i.id == entry.key);
-      return CustomerOrderItem(
-        productId: item.id,
-        productName: item.name,
-        quantity: entry.value,
-      );
-    }).toList();
+    setState(() => _isProcessingCart = true);
+    
+    try {
+      final items = _cart.entries.map((entry) {
+        final item = widget.controller.allItems.firstWhere((i) => i.id == entry.key);
+        return CustomerOrderItem(
+          productId: item.id,
+          productName: item.name,
+          quantity: entry.value,
+        );
+      }).toList();
 
-    await widget.controller.createCustomerOrder(items);
-    
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Order sent to Helper!'), backgroundColor: Colors.green),
-      );
-      setState(() {
-        _cart.clear();
-      });
+      await widget.controller.createCustomerOrder(items);
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Order sent to Helper!'), backgroundColor: Colors.green),
+        );
+        setState(() {
+          _cart.clear();
+        });
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isProcessingCart = false);
+      }
     }
   }
 
@@ -683,15 +693,17 @@ class _PosCartPageState extends State<PosCartPage> {
                 ),
                 const SizedBox(height: 16),
                 ElevatedButton.icon(
-                  onPressed: _cart.isEmpty ? null : _processOrder,
-                  icon: const Icon(Icons.check_circle_outline, color: Colors.white),
+                  onPressed: _cart.isEmpty || _isProcessingCart ? null : _processOrder,
+                  icon: _isProcessingCart
+                      ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                      : const Icon(Icons.check_circle_outline, color: Colors.white),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.green[800],
                     disabledBackgroundColor: Colors.grey,
                     minimumSize: const Size(double.infinity, 50),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   ),
-                  label: const Text('Process Order', style: TextStyle(fontSize: 18, color: Colors.white, fontWeight: FontWeight.bold)),
+                  label: Text(_isProcessingCart ? 'Processing...' : 'Process Order', style: const TextStyle(fontSize: 18, color: Colors.white, fontWeight: FontWeight.bold)),
                 ),
               ],
             ),

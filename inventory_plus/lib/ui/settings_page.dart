@@ -92,7 +92,7 @@ class SettingsPage extends StatelessWidget {
               color: Colors.green,
               title: "Inventory Reports",
               subtitle: "Export stock levels to CSV/PDF",
-              onTap: () {},
+              onTap: () => _showReportDialog(context),
             ),
             _buildSettingTile(
               icon: LucideIcons.history,
@@ -103,6 +103,35 @@ class SettingsPage extends StatelessWidget {
                 context,
                 TransactionHistoryPage(controller: controller),
               ),
+            ),
+            _buildSettingTile(
+              icon: LucideIcons.trash2,
+              color: Colors.red,
+              title: "Clear Testing Logs",
+              subtitle: "Wipe corrupted transaction history",
+              onTap: () async {
+                final confirm = await showDialog<bool>(
+                  context: context,
+                  builder: (context) => AlertDialog(
+                    title: const Text("Clear Transaction History?"),
+                    content: const Text("This will permanently delete all transaction logs (stock in, checkouts) used during testing. Your actual current inventory quantities will NOT be deleted.\n\nUse this to clean up duplicate logs from previous bugs."),
+                    actions: [
+                      TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("Cancel")),
+                      ElevatedButton(
+                        style: ElevatedButton.styleFrom(backgroundColor: Colors.red), 
+                        onPressed: () => Navigator.pop(context, true), 
+                        child: const Text("Delete All", style: TextStyle(color: Colors.white)),
+                      ),
+                    ],
+                  ),
+                );
+                if (confirm == true) {
+                  await controller.clearTransactionHistory();
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Testing logs cleared!"), backgroundColor: Colors.green));
+                  }
+                }
+              },
             ),
           ],
 
@@ -235,6 +264,274 @@ class SettingsPage extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  void _showReportDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (dialogContext) {
+        String selectedPeriod = 'Daily';
+        return StatefulBuilder(
+          builder: (stateContext, setState) {
+            return AlertDialog(
+              title: const Text('Generate Inventory Report'),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Select the report type/period:'),
+                  const SizedBox(height: 10),
+                  DropdownButton<String>(
+                    value: selectedPeriod,
+                    isExpanded: true,
+                    items: ['Daily', 'Weekly', 'Monthly'].map((String value) {
+                      return DropdownMenuItem<String>(
+                        value: value,
+                        child: Text(value),
+                      );
+                    }).toList(),
+                    onChanged: (newValue) {
+                      if (newValue != null) {
+                        setState(() {
+                          selectedPeriod = newValue;
+                        });
+                      }
+                    },
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(stateContext),
+                  child: const Text('Cancel'),
+                ),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.green,
+                    foregroundColor: Colors.white,
+                  ),
+                  onPressed: () {
+                    Navigator.pop(stateContext);
+                    _generateAndPrintInventoryReport(context, selectedPeriod);
+                  },
+                  child: const Text('Generate PDF'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Future<void> _generateAndPrintInventoryReport(
+      BuildContext context, String period) async {
+    final items = controller.allItems;
+
+    if (items.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("No inventory items found to generate report."),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    // Show a loading dialog
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) =>
+          const Center(child: CircularProgressIndicator()),
+    );
+
+    try {
+      // 1. CALCULATE TIME PERIOD CUTOFF
+      DateTime now = DateTime.now();
+      DateTime cutoffDate;
+      if (period == 'Daily') {
+        cutoffDate = DateTime(now.year, now.month, now.day); // Midnight today
+      } else if (period == 'Weekly') {
+        cutoffDate = now.subtract(const Duration(days: 7));
+      } else {
+        cutoffDate = now.subtract(const Duration(days: 30)); // Monthly
+      }
+
+      // 2. FETCH AND FILTER TRANSACTIONS
+      final allTransactions = await controller.fetchAllTransactionHistory();
+      final periodTransactions = allTransactions.where((tx) {
+        final txDate = DateTime.parse(tx['created_at']).toLocal();
+        return txDate.isAfter(cutoffDate);
+      }).toList();
+
+      // Maps to track specific item movements
+      Map<String, int> issuedDetails = {};
+      Map<String, int> receivedDetails = {};
+
+      for (var tx in periodTransactions) {
+        final qty = tx['quantity_change'] as int;
+        // Assuming your transaction table saves the product ID as 'product_id'
+        final productId = tx['product_id'] as String; 
+
+        if (tx['transaction_type'] == 'checkout') {
+          issuedDetails[productId] = (issuedDetails[productId] ?? 0) + qty.abs();
+        } else if (tx['transaction_type'] == 'stock_in' || tx['transaction_type'] == 'add') {
+          receivedDetails[productId] = (receivedDetails[productId] ?? 0) + qty;
+        }
+      }
+
+      // 3. PREPARE TABLE DATA & CALCULATE TOTALS
+      double grandTotalValue = 0;
+      int grandTotalItems = 0;
+      
+      final tableRows = <pw.TableRow>[];
+
+      // Build Table Header
+      tableRows.add(
+        pw.TableRow(
+          decoration: const pw.BoxDecoration(color: PdfColors.grey300),
+          children: [
+            'Item Code', 'Item Name', 'Beginning Qty', 'Received', 
+            'Issued', 'Ending Qty', 'Unit Cost', 'Total Value'
+          ].map((text) => pw.Padding(
+                padding: const pw.EdgeInsets.all(6),
+                child: pw.Text(text, style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 10)),
+              )).toList(),
+        ),
+      );
+
+      // Build Table Rows
+      for (var item in items) {
+        final issued = issuedDetails[item.id] ?? 0;
+        final received = receivedDetails[item.id] ?? 0;
+        final endingQty = item.quantity;
+        
+        // Reverse math to find what the stock was at the beginning of the period
+        final beginningQty = endingQty - received + issued; 
+        
+        final totalValue = endingQty * item.price;
+
+        grandTotalValue += totalValue;
+        grandTotalItems += endingQty;
+
+        tableRows.add(
+          pw.TableRow(
+            children: [
+              item.sku,
+              item.name,
+              beginningQty.toString(),
+              received.toString(),
+              issued.toString(),
+              endingQty.toString(),
+              '\$${item.price.toStringAsFixed(2)}',
+              '\$${totalValue.toStringAsFixed(2)}'
+            ].map((text) => pw.Padding(
+                  padding: const pw.EdgeInsets.all(6),
+                  child: pw.Text(text, style: const pw.TextStyle(fontSize: 10)),
+                )).toList(),
+          ),
+        );
+      }
+
+      final doc = pw.Document();
+
+      doc.addPage(
+        pw.MultiPage(
+          // CHANGED TO LANDSCAPE TO FIT ALL 8 COLUMNS CLEANLY
+          pageFormat: PdfPageFormat.a4.landscape, 
+          margin: const pw.EdgeInsets.all(32),
+          build: (pw.Context context) {
+            return [
+              // --- HEADER ---
+              pw.Header(
+                level: 0,
+                child: pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                  children: [
+                    pw.Column(
+                      crossAxisAlignment: pw.CrossAxisAlignment.start,
+                      children: [
+                        pw.Text('Inventory Summary Report', style: pw.TextStyle(fontSize: 24, fontWeight: pw.FontWeight.bold)),
+                        pw.SizedBox(height: 4),
+                        pw.Text('Report Type: $period', style: const pw.TextStyle(fontSize: 14, color: PdfColors.grey700)),
+                      ]
+                    ),
+                    pw.Column(
+                      crossAxisAlignment: pw.CrossAxisAlignment.end,
+                      children: [
+                        pw.Text('Date Generated: ${now.toString().split(' ')[0]}', style: const pw.TextStyle(fontSize: 10)),
+                        pw.Text('Prepared By: $userName', style: const pw.TextStyle(fontSize: 10)),
+                      ]
+                    )
+                  ],
+                ),
+              ),
+              pw.SizedBox(height: 20),
+
+              // --- ENTERPRISE DATA TABLE ---
+              pw.Table(
+                border: pw.TableBorder.all(color: PdfColors.grey400),
+                columnWidths: {
+                  0: const pw.FlexColumnWidth(2), // Code
+                  1: const pw.FlexColumnWidth(4), // Name
+                  2: const pw.FlexColumnWidth(1.5), // Beginning
+                  3: const pw.FlexColumnWidth(1.5), // Received
+                  4: const pw.FlexColumnWidth(1.5), // Issued
+                  5: const pw.FlexColumnWidth(1.5), // Ending
+                  6: const pw.FlexColumnWidth(1.5), // Cost
+                  7: const pw.FlexColumnWidth(2), // Total
+                },
+                children: tableRows,
+              ),
+              pw.SizedBox(height: 20),
+              pw.Divider(),
+              pw.SizedBox(height: 10),
+              
+              // --- FOOTER TOTALS ---
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.end,
+                children: [
+                  pw.Column(
+                    crossAxisAlignment: pw.CrossAxisAlignment.end,
+                    children: [
+                      pw.Text('Total Items in Stock (Ending): $grandTotalItems',
+                          style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 12)),
+                      pw.SizedBox(height: 4),
+                      pw.Text(
+                          'Total Inventory Value: \$${grandTotalValue.toStringAsFixed(2)}',
+                          style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 14)),
+                    ],
+                  ),
+                ],
+              ),
+            ];
+          },
+        ),
+      );
+
+      final bytes = await doc.save();
+
+      if (context.mounted) Navigator.pop(context);
+
+      await Printing.sharePdf(
+        bytes: bytes,
+        filename: 'Inventory_Report_${period}_${DateTime.now().millisecondsSinceEpoch}.pdf',
+      );
+    } catch (e) {
+      if (context.mounted) {
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("Error generating PDF: $e"),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
+    }
   }
 
   void _showChangePasswordDialog(BuildContext context) {
@@ -488,13 +785,15 @@ class SettingsPage extends StatelessWidget {
         );
       }
 
+      final bytes = await doc.save();
+
       // Close the loading dialog
       if (context.mounted) Navigator.pop(context);
 
-      // Open the print / share preview layout
-      await Printing.layoutPdf(
-        onLayout: (PdfPageFormat format) async => doc.save(),
-        name: 'Inventory_QR_Labels.pdf',
+      // Download or share the PDF instead of opening the print preview
+      await Printing.sharePdf(
+        bytes: bytes,
+        filename: 'Inventory_QR_Labels.pdf',
       );
     } catch (e) {
       if (context.mounted) {
