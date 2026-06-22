@@ -717,18 +717,31 @@ class InventoryController {
   // ==========================================
 
   Future<void> createCustomerOrder(List<CustomerOrderItem> items) async {
-    final locId = activeLocationId;
-    if (locId == null) return;
-    try {
-      await supabase.from('orders').insert({
-        'location_id': locId,
-        'status': 'pending',
-        'items': items.map((i) => i.toJson()).toList(),
-      });
-    } catch (e) {
-      print("Error creating order: $e");
-    }
+  final locId = activeLocationId;
+  
+  print("=== CREATE ORDER DEBUG ===");
+  print("locId: $locId");
+  print("items count: ${items.length}");
+  print("items: ${items.map((i) => i.toJson()).toList()}");
+  
+  if (locId == null) {
+    print("ERROR: locId is null, aborting!");
+    return;
   }
+  
+  try {
+    final result = await supabase.from('orders').insert({
+      'location_id': locId,
+      'status': 'pending',
+      'items': items.map((i) => i.toJson()).toList(),
+      'created_by': int.tryParse(currentUserId ?? ''),
+    }).select(); // ADD .select() so it returns the inserted row
+    
+    print("SUCCESS: Order inserted: $result");
+  } catch (e) {
+    print("ERROR inserting order: $e");
+  }
+}
 
   Stream<List<CustomerOrder>> streamOrders() {
     final locId = activeLocationId;
@@ -743,12 +756,16 @@ class InventoryController {
   }
 
   Future<void> updateOrderStatus(String orderId, String newStatus) async {
-    try {
-      await supabase.from('orders').update({'status': newStatus}).eq('id', orderId);
-    } catch (e) {
-      print("Error updating order status: $e");
-    }
+  try {
+    final Map<String, dynamic> updateData = {'status': newStatus};
+    if (newStatus == 'prepared') {
+  updateData['prepared_by'] = int.tryParse(currentUserId ?? '');
+}
+    await supabase.from('orders').update(updateData).eq('id', orderId);
+  } catch (e) {
+    print("Error updating order status: $e");
   }
+}
 
   // Prevent duplicate concurrent processing of the same order
   Set<String>? _processingOrders;
