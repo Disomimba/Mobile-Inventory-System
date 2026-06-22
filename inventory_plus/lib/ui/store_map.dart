@@ -235,7 +235,7 @@ class _StoreMapState extends State<StoreMap>
           constrained: false,
           minScale: 0.1,
           maxScale: 2.5,
-          boundaryMargin: const EdgeInsets.all(200),
+          boundaryMargin: const EdgeInsets.all(double.infinity),
           child: Builder(
             builder: (BuildContext dropContext) {
               return DragTarget<ElementType>(
@@ -322,7 +322,8 @@ class _StoreMapState extends State<StoreMap>
   }
 
   Color _getElementColor(ElementType type, bool isHighlighted) {
-    if (isHighlighted) return Colors.orange;
+    // Removed the "if (isHighlighted) return Colors.orange;" 
+    // Now it keeps its proper category color!
     switch (type) {
       case ElementType.door:
         return Colors.green;

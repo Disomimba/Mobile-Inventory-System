@@ -73,9 +73,10 @@ class _InventoryPageState extends State<InventoryPage> {
                         color: Color(0xFF111827),
                       ),
                     ),
-                    ElevatedButton.icon(
-                      onPressed: () {
-                        // FIX: Responsive Routing! Dialog on Desktop, Full Screen on Mobile
+                    // ADD THIS IF STATEMENT:
+                    if (widget.controller.isAdmin)
+                      ElevatedButton.icon(
+                        onPressed: () {
                         final isDesktop =
                             MediaQuery.of(context).size.width >= 600;
                         if (isDesktop) {

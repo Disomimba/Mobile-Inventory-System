@@ -376,7 +376,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
             icon: const Icon(LucideIcons.check, color: Colors.greenAccent),
             onPressed: _handleSave,
           )
-        else
+        else if (widget.controller.currentUserRole?.toLowerCase() == 'admin')
           IconButton(
             icon: const Icon(LucideIcons.pencil, color: Colors.white, size: 20),
             onPressed: () => setState(() => _isEditing = true),
@@ -635,6 +635,8 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
   }
 
   Widget _buildTransactionHistoryBox() {
+    final recentHistory = _transactionHistory.take(5).toList();
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(16),
@@ -646,17 +648,47 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Row(
+          // Header with View All button
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Icon(LucideIcons.history, size: 16, color: Colors.grey),
-              SizedBox(width: 8),
-              Text(
-                "Transaction History",
-                style: TextStyle(fontWeight: FontWeight.bold),
+              const Row(
+                children: [
+                  Icon(LucideIcons.history, size: 16, color: Colors.grey),
+                  SizedBox(width: 8),
+                  Text(
+                    "Transaction History",
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                ],
               ),
+              if (_transactionHistory.length > 5)
+                TextButton(
+                  onPressed: _showAllTransactionsModal,
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  child: const Row(
+                    children: [
+                      Text(
+                        "View All",
+                        style: TextStyle(
+                          color: Colors.orange,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      SizedBox(width: 4),
+                      Icon(LucideIcons.chevronRight, size: 14, color: Colors.orange),
+                    ],
+                  ),
+                ),
             ],
           ),
           const SizedBox(height: 16),
+
           if (_isLoadingHistory)
             const Center(child: CircularProgressIndicator())
           else if (_transactionHistory.isEmpty)
@@ -670,46 +702,152 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
             ListView.builder(
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
-              itemCount: _transactionHistory.length,
-              itemBuilder: (context, index) {
-                final transaction = _transactionHistory[index];
-                final date = DateTime.parse(
-                  transaction['created_at'],
-                ).toLocal();
-                final formattedDate =
-                    "${date.month}/${date.day}/${date.year} ${date.hour}:${date.minute.toString().padLeft(2, '0')}";
-                final quantityChange = transaction['quantity_change'];
-                final isPositive = quantityChange > 0;
-                final type = transaction['transaction_type'] as String;
-
-                // Extract the profile data linked via Foreign Key
-                final profileInfo = transaction['profiles'];
-                final userName = profileInfo != null
-                    ? profileInfo['name']
-                    : (transaction['user_name'] ?? 'Unknown');
-
-                return ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: Icon(
-                    isPositive ? LucideIcons.plus : LucideIcons.minus,
-                    color: isPositive ? Colors.green : Colors.red,
-                  ),
-                  title: Text(
-                    "${isPositive ? '+' : ''}$quantityChange | ${type.replaceAll('_', ' ').capitalize()}",
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w600,
-                      fontSize: 14,
-                    ),
-                  ),
-                  subtitle: Text("By $userName at $formattedDate"),
-                  trailing: Text(
-                    "New Qty: ${transaction['new_quantity']}",
-                    style: const TextStyle(fontSize: 12, color: Colors.grey),
-                  ),
-                );
-              },
+              itemCount: recentHistory.length,
+              itemBuilder: (context, index) =>
+                  _buildTransactionTile(recentHistory[index]),
             ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildTransactionTile(Map<String, dynamic> transaction) {
+    final date = DateTime.parse(transaction['created_at']).toLocal();
+    final formattedDate =
+        "${date.month}/${date.day}/${date.year} ${date.hour}:${date.minute.toString().padLeft(2, '0')}";
+    final quantityChange = transaction['quantity_change'];
+    final isPositive = quantityChange > 0;
+    final type = transaction['transaction_type'] as String;
+    final profileInfo = transaction['profiles'];
+    final userName = profileInfo != null
+        ? profileInfo['name']
+        : (transaction['user_name'] ?? 'Unknown');
+
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      leading: Container(
+        width: 36,
+        height: 36,
+        decoration: BoxDecoration(
+          color: isPositive
+              ? Colors.green.withOpacity(0.1)
+              : Colors.red.withOpacity(0.1),
+          shape: BoxShape.circle,
+        ),
+        child: Icon(
+          isPositive ? LucideIcons.plus : LucideIcons.minus,
+          color: isPositive ? Colors.green : Colors.red,
+          size: 16,
+        ),
+      ),
+      title: Text(
+        "${isPositive ? '+' : ''}$quantityChange  •  ${type.replaceAll('_', ' ').capitalize()}",
+        style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+      ),
+      subtitle: Text(
+        "By $userName  •  $formattedDate",
+        style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
+      ),
+      trailing: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: Colors.grey.shade100,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Text(
+          "Qty: ${transaction['new_quantity']}",
+          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
+        ),
+      ),
+    );
+  }
+
+  void _showAllTransactionsModal() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => DraggableScrollableSheet(
+        initialChildSize: 0.75,
+        minChildSize: 0.5,
+        maxChildSize: 0.95,
+        builder: (context, scrollController) => Container(
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          child: Column(
+            children: [
+              const SizedBox(height: 12),
+              Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade300,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          "All Transactions",
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 18,
+                          ),
+                        ),
+                        Text(
+                          _currentItem.name,
+                          style: TextStyle(
+                            color: Colors.grey.shade500,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ],
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: Colors.orange.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        "${_transactionHistory.length} records",
+                        style: const TextStyle(
+                          color: Colors.orange,
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              Divider(height: 1, color: Colors.grey.shade200),
+              Expanded(
+                child: ListView.separated(
+                  controller: scrollController,
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 20, vertical: 12),
+                  itemCount: _transactionHistory.length,
+                  separatorBuilder: (_, __) =>
+                      Divider(height: 1, color: Colors.grey.shade100),
+                  itemBuilder: (context, index) =>
+                      _buildTransactionTile(_transactionHistory[index]),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -847,32 +985,22 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
         ),
         child: Row(
           children: [
-            Expanded(
-              child: OutlinedButton.icon(
-                onPressed: _showDeleteDialog,
-                icon: const Icon(LucideIcons.trash2, size: 18),
-                label: const Text("Delete"),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: Colors.red,
-                  side: const BorderSide(color: Colors.red),
-                  padding: const EdgeInsets.symmetric(vertical: 16),
+            if (widget.controller.currentUserRole?.toLowerCase() == 'admin') ...[
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: _showDeleteDialog,
+                  icon: const Icon(LucideIcons.trash2, size: 18),
+                  label: const Text("Delete"),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.red,
+                    side: const BorderSide(color: Colors.red),
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              flex: 2,
-              child: ElevatedButton.icon(
-                onPressed: _showCheckoutSheet,
-                icon: const Icon(LucideIcons.shoppingCart, size: 18),
-                label: const Text("Checkout Item"),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF0F172A),
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                ),
-              ),
-            ),
+              
+            ],
+            
           ],
         ),
       ),

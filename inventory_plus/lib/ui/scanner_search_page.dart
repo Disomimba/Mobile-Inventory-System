@@ -24,11 +24,25 @@ class _ScannerSearchPageState extends State<ScannerSearchPage> {
   bool _isScanning = true;
   InventoryItem? _scannedItem;
 
+  bool get _canUseAI {
+    final role = widget.controller.currentUserRole?.toLowerCase() ?? 'staff';
+    return role == 'admin' || role == 'staff';
+  }
+
   void _handleRealScan(String scannedValue) {
     if (!_isScanning) return;
     setState(() => _isScanning = false);
 
-    final foundItem = widget.controller.findItemByCode(scannedValue);
+    InventoryItem? foundItem;
+    try {
+      final cleanValue = scannedValue.trim();
+
+      foundItem = widget.controller.allItems.firstWhere(
+        (item) => item.sku == cleanValue || item.id == cleanValue,
+      );
+    } catch (_) {
+      foundItem = null; // firstWhere throws an error if no match is found
+    }
 
     if (foundItem != null) {
       setState(() => _scannedItem = foundItem);
@@ -104,47 +118,57 @@ class _ScannerSearchPageState extends State<ScannerSearchPage> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text(
-                "Hardware Inventory",
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              ElevatedButton.icon(
-                onPressed: () {
-                  // This opens your new Object Scanner
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => VisualSearchPage(
-                        controller: widget.controller,
-                        onSelectItem: widget.onSelectItem,
-                      ),
+              Row(
+                children: [
+                  IconButton(
+                    icon: const Icon(LucideIcons.chevronLeft, color: Colors.white),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                  const SizedBox(width: 4),
+                  const Text(
+                    "Hardware Inventory",
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
                     ),
-                  );
-                },
-                icon: const Icon(
-                  LucideIcons.scanLine,
-                  size: 16,
-                  color: Colors.white,
-                ),
-                label: const Text(
-                  "AI Scanner",
-                  style: TextStyle(color: Colors.white),
-                ),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.orange,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(20),
                   ),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 8,
-                  ),
-                ),
+                ],
               ),
+              if (_canUseAI)
+                ElevatedButton.icon(
+                  onPressed: () {
+                    // This opens your new Object Scanner
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => VisualSearchPage(
+                          controller: widget.controller,
+                          onSelectItem: widget.onSelectItem,
+                        ),
+                      ),
+                    );
+                  },
+                  icon: const Icon(
+                    LucideIcons.scanLine,
+                    size: 16,
+                    color: Colors.white,
+                  ),
+                  label: const Text(
+                    "AI Scanner",
+                    style: TextStyle(color: Colors.white),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.orange,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
+                  ),
+                ),
             ],
           ),
         ],

@@ -12,7 +12,6 @@ class LoginPage extends StatefulWidget {
 }
 
 class _LoginPageState extends State<LoginPage> {
-  // The GlobalKey to control our Form validation
   final _formKey = GlobalKey<FormState>();
   final _usernameController = TextEditingController();
   final _passwordController = TextEditingController();
@@ -22,8 +21,6 @@ class _LoginPageState extends State<LoginPage> {
   bool _isLoading = false;
 
   Future<void> _handleLogin() async {
-    // 1. Trigger validation before doing anything else
-    // If validation fails (returns false), we stop here and don't show loading.
     if (!_formKey.currentState!.validate()) {
       return;
     }
@@ -34,26 +31,23 @@ class _LoginPageState extends State<LoginPage> {
     setState(() => _isLoading = true);
 
     try {
-      // Authenticate against custom profiles table
       final userProfile = await _authService.login(username, password);
 
       if (userProfile != null) {
         final String? assignedLocationId = userProfile['location_id'];
         final String userId = userProfile['id'].toString();
 
-        // Save session locally
         final prefs = await SharedPreferences.getInstance();
         await prefs.setBool('isLoggedIn', true);
         await prefs.setString('userId', userId);
 
-        // Save user details to the controller
         widget.controller.setLoggedInUser(
           name: userProfile['name'] ?? username,
           id: userId,
           role: userProfile['role'] ?? 'staff',
+          email: userProfile['email'],
         );
 
-        // Load app data based on user's location
         if (assignedLocationId != null && assignedLocationId.isNotEmpty) {
           await widget.controller.loadAppData(assignedLocationId);
           if (mounted) {
@@ -68,7 +62,7 @@ class _LoginPageState extends State<LoginPage> {
       }
     } catch (e) {
       _showError("An unexpected error occurred during login.");
-      print("Login Page Error: $e");
+      debugPrint("Login Page Error: $e");
     } finally {
       if (mounted) {
         setState(() => _isLoading = false);
@@ -79,6 +73,41 @@ class _LoginPageState extends State<LoginPage> {
   void _showError(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(message), backgroundColor: Colors.redAccent),
+    );
+  }
+  void _showForgotPasswordDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF151D2E),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(8),
+          side: const BorderSide(color: Colors.white10),
+        ),
+        title: const Row(
+          children: [
+            Icon(LucideIcons.shieldAlert, color: Colors.orange, size: 24),
+            SizedBox(width: 12),
+            Text(
+              "Account Recovery", 
+              style: TextStyle(color: Colors.white, fontSize: 18),
+            ),
+          ],
+        ),
+        content: const Text(
+          "For security purposes, self-service password resets are disabled for operator accounts.\n\nPlease contact your System Administrator or Manager to have your password reset.",
+          style: TextStyle(color: Colors.grey, height: 1.5, fontSize: 14),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text(
+              "Understood", 
+              style: TextStyle(color: Colors.orange, fontWeight: FontWeight.bold),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -92,131 +121,186 @@ class _LoginPageState extends State<LoginPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF0F172A),
-      body: Center(
-        child: SingleChildScrollView(
-          // FIX: Added a Container with BoxConstraints to prevent stretching on Web/Desktop
-          child: Container(
-            constraints: const BoxConstraints(maxWidth: 400),
-            padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 50),
-            child: Form(
-              key: _formKey,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Center(
-                    child: Container(
-                      padding: const EdgeInsets.all(20),
-                      decoration: BoxDecoration(
-                        color: Colors.orange.withOpacity(0.1),
-                        shape: BoxShape.circle,
-                      ),
-                      child: const Icon(
-                        LucideIcons.packageCheck,
-                        color: Colors.orange,
-                        size: 60,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 32),
-                  const Center(
-                    child: Text(
-                      "Inventory Plus",
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 28,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                  const Center(
-                    child: Text(
-                      "Hardware Management System",
-                      style: TextStyle(color: Colors.grey, fontSize: 14),
-                    ),
-                  ),
-                  const SizedBox(height: 60),
-
-                  const Text(
-                    "USERNAME",
-                    style: TextStyle(
-                      color: Colors.grey,
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  _buildTextField(
-                    _usernameController,
-                    "Enter your username",
-                    LucideIcons.user,
-                    false,
-                  ),
-
-                  const SizedBox(height: 24),
-
-                  const Text(
-                    "PASSWORD",
-                    style: TextStyle(
-                      color: Colors.grey,
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  _buildTextField(
-                    _passwordController,
-                    "••••••••",
-                    LucideIcons.lock,
-                    true,
-                    suffix: IconButton(
-                      icon: Icon(
-                        _isPasswordVisible
-                            ? LucideIcons.eye
-                            : LucideIcons.eyeOff,
-                        color: Colors.grey,
-                        size: 18,
-                      ),
-                      onPressed: () => setState(
-                        () => _isPasswordVisible = !_isPasswordVisible,
-                      ),
-                    ),
-                  ),
-
-                  const SizedBox(height: 40),
-
-                  SizedBox(
-                    width: double.infinity,
-                    height: 55,
-                    child: ElevatedButton(
-                      onPressed: _isLoading ? null : _handleLogin,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.orange,
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
+      backgroundColor: const Color(0xFF0F1423),
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            child: Container(
+              // Reduced max width from 420 to 380 to make it slightly smaller
+              constraints: const BoxConstraints(maxWidth: 380),
+              // Reduced padding to keep proportions right on a smaller card
+              padding: const EdgeInsets.all(32),
+              decoration: BoxDecoration(
+                color: const Color(0xFF151D2E),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.white10),
+              ),
+              child: Form(
+                key: _formKey,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Center(
+                      child: Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: Colors.orange.withOpacity(0.1),
+                          shape: BoxShape.circle,
                         ),
-                        elevation: 0,
+                        child: const Icon(
+                          LucideIcons.packageCheck,
+                          color: Colors.orange,
+                          size: 48,
+                        ),
                       ),
-                      child: _isLoading
-                          ? const SizedBox(
-                              height: 20,
-                              width: 20,
-                              child: CircularProgressIndicator(
-                                color: Colors.white,
-                                strokeWidth: 2,
-                              ),
-                            )
-                          : const Text(
-                              "Sign In",
-                              style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
                     ),
-                  ),
-                ],
+                    const SizedBox(height: 16),
+                    const Center(
+                      child: Text(
+                        "Inventory Plus",
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 22,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    const Center(
+                      child: Text(
+                        "Hardware Management System",
+                        style: TextStyle(color: Colors.grey, fontSize: 13),
+                      ),
+                    ),
+                    const SizedBox(height: 32),
+
+                    const Text(
+                      "Username",
+                      style: TextStyle(
+                        color: Colors.grey,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    _buildTextField(
+                      _usernameController,
+                      "Enter your operator ID",
+                      LucideIcons.user,
+                      false,
+                    ),
+
+                    const SizedBox(height: 20),
+
+                    const Text(
+                      "Password",
+                      style: TextStyle(
+                        color: Colors.grey,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    _buildTextField(
+                      _passwordController,
+                      "••••••••",
+                      LucideIcons.lock,
+                      true,
+                      suffix: IconButton(
+                        icon: Icon(
+                          _isPasswordVisible
+                              ? LucideIcons.eye
+                              : LucideIcons.eyeOff,
+                          color: Colors.grey,
+                          size: 18,
+                        ),
+                        onPressed: () => setState(
+                          () => _isPasswordVisible = !_isPasswordVisible,
+                        ),
+                      ),
+                    ),
+
+                    const SizedBox(height: 12),
+
+                    // Forgot Credentials only
+                    // Forgot Credentials only
+Align(
+  alignment: Alignment.centerRight,
+  child: TextButton(
+    onPressed: () => _showForgotPasswordDialog(context), // <-- Update this line
+    style: TextButton.styleFrom(
+      padding: EdgeInsets.zero,
+      minimumSize: Size.zero,
+      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+    ),
+    child: const Text(
+      "Forgot credentials?",
+      style: TextStyle(
+        color: Colors.orange,
+        fontSize: 12,
+      ),
+    ),
+  ),
+),
+
+                    const SizedBox(height: 24),
+
+                    SizedBox(
+                      width: double.infinity,
+                      height: 48,
+                      child: ElevatedButton(
+                        onPressed: _isLoading ? null : _handleLogin,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.orange,
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          elevation: 0,
+                        ),
+                        child: _isLoading
+                            ? const SizedBox(
+                                height: 20,
+                                width: 20,
+                                child: CircularProgressIndicator(
+                                  color: Colors.white,
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Text(
+                                    "Sign In",
+                                    style: TextStyle(
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  SizedBox(width: 8),
+                                  Icon(LucideIcons.logIn, size: 18),
+                                ],
+                              ),
+                      ),
+                    ),
+                    
+                    const SizedBox(height: 32),
+                    const Divider(color: Colors.white10, height: 1),
+                    const SizedBox(height: 24),
+                    
+                    // Terms and Privacy
+                    const Center(
+                      child: Text(
+                        "Terms of Service   •   Privacy Policy",
+                        style: TextStyle(
+                          color: Colors.grey,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
@@ -225,7 +309,6 @@ class _LoginPageState extends State<LoginPage> {
     );
   }
 
-  // Helper widget to build TextFields with built-in validation
   Widget _buildTextField(
     TextEditingController controller,
     String hint,
@@ -236,7 +319,7 @@ class _LoginPageState extends State<LoginPage> {
     return TextFormField(
       controller: controller,
       obscureText: isPassword && !_isPasswordVisible,
-      style: const TextStyle(color: Colors.white),
+      style: const TextStyle(color: Colors.white, fontSize: 14),
       validator: (value) {
         final text = value?.trim() ?? '';
         if (text.isEmpty) {
@@ -248,18 +331,26 @@ class _LoginPageState extends State<LoginPage> {
         if (!isPassword && text.length < 3) {
           return 'Username must be at least 3 characters';
         }
-        return null; // Returning null means no error
+        return null;
       },
       decoration: InputDecoration(
         hintText: hint,
         hintStyle: const TextStyle(color: Colors.white24),
-        prefixIcon: Icon(icon, color: Colors.orange, size: 20),
+        prefixIcon: Icon(icon, color: Colors.white54, size: 18),
         suffixIcon: suffix,
         filled: true,
-        fillColor: const Color(0xFF1E293B),
+        fillColor: const Color(0xFF0F1423),
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide.none,
+          borderRadius: BorderRadius.circular(6),
+          borderSide: const BorderSide(color: Colors.white10),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(6),
+          borderSide: const BorderSide(color: Colors.white10),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(6),
+          borderSide: const BorderSide(color: Colors.orange, width: 1),
         ),
         errorStyle: const TextStyle(color: Colors.redAccent, fontSize: 12),
         contentPadding: const EdgeInsets.symmetric(vertical: 16),

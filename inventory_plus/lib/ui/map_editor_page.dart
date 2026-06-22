@@ -109,27 +109,34 @@ class _MapEditorPageState extends State<MapEditorPage> {
               onPressed: () {
                 showDialog(
                   context: context,
-                  builder: (context) => AlertDialog(
+                  // 1. CHANGE 'context' to 'dialogContext' HERE:
+                  builder: (dialogContext) => AlertDialog(
                     title: const Text("Save Map?"),
                     content: const Text("Are you sure you want to save the current map layout?"),
                     actions: [
                       TextButton(
-                        onPressed: () => Navigator.pop(context),
+                        // 2. USE 'dialogContext' TO CLOSE THE DIALOG:
+                        onPressed: () => Navigator.pop(dialogContext),
                         child: const Text("Cancel"),
                       ),
                       ElevatedButton(
                         style: ElevatedButton.styleFrom(backgroundColor: Colors.blue),
                         onPressed: () async {
-                          Navigator.pop(context);
+                          // 3. USE 'dialogContext' TO CLOSE THE DIALOG
+                          Navigator.pop(dialogContext);
+                          
                           setState(() {
                             _isSaved = true;
                           });
+                          
                           await widget.controller.saveLayout(); 
+                          
+                          // 4. NOW THIS USES THE SAFE, MAIN PAGE CONTEXT:
                           if (mounted) {
                             ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(content: Text("Store layout saved successfully!")),
                             );
-                            Navigator.pop(context);
+                            Navigator.pop(context); // Go back to the previous screen
                           }
                         },
                         child: const Text("Save", style: TextStyle(color: Colors.white)),
@@ -215,21 +222,35 @@ class _MapEditorPageState extends State<MapEditorPage> {
 
   Widget _buildManageToolbar() {
     return Container(
-      padding: const EdgeInsets.all(12),
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
       color: const Color(0xFF1E293B),
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Row(
-          children: [
-            const Text("Drag to map:", style: TextStyle(color: Colors.white70, fontWeight: FontWeight.bold, fontSize: 12)),
-            const SizedBox(width: 16),
-            _buildDraggableTool(ElementType.door, "Door", Colors.green),
-            _buildDraggableTool(ElementType.rack, "Rack", Colors.blue),
-            _buildDraggableTool(ElementType.shelf, "Shelf", Colors.orange),
-            _buildDraggableTool(ElementType.cashier, "Cashier", Colors.purple),
-            _buildDraggableTool(ElementType.pathway, "Path", Colors.grey),
-          ],
-        ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 4.0),
+            child: Text(
+              "Press & hold, then drag to map:", 
+              style: TextStyle(color: Colors.white70, fontWeight: FontWeight.bold, fontSize: 12)
+            ),
+          ),
+          const SizedBox(height: 12),
+          // A single Row with Expanded children forces them to stay on one line
+          Row(
+            children: [
+              Expanded(child: _buildDraggableTool(ElementType.door, "Door", Colors.green)),
+              const SizedBox(width: 4), // Small gap between items
+              Expanded(child: _buildDraggableTool(ElementType.rack, "Rack", Colors.blue)),
+              const SizedBox(width: 4),
+              Expanded(child: _buildDraggableTool(ElementType.shelf, "Shelf", Colors.orange)),
+              const SizedBox(width: 4),
+              Expanded(child: _buildDraggableTool(ElementType.cashier, "Cashier", Colors.purple)),
+              const SizedBox(width: 4),
+              Expanded(child: _buildDraggableTool(ElementType.pathway, "Path", Colors.grey)),
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -245,29 +266,34 @@ class _MapEditorPageState extends State<MapEditorPage> {
       }
     }
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8.0),
-      child: Draggable<ElementType>(
-        data: type,
-        feedback: Material(
-          color: Colors.transparent,
-          child: Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(8)),
-            child: Icon(getIcon(type), color: Colors.white),
-          ),
-        ),
+    return LongPressDraggable<ElementType>(
+      data: type,
+      delay: const Duration(milliseconds: 150), 
+      feedback: Material(
+        color: Colors.transparent,
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-          decoration: BoxDecoration(
-            color: color.withOpacity(0.2),
-            borderRadius: BorderRadius.circular(6),
-            border: Border.all(color: color),
-          ),
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(8)),
+          child: Icon(getIcon(type), color: Colors.white),
+        ),
+      ),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 8),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.2),
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(color: color),
+        ),
+        // FittedBox scales down the contents automatically if the screen gets too narrow!
+        child: FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.center,
           child: Row(
+            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Icon(getIcon(type), size: 14, color: color),
-              const SizedBox(width: 6),
+              const SizedBox(width: 4),
               Text(label, style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.bold)),
             ],
           ),
@@ -275,7 +301,6 @@ class _MapEditorPageState extends State<MapEditorPage> {
       ),
     );
   }
-
   Widget _buildSelectionToolbar() {
     final items = widget.controller.allItems.toList()
       ..sort((a, b) {
