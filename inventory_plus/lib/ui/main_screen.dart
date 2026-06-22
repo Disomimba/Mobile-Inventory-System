@@ -98,6 +98,14 @@ class _MainScreenState extends State<MainScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (widget.controller.currentUserId == null) {
+      return const Scaffold(
+        backgroundColor: Color(0xFF0F172A),
+        body: Center(
+          child: CircularProgressIndicator(color: Colors.orange),
+        ),
+      );
+    }
     // If Mobile is viewing an item, override the main layout
     if (_isDetailView && _selectedItem != null) {
       return ItemDetailPage(

@@ -433,7 +433,7 @@ class _PosCartPageState extends State<PosCartPage> {
                                             MainAxisAlignment.spaceBetween,
                                         children: [
                                           Text(
-                                            "\$${item.price.toStringAsFixed(2)}",
+                                            "\₱${item.price.toStringAsFixed(2)}",
                                             style: const TextStyle(
                                               color: Colors.orange,
                                               fontWeight: FontWeight.bold,
@@ -528,9 +528,10 @@ class _PosCartPageState extends State<PosCartPage> {
                                 padding: const EdgeInsets.symmetric(horizontal: 16.0),
                                 child: Column(
                                   mainAxisAlignment: MainAxisAlignment.center,
+                                  crossAxisAlignment: CrossAxisAlignment.end,
                                   children: [
                                     Text(
-                                      "\$${item.price.toStringAsFixed(2)}",
+                                      "\₱${item.price.toStringAsFixed(2)}",
                                       style: const TextStyle(
                                         color: Colors.orange,
                                         fontWeight: FontWeight.bold,
@@ -650,7 +651,7 @@ class _PosCartPageState extends State<PosCartPage> {
                                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                 children: [
                                   Expanded(child: Text(item.name, style: const TextStyle(fontWeight: FontWeight.w600))),
-                                  Text("\$${(item.price * qty).toStringAsFixed(2)}", style: const TextStyle(color: Colors.orange, fontWeight: FontWeight.bold, fontSize: 16)),
+                                  Text("\₱${(item.price * qty).toStringAsFixed(2)}", style: const TextStyle(color: Colors.orange, fontWeight: FontWeight.bold, fontSize: 16)),
                                 ],
                               ),
                               const SizedBox(height: 12),
@@ -688,7 +689,7 @@ class _PosCartPageState extends State<PosCartPage> {
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     const Text("TOTAL DUE", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.black)),
-                    Text("\$${_calculateTotal().toStringAsFixed(2)}", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 24, color: Colors.black)),
+                    Text("\₱${_calculateTotal().toStringAsFixed(2)}", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 24, color: Colors.black)),
                   ],
                 ),
                 const SizedBox(height: 16),

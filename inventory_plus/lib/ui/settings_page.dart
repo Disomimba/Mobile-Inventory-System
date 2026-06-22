@@ -8,8 +8,9 @@ import '../logic/inventory_controller.dart';
 import 'map_editor_page.dart';
 import 'transaction_history_page.dart';
 import 'staff_management_page.dart';
+import 'profile_info_page.dart'; 
 
-class SettingsPage extends StatelessWidget {
+class SettingsPage extends StatefulWidget {
   final InventoryController controller;
   final String userName;
   final String userId;
@@ -23,11 +24,23 @@ class SettingsPage extends StatelessWidget {
     required this.userRole,
   });
 
-  // RESPONSIVE ROUTING: Opens full screen on Mobile, floating Modal on Desktop
-  void _openResponsivePage(BuildContext context, Widget page) {
+  @override
+  State<SettingsPage> createState() => _SettingsPageState();
+}
+
+class _SettingsPageState extends State<SettingsPage> {
+  late String _currentUserName;
+
+  @override
+  void initState() {
+    super.initState();
+    _currentUserName = widget.userName;
+  }
+
+  Future<dynamic> _openResponsivePage(BuildContext context, Widget page) async {
     final isDesktop = MediaQuery.of(context).size.width >= 600;
     if (isDesktop) {
-      showDialog(
+      return await showDialog(
         context: context,
         builder: (context) => Dialog(
           shape: RoundedRectangleBorder(
@@ -35,14 +48,14 @@ class SettingsPage extends StatelessWidget {
           ),
           clipBehavior: Clip.antiAlias,
           child: SizedBox(
-            width: 800, // Capped width for Desktop Modal
+            width: 800,
             height: 750,
             child: page,
           ),
         ),
       );
     } else {
-      Navigator.push(context, MaterialPageRoute(builder: (context) => page));
+      return await Navigator.push(context, MaterialPageRoute(builder: (context) => page));
     }
   }
 
@@ -52,10 +65,11 @@ class SettingsPage extends StatelessWidget {
       backgroundColor: const Color(0xFFF8FAFC),
       body: ListView(
         children: [
-          _buildProfileHeader(),
+          _buildProfileHeader(context),
           const SizedBox(height: 10),
-
+          
           _buildSectionHeader("WAREHOUSE CONFIGURATION"),
+          
           _buildSettingTile(
             icon: LucideIcons.map,
             color: Colors.blue,
@@ -63,7 +77,7 @@ class SettingsPage extends StatelessWidget {
             subtitle: "Manage racks, shelves, and pathways",
             onTap: () => _openResponsivePage(
               context,
-              MapEditorPage(controller: controller),
+              MapEditorPage(controller: widget.controller),
             ),
           ),
           _buildSettingTile(
@@ -73,7 +87,7 @@ class SettingsPage extends StatelessWidget {
             subtitle: "Export printable PDF of item QR codes",
             onTap: () => _generateAndPrintQRLabels(context),
           ),
-          if (controller.isAdmin) ...[
+          if (widget.controller.isAdmin) ...[
             _buildSectionHeader("ORGANIZATION"),
             const SizedBox(height: 20),
 
@@ -84,7 +98,7 @@ class SettingsPage extends StatelessWidget {
               subtitle: "Create and manage staff accounts",
               onTap: () => _openResponsivePage(
                 context,
-                StaffManagementPage(controller: controller),
+                StaffManagementPage(controller: widget.controller),
               ),
             ),
             _buildSettingTile(
@@ -101,48 +115,13 @@ class SettingsPage extends StatelessWidget {
               subtitle: "View all inventory transactions",
               onTap: () => _openResponsivePage(
                 context,
-                TransactionHistoryPage(controller: controller),
+                TransactionHistoryPage(controller: widget.controller),
               ),
-            ),
-            _buildSettingTile(
-              icon: LucideIcons.trash2,
-              color: Colors.red,
-              title: "Clear Testing Logs",
-              subtitle: "Wipe corrupted transaction history",
-              onTap: () async {
-                final confirm = await showDialog<bool>(
-                  context: context,
-                  builder: (context) => AlertDialog(
-                    title: const Text("Clear Transaction History?"),
-                    content: const Text("This will permanently delete all transaction logs (stock in, checkouts) used during testing. Your actual current inventory quantities will NOT be deleted.\n\nUse this to clean up duplicate logs from previous bugs."),
-                    actions: [
-                      TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("Cancel")),
-                      ElevatedButton(
-                        style: ElevatedButton.styleFrom(backgroundColor: Colors.red), 
-                        onPressed: () => Navigator.pop(context, true), 
-                        child: const Text("Delete All", style: TextStyle(color: Colors.white)),
-                      ),
-                    ],
-                  ),
-                );
-                if (confirm == true) {
-                  await controller.clearTransactionHistory();
-                  if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Testing logs cleared!"), backgroundColor: Colors.green));
-                  }
-                }
-              },
             ),
           ],
 
           const SizedBox(height: 20),
           _buildSectionHeader("ACCOUNT"),
-          _buildSettingTile(
-            icon: LucideIcons.lock,
-            color: Colors.grey,
-            title: "Change Password",
-            onTap: () => _showChangePasswordDialog(context),
-          ),
           _buildSettingTile(
             icon: LucideIcons.logOut,
             color: Colors.redAccent,
@@ -166,42 +145,6 @@ class SettingsPage extends StatelessWidget {
               ),
             ),
           ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildProfileHeader() {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(20, 40, 20, 20),
-      color: Colors.white,
-      child: Row(
-        children: [
-          CircleAvatar(
-            radius: 30,
-            backgroundColor: Colors.orange.withOpacity(0.1),
-            child: const Icon(LucideIcons.user, color: Colors.orange, size: 30),
-          ),
-          const SizedBox(width: 15),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  userName,
-                  style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                Text(
-                  userId,
-                  style: TextStyle(color: Colors.grey[600], fontSize: 13),
-                ),
-              ],
-            ),
-          ),
-          const Icon(LucideIcons.chevronRight, color: Colors.grey, size: 20),
         ],
       ),
     );
@@ -329,7 +272,7 @@ class SettingsPage extends StatelessWidget {
 
   Future<void> _generateAndPrintInventoryReport(
       BuildContext context, String period) async {
-    final items = controller.allItems;
+    final items = widget.controller.allItems;
 
     if (items.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -341,7 +284,6 @@ class SettingsPage extends StatelessWidget {
       return;
     }
 
-    // Show a loading dialog
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -350,31 +292,27 @@ class SettingsPage extends StatelessWidget {
     );
 
     try {
-      // 1. CALCULATE TIME PERIOD CUTOFF
       DateTime now = DateTime.now();
       DateTime cutoffDate;
       if (period == 'Daily') {
-        cutoffDate = DateTime(now.year, now.month, now.day); // Midnight today
+        cutoffDate = DateTime(now.year, now.month, now.day); 
       } else if (period == 'Weekly') {
         cutoffDate = now.subtract(const Duration(days: 7));
       } else {
-        cutoffDate = now.subtract(const Duration(days: 30)); // Monthly
+        cutoffDate = now.subtract(const Duration(days: 30)); 
       }
 
-      // 2. FETCH AND FILTER TRANSACTIONS
-      final allTransactions = await controller.fetchAllTransactionHistory();
+      final allTransactions = await widget.controller.fetchAllTransactionHistory();
       final periodTransactions = allTransactions.where((tx) {
         final txDate = DateTime.parse(tx['created_at']).toLocal();
         return txDate.isAfter(cutoffDate);
       }).toList();
 
-      // Maps to track specific item movements
       Map<String, int> issuedDetails = {};
       Map<String, int> receivedDetails = {};
 
       for (var tx in periodTransactions) {
         final qty = tx['quantity_change'] as int;
-        // Assuming your transaction table saves the product ID as 'product_id'
         final productId = tx['product_id'] as String; 
 
         if (tx['transaction_type'] == 'checkout') {
@@ -384,13 +322,11 @@ class SettingsPage extends StatelessWidget {
         }
       }
 
-      // 3. PREPARE TABLE DATA & CALCULATE TOTALS
       double grandTotalValue = 0;
       int grandTotalItems = 0;
       
       final tableRows = <pw.TableRow>[];
 
-      // Build Table Header
       tableRows.add(
         pw.TableRow(
           decoration: const pw.BoxDecoration(color: PdfColors.grey300),
@@ -404,13 +340,11 @@ class SettingsPage extends StatelessWidget {
         ),
       );
 
-      // Build Table Rows
       for (var item in items) {
         final issued = issuedDetails[item.id] ?? 0;
         final received = receivedDetails[item.id] ?? 0;
         final endingQty = item.quantity;
         
-        // Reverse math to find what the stock was at the beginning of the period
         final beginningQty = endingQty - received + issued; 
         
         final totalValue = endingQty * item.price;
@@ -441,12 +375,10 @@ class SettingsPage extends StatelessWidget {
 
       doc.addPage(
         pw.MultiPage(
-          // CHANGED TO LANDSCAPE TO FIT ALL 8 COLUMNS CLEANLY
           pageFormat: PdfPageFormat.a4.landscape, 
           margin: const pw.EdgeInsets.all(32),
           build: (pw.Context context) {
             return [
-              // --- HEADER ---
               pw.Header(
                 level: 0,
                 child: pw.Row(
@@ -464,7 +396,6 @@ class SettingsPage extends StatelessWidget {
                       crossAxisAlignment: pw.CrossAxisAlignment.end,
                       children: [
                         pw.Text('Date Generated: ${now.toString().split(' ')[0]}', style: const pw.TextStyle(fontSize: 10)),
-                        pw.Text('Prepared By: $userName', style: const pw.TextStyle(fontSize: 10)),
                       ]
                     )
                   ],
@@ -472,18 +403,17 @@ class SettingsPage extends StatelessWidget {
               ),
               pw.SizedBox(height: 20),
 
-              // --- ENTERPRISE DATA TABLE ---
               pw.Table(
                 border: pw.TableBorder.all(color: PdfColors.grey400),
                 columnWidths: {
-                  0: const pw.FlexColumnWidth(2), // Code
-                  1: const pw.FlexColumnWidth(4), // Name
-                  2: const pw.FlexColumnWidth(1.5), // Beginning
-                  3: const pw.FlexColumnWidth(1.5), // Received
-                  4: const pw.FlexColumnWidth(1.5), // Issued
-                  5: const pw.FlexColumnWidth(1.5), // Ending
-                  6: const pw.FlexColumnWidth(1.5), // Cost
-                  7: const pw.FlexColumnWidth(2), // Total
+                  0: const pw.FlexColumnWidth(2), 
+                  1: const pw.FlexColumnWidth(4), 
+                  2: const pw.FlexColumnWidth(1.5), 
+                  3: const pw.FlexColumnWidth(1.5), 
+                  4: const pw.FlexColumnWidth(1.5), 
+                  5: const pw.FlexColumnWidth(1.5), 
+                  6: const pw.FlexColumnWidth(1.5), 
+                  7: const pw.FlexColumnWidth(2), 
                 },
                 children: tableRows,
               ),
@@ -491,7 +421,6 @@ class SettingsPage extends StatelessWidget {
               pw.Divider(),
               pw.SizedBox(height: 10),
               
-              // --- FOOTER TOTALS ---
               pw.Row(
                 mainAxisAlignment: pw.MainAxisAlignment.end,
                 children: [
@@ -534,166 +463,8 @@ class SettingsPage extends StatelessWidget {
     }
   }
 
-  void _showChangePasswordDialog(BuildContext context) {
-    final currentPasswordController = TextEditingController();
-    final newPasswordController = TextEditingController();
-    final confirmPasswordController = TextEditingController();
-    bool obscureText = true;
-    bool isSaving = false;
-    String? errorMessage;
-
-    showDialog(
-      context: context,
-      builder: (dialogContext) {
-        return StatefulBuilder(
-          builder: (stateContext, setState) {
-            return AlertDialog(
-              title: const Text("Change Password"),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-              content: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (errorMessage != null)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 12),
-                        child: Text(
-                          errorMessage!,
-                          style: const TextStyle(
-                            color: Colors.redAccent,
-                            fontSize: 13,
-                          ),
-                        ),
-                      ),
-                    TextField(
-                      controller: currentPasswordController,
-                      obscureText: obscureText,
-                      decoration: const InputDecoration(
-                        labelText: "Current Password",
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: newPasswordController,
-                      obscureText: obscureText,
-                      decoration: const InputDecoration(
-                        labelText: "New Password",
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: confirmPasswordController,
-                      obscureText: obscureText,
-                      decoration: InputDecoration(
-                        labelText: "Confirm Password",
-                        border: const OutlineInputBorder(),
-                        suffixIcon: IconButton(
-                          icon: Icon(
-                            obscureText ? LucideIcons.eye : LucideIcons.eyeOff,
-                            color: Colors.grey,
-                          ),
-                          onPressed: () {
-                            setState(() {
-                              obscureText = !obscureText;
-                            });
-                          },
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text("Cancel"),
-                ),
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.blue,
-                    foregroundColor: Colors.white,
-                  ),
-                  onPressed: isSaving
-                      ? null
-                      : () async {
-                          if (currentPasswordController.text.isEmpty ||
-                              newPasswordController.text.isEmpty ||
-                              confirmPasswordController.text.isEmpty) {
-                            setState(
-                              () => errorMessage = "Please fill in all fields.",
-                            );
-                            return;
-                          }
-                          if (newPasswordController.text.trim().length <= 6) {
-                            setState(
-                              () => errorMessage =
-                                  "Password must be more than 6 characters.",
-                            );
-                            return;
-                          }
-                          if (newPasswordController.text !=
-                              confirmPasswordController.text) {
-                            setState(
-                              () =>
-                                  errorMessage = "New passwords do not match.",
-                            );
-                            return;
-                          }
-
-                          setState(() {
-                            isSaving = true;
-                            errorMessage = null;
-                          });
-
-                          final error = await controller.changePassword(
-                            currentPasswordController.text,
-                            newPasswordController.text,
-                          );
-
-                          if (error != null) {
-                            setState(() {
-                              errorMessage = error;
-                              isSaving = false;
-                            });
-                          } else {
-                            if (context.mounted) {
-                              Navigator.pop(context);
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text(
-                                    "Password changed successfully!",
-                                  ),
-                                  backgroundColor: Colors.green,
-                                ),
-                              );
-                            }
-                          }
-                        },
-                  child: isSaving
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(
-                            color: Colors.white,
-                            strokeWidth: 2,
-                          ),
-                        )
-                      : const Text("Save"),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
-  }
-
   Future<void> _generateAndPrintQRLabels(BuildContext context) async {
-    final items = controller.allItems;
+    final items = widget.controller.allItems;
 
     if (items.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -705,7 +476,6 @@ class SettingsPage extends StatelessWidget {
       return;
     }
 
-    // Show a loading dialog
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -717,7 +487,6 @@ class SettingsPage extends StatelessWidget {
       final doc = pw.Document();
       const int itemsPerPage = 6;
 
-      // Group items into chunks of 6 per page
       for (var i = 0; i < items.length; i += itemsPerPage) {
         final chunk = items.skip(i).take(itemsPerPage).toList();
 
@@ -731,8 +500,8 @@ class SettingsPage extends StatelessWidget {
                 runSpacing: 20,
                 children: chunk.map((item) {
                   return pw.Container(
-                    width: 240, // Keeps it to exactly 2 columns wide on A4
-                    height: 240, // Keeps it to exactly 3 rows high on A4
+                    width: 240, 
+                    height: 240, 
                     padding: const pw.EdgeInsets.all(12),
                     decoration: pw.BoxDecoration(
                       border: pw.Border.all(color: PdfColors.grey, width: 2),
@@ -762,8 +531,7 @@ class SettingsPage extends StatelessWidget {
                         pw.Expanded(
                           child: pw.BarcodeWidget(
                             barcode: pw.Barcode.qrCode(),
-                            data: item
-                                .sku, // Generates QR Code based on item's SKU
+                            data: item.sku, 
                             drawText: false,
                           ),
                         ),
@@ -787,19 +555,15 @@ class SettingsPage extends StatelessWidget {
 
       final bytes = await doc.save();
 
-      // Close the loading dialog
       if (context.mounted) Navigator.pop(context);
 
-      // Download or share the PDF instead of opening the print preview
       await Printing.sharePdf(
         bytes: bytes,
         filename: 'Inventory_QR_Labels.pdf',
       );
     } catch (e) {
       if (context.mounted) {
-        Navigator.pop(
-          context,
-        ); // Make sure to hide the loading dialog if an error occurs
+        Navigator.pop(context); 
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text("Error generating PDF: $e"),
@@ -809,4 +573,61 @@ class SettingsPage extends StatelessWidget {
       }
     }
   }
-}
+  
+  Widget _buildProfileHeader(BuildContext context) {
+    return Material(
+      color: Colors.white,
+      child: InkWell(
+        onTap: () async {
+          final updatedName = await _openResponsivePage(
+            context,
+            ProfileInfoPage(
+              controller: widget.controller,
+              currentName: _currentUserName, 
+              currentEmail: widget.controller.loggedInUserEmail,
+              userId: widget.userId,
+              role: widget.userRole,
+            ),
+          );
+
+          if (updatedName != null && updatedName is String && mounted) {
+            setState(() {
+              _currentUserName = updatedName;
+            });
+          }
+        },
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(20, 40, 20, 20),
+          child: Row(
+            children: [
+              CircleAvatar(
+                radius: 30,
+                backgroundColor: Colors.orange.withOpacity(0.1),
+                child: const Icon(LucideIcons.user, color: Colors.orange, size: 30),
+              ),
+              const SizedBox(width: 15),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _currentUserName, 
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    Text(
+                      widget.userId,
+                      style: TextStyle(color: Colors.grey[600], fontSize: 13),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+} 

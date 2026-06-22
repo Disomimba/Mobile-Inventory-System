@@ -41,4 +41,20 @@ class AuthService {
       return null;
     }
   }
+  Future<bool> adminResetPassword(String targetUserId, String newPassword) async {
+    try {
+      // Hash the new password using your existing method
+      final hashedNewPassword = _hashPassword(newPassword);
+      
+      await _supabase
+          .from('profiles')
+          .update({'password': hashedNewPassword})
+          .eq('id', targetUserId);
+          
+      return true; // Success
+    } catch (e) {
+      print("Admin Reset Error: $e");
+      return false; // Failed
+    }
+  }
 }

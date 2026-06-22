@@ -7,14 +7,14 @@ import '../data/inventory.dart';
 
 class InventoryController {
   final SupabaseClient supabase = Supabase.instance.client;
-
+  int? currentUserNumericId; 
   List<MapElement> storeLayout = [];
   List<InventoryItem> _items = [];
   String? activeLocationId;
   String? currentUserRole;
   String? currentUserName;
   String? currentUserId;
-
+  String? loggedInUserEmail;
   bool get isAdmin => currentUserRole?.toLowerCase() == 'admin';
 
   List<InventoryItem> get allItems => _items;
@@ -23,10 +23,13 @@ class InventoryController {
     required String name,
     required String id,
     required String role,
+    String? email,
   }) {
     currentUserName = name;
     currentUserId = id;
     currentUserRole = role;
+  currentUserNumericId = int.tryParse(id);
+  loggedInUserEmail = email; 
   }
 
   // Helper method to hash the password using SHA-256
@@ -59,9 +62,7 @@ class InventoryController {
         storeLayout = layoutJson.map((el) => MapElement.fromJson(el)).toList();
       }
 
-      print("Store Data Sync Complete: $userLocationId");
     } catch (e) {
-      print("Error loading store data: $e");
       _items = [];
       storeLayout = [];
     }
@@ -81,7 +82,6 @@ class InventoryController {
           .update({'layout_data': jsonDecode(encodedData)})
           .eq('id', locId);
 
-      print("Layout saved to Supabase.");
     } catch (e) {
       print("Error saving layout: $e");
     }
@@ -145,10 +145,6 @@ class InventoryController {
     final userName = currentUserName ?? 'Unknown User';
 
     if (locId == null || userId == null) return;
-
-    print("--- DEBUG TRANSACTION LOG ---");
-    print("productId: $productId | locId: $locId | userId: $userId");
-
     try {
       final Map<String, dynamic> insertData = {
         'product_id': productId,
@@ -719,11 +715,6 @@ class InventoryController {
   Future<void> createCustomerOrder(List<CustomerOrderItem> items) async {
   final locId = activeLocationId;
   
-  print("=== CREATE ORDER DEBUG ===");
-  print("locId: $locId");
-  print("items count: ${items.length}");
-  print("items: ${items.map((i) => i.toJson()).toList()}");
-  
   if (locId == null) {
     print("ERROR: locId is null, aborting!");
     return;
@@ -734,7 +725,7 @@ class InventoryController {
       'location_id': locId,
       'status': 'pending',
       'items': items.map((i) => i.toJson()).toList(),
-      'created_by': int.tryParse(currentUserId ?? ''),
+      'created_by': currentUserNumericId, // INSTEAD OF int.tryParse(currentUserId ?? '')
     }).select(); // ADD .select() so it returns the inserted row
     
     print("SUCCESS: Order inserted: $result");
@@ -759,7 +750,7 @@ class InventoryController {
   try {
     final Map<String, dynamic> updateData = {'status': newStatus};
     if (newStatus == 'prepared') {
-  updateData['prepared_by'] = int.tryParse(currentUserId ?? '');
+      updateData['prepared_by'] = currentUserNumericId; 
 }
     await supabase.from('orders').update(updateData).eq('id', orderId);
   } catch (e) {
@@ -797,6 +788,32 @@ class InventoryController {
       print("Error completing order and deducting stock: $e");
     } finally {
       _processingOrders!.remove(order.id);
+    }
+    
+  }
+  Future<void> updateProfile({
+    required String userId,
+    required String name,
+    required String email,
+  }) async {
+    try {
+      final updateData = {
+        'name': name,
+        'email': email.isEmpty ? null : email, 
+      };
+
+      await Supabase.instance.client
+          .from('profiles')
+          .update(updateData)
+          .eq('id', userId);
+
+      // CRITICAL: Update the active memory so the app remembers the new data 
+      // without forcing the user to log out and log back in!
+      loggedInUserEmail = email; 
+
+
+    } catch (e) {
+      throw Exception("Failed to save changes to the database."); 
     }
   }
 }

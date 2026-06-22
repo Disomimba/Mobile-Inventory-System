@@ -45,6 +45,7 @@ class _LoginPageState extends State<LoginPage> {
           name: userProfile['name'] ?? username,
           id: userId,
           role: userProfile['role'] ?? 'staff',
+          email: userProfile['email'],
         );
 
         if (assignedLocationId != null && assignedLocationId.isNotEmpty) {
@@ -72,6 +73,41 @@ class _LoginPageState extends State<LoginPage> {
   void _showError(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(message), backgroundColor: Colors.redAccent),
+    );
+  }
+  void _showForgotPasswordDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF151D2E),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(8),
+          side: const BorderSide(color: Colors.white10),
+        ),
+        title: const Row(
+          children: [
+            Icon(LucideIcons.shieldAlert, color: Colors.orange, size: 24),
+            SizedBox(width: 12),
+            Text(
+              "Account Recovery", 
+              style: TextStyle(color: Colors.white, fontSize: 18),
+            ),
+          ],
+        ),
+        content: const Text(
+          "For security purposes, self-service password resets are disabled for operator accounts.\n\nPlease contact your System Administrator or Manager to have your password reset.",
+          style: TextStyle(color: Colors.grey, height: 1.5, fontSize: 14),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text(
+              "Understood", 
+              style: TextStyle(color: Colors.orange, fontWeight: FontWeight.bold),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -188,26 +224,25 @@ class _LoginPageState extends State<LoginPage> {
                     const SizedBox(height: 12),
 
                     // Forgot Credentials only
-                    Align(
-                      alignment: Alignment.centerRight,
-                      child: TextButton(
-                        onPressed: () {
-                          // Handle forgot credentials
-                        },
-                        style: TextButton.styleFrom(
-                          padding: EdgeInsets.zero,
-                          minimumSize: Size.zero,
-                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        ),
-                        child: const Text(
-                          "Forgot credentials?",
-                          style: TextStyle(
-                            color: Colors.orange,
-                            fontSize: 12,
-                          ),
-                        ),
-                      ),
-                    ),
+                    // Forgot Credentials only
+Align(
+  alignment: Alignment.centerRight,
+  child: TextButton(
+    onPressed: () => _showForgotPasswordDialog(context), // <-- Update this line
+    style: TextButton.styleFrom(
+      padding: EdgeInsets.zero,
+      minimumSize: Size.zero,
+      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+    ),
+    child: const Text(
+      "Forgot credentials?",
+      style: TextStyle(
+        color: Colors.orange,
+        fontSize: 12,
+      ),
+    ),
+  ),
+),
 
                     const SizedBox(height: 24),
 

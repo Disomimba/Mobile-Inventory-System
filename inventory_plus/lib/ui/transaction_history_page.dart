@@ -36,6 +36,31 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
           .eq('location_id', locId)
           .order('created_at', ascending: false);
 
+      // Collect all unique user IDs (both cashier and helper)
+      final allUserIds = orders
+          .expand((o) {
+            final createdBy = o['created_by'];
+            final preparedBy = o['prepared_by'];
+            // prepared_by is stored as text, parse to int to match profiles.id (bigint)
+            final preparedByInt = preparedBy != null ? int.tryParse(preparedBy.toString()) : null;
+            return [createdBy, preparedByInt];
+          })
+          .where((id) => id != null)
+          .toSet()
+          .toList();
+
+      // Single batch fetch for all names
+      Map<dynamic, String> profileNames = {};
+      if (allUserIds.isNotEmpty) {
+        final profiles = await widget.controller.supabase
+            .from('profiles')
+            .select('id, name')
+            .inFilter('id', allUserIds);
+        for (final p in profiles) {
+          profileNames[p['id']] = p['name']?.toString() ?? '—';
+        }
+      }
+
       final List<_OrderGroup> groups = [];
 
       for (final order in orders) {
@@ -51,8 +76,12 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
           status: status,
           createdAt: createdAt,
           items: items,
-          createdBy: order['created_by']?.toString(),
-          preparedBy: order['prepared_by']?.toString(),
+          createdBy: order['created_by'] != null
+              ? profileNames[order['created_by']]
+              : null,
+          preparedBy: order['prepared_by'] != null
+              ? profileNames[int.tryParse(order['prepared_by'].toString())]
+              : null,
         ));
       }
 
