@@ -59,6 +59,8 @@ class _OrderQueuePageState extends State<OrderQueuePage> {
           final orders = snapshot.data ?? [];
           final pendingOrders = orders.where((o) => o.status == 'pending').toList();
 
+          pendingOrders.sort((a, b) => a.createdAt.compareTo(b.createdAt));
+
           return Padding(
             padding: const EdgeInsets.all(16.0),
             child: Column(
@@ -106,17 +108,7 @@ class _OrderQueuePageState extends State<OrderQueuePage> {
                                             '#ORD-$shortId',
                                             style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.black87),
                                           ),
-                                          if (index == 0) ...[
-                                            const SizedBox(width: 8),
-                                            Container(
-                                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                              decoration: BoxDecoration(
-                                                color: const Color(0xFF9E651D),
-                                                borderRadius: BorderRadius.circular(4),
-                                              ),
-                                              child: const Text('URGENT', style: TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold)),
-                                            ),
-                                          ]
+                                          
                                         ],
                                       ),
                                       const SizedBox(height: 8),
