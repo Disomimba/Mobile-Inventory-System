@@ -38,6 +38,11 @@ class _VisualSearchPageState extends State<VisualSearchPage> {
   }
 
   Future<void> _initializeCamera() async {
+    // Dispose old controller first to avoid resource leaks / black screen
+    final oldController = _cameraController;
+    _cameraController = null;
+    await oldController?.dispose();
+
     try {
       _cameras = await availableCameras();
       if (_cameras.isNotEmpty) {
@@ -109,7 +114,7 @@ class _VisualSearchPageState extends State<VisualSearchPage> {
       final XFile imageFile = await _cameraController!.takePicture();
       var request = http.MultipartRequest(
         'POST',
-        Uri.parse('http://127.0.0.1:8000/analyze-frame'),
+        Uri.parse('https://inventory-object-scanner.up.railway.app/analyze-frame'),
       );
       final imageBytes = await imageFile.readAsBytes();
       request.files.add(
@@ -192,7 +197,8 @@ class _VisualSearchPageState extends State<VisualSearchPage> {
     } catch (e) {
       debugPrint("Network Error: $e");
     } finally {
-      if (mounted && _scannedItem == null && !_isLiveMode) {
+      // Always clear the spinner — don't gate on _scannedItem state
+      if (mounted) {
         setState(() => _isProcessing = false);
       }
     }
@@ -200,6 +206,8 @@ class _VisualSearchPageState extends State<VisualSearchPage> {
 
   void _resetScanner() {
     setState(() => _scannedItem = null);
+    // Re-initialize the camera so the preview is fresh after takePicture() stalled it
+    _initializeCamera();
   }
 
   @override
@@ -290,7 +298,7 @@ class _VisualSearchPageState extends State<VisualSearchPage> {
               ),
               const SizedBox(height: 8),
               Text(
-                "Scanning for wrenches, hammers, and screwdrivers",
+                "Point camera at a single object to classify",
                 style: TextStyle(
                   color: Colors.white.withOpacity(0.9),
                   fontSize: 13,

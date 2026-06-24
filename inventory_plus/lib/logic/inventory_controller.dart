@@ -7,7 +7,7 @@ import '../data/inventory.dart';
 
 class InventoryController {
   final SupabaseClient supabase = Supabase.instance.client;
-  int? currentUserNumericId; 
+  int? currentUserNumericId;
   List<MapElement> storeLayout = [];
   List<InventoryItem> _items = [];
   String? activeLocationId;
@@ -28,8 +28,8 @@ class InventoryController {
     currentUserName = name;
     currentUserId = id;
     currentUserRole = role;
-  currentUserNumericId = int.tryParse(id);
-  loggedInUserEmail = email; 
+    currentUserNumericId = int.tryParse(id);
+    loggedInUserEmail = email;
   }
 
   // Helper method to hash the password using SHA-256
@@ -61,7 +61,6 @@ class InventoryController {
         final List<dynamic> layoutJson = locationResponse['layout_data'];
         storeLayout = layoutJson.map((el) => MapElement.fromJson(el)).toList();
       }
-
     } catch (e) {
       _items = [];
       storeLayout = [];
@@ -81,7 +80,6 @@ class InventoryController {
           .from('locations')
           .update({'layout_data': jsonDecode(encodedData)})
           .eq('id', locId);
-
     } catch (e) {
       print("Error saving layout: $e");
     }
@@ -105,8 +103,8 @@ class InventoryController {
             'product_quantity': newItem.quantity,
             'description': newItem.description,
             'image_url': newItem.imageUrl,
-            'location_id': locId, 
-            'map_element_id': newItem.locationId, 
+            'location_id': locId,
+            'map_element_id': newItem.locationId,
             'manufacturer': newItem.manufacturer,
             'model': newItem.model,
             'product_size': newItem.productSize,
@@ -114,7 +112,7 @@ class InventoryController {
             'bin_number': newItem.binNumber,
           })
           .select()
-          .single(); 
+          .single();
 
       final savedItem = InventoryItem.fromSupabase(response);
 
@@ -167,10 +165,12 @@ class InventoryController {
     try {
       // Generate a unique path to prevent overwriting images with the same name
       final path = 'public/${DateTime.now().millisecondsSinceEpoch}_$fileName';
-      
+
       await supabase.storage.from('product_images').upload(path, imageFile);
-      
-      final imageUrl = supabase.storage.from('product_images').getPublicUrl(path);
+
+      final imageUrl = supabase.storage
+          .from('product_images')
+          .getPublicUrl(path);
       return imageUrl;
     } catch (e) {
       print("Error uploading image: $e");
@@ -179,13 +179,20 @@ class InventoryController {
   }
 
   // Uploads an image from bytes (Required for Flutter Web)
-  Future<String?> uploadImageBytes(Uint8List imageBytes, String fileName) async {
+  Future<String?> uploadImageBytes(
+    Uint8List imageBytes,
+    String fileName,
+  ) async {
     try {
       final path = 'public/${DateTime.now().millisecondsSinceEpoch}_$fileName';
-      
-      await supabase.storage.from('product_images').uploadBinary(path, imageBytes);
-      
-      final imageUrl = supabase.storage.from('product_images').getPublicUrl(path);
+
+      await supabase.storage
+          .from('product_images')
+          .uploadBinary(path, imageBytes);
+
+      final imageUrl = supabase.storage
+          .from('product_images')
+          .getPublicUrl(path);
       return imageUrl;
     } catch (e) {
       print("Error uploading image bytes: $e");
@@ -227,8 +234,7 @@ class InventoryController {
             'shelf_level': updatedItem.shelfLevel,
             'bin_number': updatedItem.binNumber,
             'image_url': updatedItem.imageUrl,
-            'map_element_id':
-                updatedItem.locationId, 
+            'map_element_id': updatedItem.locationId,
           })
           .eq('id', updatedItem.id);
     } catch (e) {
@@ -245,7 +251,8 @@ class InventoryController {
         final itemToDelete = _items[index];
         _items.removeAt(index);
         await _logTransaction(
-          productId: null, // Null to prevent Foreign Key constraint error on cascade delete
+          productId:
+              null, // Null to prevent Foreign Key constraint error on cascade delete
           type: 'delete',
           quantityChange: -itemToDelete.quantity,
           newQuantity: 0,
@@ -293,7 +300,9 @@ class InventoryController {
       storeLayout.removeWhere((item) => item.id == elementId);
 
       // Unassign all items that were assigned to this element
-      final itemsToUnassign = _items.where((item) => item.locationId == elementId).toList();
+      final itemsToUnassign = _items
+          .where((item) => item.locationId == elementId)
+          .toList();
       for (var item in itemsToUnassign) {
         await assignItemToLocation(item.id, null);
       }
@@ -307,7 +316,9 @@ class InventoryController {
       storeLayout.clear();
 
       // Unassign all items that have a locationId
-      final itemsToUnassign = _items.where((item) => item.locationId != null).toList();
+      final itemsToUnassign = _items
+          .where((item) => item.locationId != null)
+          .toList();
       for (var item in itemsToUnassign) {
         await assignItemToLocation(item.id, null);
       }
@@ -327,17 +338,19 @@ class InventoryController {
       await supabase
           .from('products')
           .update({
-            // NOTE: You may need to add 'aisle' and 'section' columns to your Supabase table if you want to save them!
             // 'aisle': aisle,
             'shelf_level': shelf.toString(),
             // 'section': section,
-            'bin_number': layer, // Using bin_number to store the layer in this example
+            'bin_number': layer,
           })
           .eq('id', itemId);
 
       final index = _items.indexWhere((item) => item.id == itemId);
       if (index != -1) {
-        _items[index] = _items[index].copyWith(shelfLevel: shelf.toString(), binNumber: layer);
+        _items[index] = _items[index].copyWith(
+          shelfLevel: shelf.toString(),
+          binNumber: layer,
+        );
       }
     } catch (e) {
       print("Error updating location details: $e");
@@ -355,11 +368,12 @@ class InventoryController {
       final matchesSearch =
           item.name.toLowerCase().contains(query.toLowerCase()) ||
           item.sku.toLowerCase().contains(query.toLowerCase());
-      
-      final matchesCategory = category == 'All' || 
+
+      final matchesCategory =
+          category == 'All' ||
           (category == 'Unassigned' && item.locationId == null) ||
           item.category == category;
-          
+
       return matchesSearch && matchesCategory;
     }).toList();
 
@@ -530,7 +544,10 @@ class InventoryController {
     }
   }
 
-  Future<String?> changePassword(String currentPassword, String newPassword) async {
+  Future<String?> changePassword(
+    String currentPassword,
+    String newPassword,
+  ) async {
     if (currentUserId == null) return "User not logged in.";
     try {
       final hashedCurrentPassword = _hashPassword(currentPassword);
@@ -548,15 +565,20 @@ class InventoryController {
       }
 
       // Update to new password
-      await supabase.from('profiles').update({'password': hashedNewPassword}).eq('id', currentUserId!);
-      return null; // Returns null upon success
+      await supabase
+          .from('profiles')
+          .update({'password': hashedNewPassword})
+          .eq('id', currentUserId!);
+      return null;
     } catch (e) {
       print("Error changing password: $e");
       return "An error occurred while changing the password.";
     }
   }
 
-  Future<List<Map<String, dynamic>>> fetchTransactionHistory(String productId) async {
+  Future<List<Map<String, dynamic>>> fetchTransactionHistory(
+    String productId,
+  ) async {
     try {
       final response = await supabase
           .from('transaction_history')
@@ -590,8 +612,10 @@ class InventoryController {
     final locId = activeLocationId;
     if (locId == null) return;
     try {
-      // Wipes old/dirty transaction logs used during testing
-      await supabase.from('transaction_history').delete().eq('location_id', locId);
+      await supabase
+          .from('transaction_history')
+          .delete()
+          .eq('location_id', locId);
     } catch (e) {
       print("Error clearing transaction history: $e");
     }
@@ -601,15 +625,17 @@ class InventoryController {
   // AI ANALYTICS & FORECASTING ENGINE
   // ==========================================
 
-  /// Analyzes transaction history to generate actionable AI stock recommendations and demand forecasts.
-  /// 1. AI Demand Forecasting -> Calculates "Predicted Stockout Date" based on sales velocity.
-  /// 2. AI Stock Recommendation -> Classifies items (Fast/Slow/Dead) and calculates dynamic reorder points.
-  Future<List<Map<String, dynamic>>> generateInventoryAnalytics({int days = 30, int leadTimeDays = 7}) async {
+  Future<List<Map<String, dynamic>>> generateInventoryAnalytics({
+    int days = 30,
+    int leadTimeDays = 7,
+  }) async {
     final locId = activeLocationId;
     if (locId == null) return [];
 
     try {
-      final cutoffDate = DateTime.now().subtract(Duration(days: days)).toIso8601String();
+      final cutoffDate = DateTime.now()
+          .subtract(Duration(days: days))
+          .toIso8601String();
 
       // Fetch checkout transactions in the past `days` to calculate velocity
       final response = await supabase
@@ -626,7 +652,6 @@ class InventoryController {
       for (var tx in transactions) {
         final String? pId = tx['product_id'];
         if (pId != null) {
-          // 'checkout' transactions log negative quantity changes, use absolute value
           final int qty = (tx['quantity_change'] as num).abs().toInt();
           salesData[pId] = (salesData[pId] ?? 0) + qty;
         }
@@ -637,8 +662,7 @@ class InventoryController {
       for (var item in _items) {
         final totalSold = salesData[item.id] ?? 0;
         final dailySalesVelocity = totalSold / days;
-        
-        // SOLUTION 2: AI Stock Recommendation (Classify based on velocity to solve Overstocking)
+
         String classification;
         if (totalSold == 0) {
           classification = 'Dead Stock';
@@ -648,7 +672,6 @@ class InventoryController {
           classification = 'Slow-Moving';
         }
 
-        // SOLUTION 1: AI Demand Forecasting (Predict Stockout Date to solve Delayed Procurement)
         int daysUntilStockout = -1;
         DateTime? stockoutDate;
         if (dailySalesVelocity > 0) {
@@ -656,21 +679,21 @@ class InventoryController {
           stockoutDate = DateTime.now().add(Duration(days: daysUntilStockout));
         }
 
-        // Dynamic Reorder Math (Calculates exact safety stock & prevents stockouts)
         int safetyStock = 0;
         int reorderPoint = 0;
         int optimalReorderQuantity = 0;
 
         if (classification == 'Fast-Moving') {
-          safetyStock = (leadTimeDays * dailySalesVelocity * 1.5).ceil(); // Increased safety buffer
-          reorderPoint = (leadTimeDays * dailySalesVelocity).ceil() + safetyStock;
-          optimalReorderQuantity = (dailySalesVelocity * 30).ceil(); // Restock 30 days worth
+          safetyStock = (leadTimeDays * dailySalesVelocity * 1.5).ceil();
+          reorderPoint =
+              (leadTimeDays * dailySalesVelocity).ceil() + safetyStock;
+          optimalReorderQuantity = (dailySalesVelocity * 30).ceil();
         } else if (classification == 'Slow-Moving') {
-          safetyStock = (leadTimeDays * dailySalesVelocity * 1.0).ceil(); // Standard safety buffer
-          reorderPoint = (leadTimeDays * dailySalesVelocity).ceil() + safetyStock;
-          optimalReorderQuantity = (dailySalesVelocity * 15).ceil(); // Restock only 15 days worth to prevent tied capital
+          safetyStock = (leadTimeDays * dailySalesVelocity * 1.0).ceil();
+          reorderPoint =
+              (leadTimeDays * dailySalesVelocity).ceil() + safetyStock;
+          optimalReorderQuantity = (dailySalesVelocity * 15).ceil();
         } else {
-          // Dead Stock: Restrict reordering to prevent overstocking
           safetyStock = 0;
           reorderPoint = 0;
           optimalReorderQuantity = 0;
@@ -686,22 +709,23 @@ class InventoryController {
           'safetyStock': safetyStock,
           'reorderPoint': reorderPoint,
           'optimalReorderQuantity': optimalReorderQuantity,
-          'needsReorder': item.quantity <= reorderPoint && classification != 'Dead Stock',
+          'needsReorder':
+              item.quantity <= reorderPoint && classification != 'Dead Stock',
         });
       }
 
-      // Sort by urgency: Items needing reorder first, then by days until stockout
       analyticsList.sort((a, b) {
         if (a['needsReorder'] && !b['needsReorder']) return -1;
         if (!a['needsReorder'] && b['needsReorder']) return 1;
         if (a['daysUntilStockout'] != -1 && b['daysUntilStockout'] != -1) {
-          return (a['daysUntilStockout'] as int).compareTo(b['daysUntilStockout'] as int);
+          return (a['daysUntilStockout'] as int).compareTo(
+            b['daysUntilStockout'] as int,
+          );
         }
         return 0;
       });
 
       return analyticsList;
-
     } catch (e) {
       print("Error generating inventory analytics: $e");
       return [];
@@ -713,26 +737,41 @@ class InventoryController {
   // ==========================================
 
   Future<void> createCustomerOrder(List<CustomerOrderItem> items) async {
-  final locId = activeLocationId;
-  
-  if (locId == null) {
-    print("ERROR: locId is null, aborting!");
-    return;
+    final locId = activeLocationId;
+
+    if (locId == null) {
+      print("ERROR: locId is null, aborting!");
+      return;
+    }
+
+    try {
+      // 1. Insert the order into the database
+      final result = await supabase.from('orders').insert({
+        'location_id': locId,
+        'status': 'pending',
+        'items': items.map((i) => i.toJson()).toList(),
+        'created_by': currentUserNumericId,
+      }).select();
+
+      print("SUCCESS: Order inserted: $result");
+
+      // 2. DEDUCT STOCK IMMEDIATELY (Reserve it)
+      // This prevents double booking by updating the inventory instantly for all users
+      for (var orderItem in items) {
+        final index = _items.indexWhere((i) => i.id == orderItem.productId);
+        if (index != -1) {
+          final currentItem = _items[index];
+          final updatedItem = calculateCheckout(
+            currentItem,
+            orderItem.quantity,
+          );
+          await updateItem(updatedItem);
+        }
+      }
+    } catch (e) {
+      print("ERROR inserting order: $e");
+    }
   }
-  
-  try {
-    final result = await supabase.from('orders').insert({
-      'location_id': locId,
-      'status': 'pending',
-      'items': items.map((i) => i.toJson()).toList(),
-      'created_by': currentUserNumericId, // INSTEAD OF int.tryParse(currentUserId ?? '')
-    }).select(); // ADD .select() so it returns the inserted row
-    
-    print("SUCCESS: Order inserted: $result");
-  } catch (e) {
-    print("ERROR inserting order: $e");
-  }
-}
 
   Stream<List<CustomerOrder>> streamOrders() {
     final locId = activeLocationId;
@@ -743,77 +782,66 @@ class InventoryController {
         .stream(primaryKey: ['id'])
         .eq('location_id', locId)
         .order('created_at', ascending: false)
-        .map((list) => list.map((item) => CustomerOrder.fromSupabase(item)).toList());
+        .map(
+          (list) =>
+              list.map((item) => CustomerOrder.fromSupabase(item)).toList(),
+        );
   }
 
   Future<void> updateOrderStatus(String orderId, String newStatus) async {
-  try {
-    final Map<String, dynamic> updateData = {'status': newStatus};
-    if (newStatus == 'prepared') {
-      updateData['prepared_by'] = currentUserNumericId; 
-}
-    await supabase.from('orders').update(updateData).eq('id', orderId);
-  } catch (e) {
-    print("Error updating order status: $e");
+    try {
+      final Map<String, dynamic> updateData = {'status': newStatus};
+      if (newStatus == 'prepared') {
+        updateData['prepared_by'] = currentUserNumericId;
+      }
+      await supabase.from('orders').update(updateData).eq('id', orderId);
+    } catch (e) {
+      print("Error updating order status: $e");
+    }
   }
-}
 
-  // Prevent duplicate concurrent processing of the same order
   Set<String>? _processingOrders;
 
   Future<void> completeOrder(CustomerOrder order) async {
-    // Lazy initialization to survive Hot Reloads
     _processingOrders ??= {};
     if (_processingOrders!.contains(order.id)) return;
     _processingOrders!.add(order.id);
 
     try {
-      // 0. Double-check order status on the server to prevent double-deduction
-      final checkOrder = await supabase.from('orders').select('status').eq('id', order.id).single();
+      // 0. Double-check order status to prevent unnecessary updates
+      final checkOrder = await supabase
+          .from('orders')
+          .select('status')
+          .eq('id', order.id)
+          .single();
       if (checkOrder['status'] == 'completed') return;
 
-      // 1. Update order status to completed
+      // 1. Update order status to completed ONLY.
+      // Stock is NO LONGER deducted here because it was reserved in createCustomerOrder.
       await updateOrderStatus(order.id, 'completed');
-
-      // 2. Deduct stock for each item in the order
-      for (var orderItem in order.items) {
-        final index = _items.indexWhere((i) => i.id == orderItem.productId);
-        if (index != -1) {
-          final currentItem = _items[index];
-          final updatedItem = calculateCheckout(currentItem, orderItem.quantity);
-          await updateItem(updatedItem); // This also handles logging the 'checkout' transaction
-        }
-      }
     } catch (e) {
-      print("Error completing order and deducting stock: $e");
+      print("Error completing order: $e");
     } finally {
       _processingOrders!.remove(order.id);
     }
-    
   }
+
   Future<void> updateProfile({
     required String userId,
     required String name,
     required String email,
   }) async {
     try {
-      final updateData = {
-        'name': name,
-        'email': email.isEmpty ? null : email, 
-      };
+      final updateData = {'name': name, 'email': email.isEmpty ? null : email};
 
       await Supabase.instance.client
           .from('profiles')
           .update(updateData)
           .eq('id', userId);
 
-      // CRITICAL: Update the active memory so the app remembers the new data 
-      // without forcing the user to log out and log back in!
-      loggedInUserEmail = email; 
-
-
+      loggedInUserEmail = email;
     } catch (e) {
-      throw Exception("Failed to save changes to the database."); 
+      throw Exception("Failed to save changes to the database.");
     }
   }
 }

@@ -21,21 +21,21 @@ class _PosCartPageState extends State<PosCartPage> {
   bool _isGridView = true;
   bool _isProcessingCart = false;
 
-  List<InventoryItem> get _filteredItems => widget.controller.searchInventory(_searchQuery);
+  List<InventoryItem> get _filteredItems =>
+      widget.controller.searchInventory(_searchQuery);
 
-  
   bool _addToCart(InventoryItem item) {
-    if (item.quantity <= 0) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('${item.name} is out of stock!'), backgroundColor: Colors.red),
-      );
-      return false;
-    }
-    
     final currentQty = _cart[item.id] ?? 0;
+
+    // Check against the total inventory limit
     if (currentQty >= item.quantity) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Cannot add more of ${item.name}. Stock limit reached.'), backgroundColor: Colors.orange),
+        SnackBar(
+          content: Text(
+            'Cannot add more of ${item.name}. Stock limit reached.',
+          ),
+          backgroundColor: Colors.orange,
+        ),
       );
       return false;
     }
@@ -63,7 +63,12 @@ class _PosCartPageState extends State<PosCartPage> {
       final item = widget.controller.allItems.firstWhere((i) => i.id == itemId);
       if (qty > item.quantity) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Cannot set quantity to $qty. Only ${item.quantity} in stock.'), backgroundColor: Colors.orange),
+          SnackBar(
+            content: Text(
+              'Cannot set quantity to $qty. Only ${item.quantity} in stock.',
+            ),
+            backgroundColor: Colors.orange,
+          ),
         );
         qty = item.quantity;
       }
@@ -82,12 +87,14 @@ class _PosCartPageState extends State<PosCartPage> {
 
   Future<void> _processOrder() async {
     if (_cart.isEmpty || _isProcessingCart) return;
-    
+
     setState(() => _isProcessingCart = true);
-    
+
     try {
       final items = _cart.entries.map((entry) {
-        final item = widget.controller.allItems.firstWhere((i) => i.id == entry.key);
+        final item = widget.controller.allItems.firstWhere(
+          (i) => i.id == entry.key,
+        );
         return CustomerOrderItem(
           productId: item.id,
           productName: item.name,
@@ -96,10 +103,13 @@ class _PosCartPageState extends State<PosCartPage> {
       }).toList();
 
       await widget.controller.createCustomerOrder(items);
-      
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Order sent to Helper!'), backgroundColor: Colors.green),
+          const SnackBar(
+            content: Text('Order sent to Helper!'),
+            backgroundColor: Colors.green,
+          ),
         );
         setState(() {
           _cart.clear();
@@ -116,7 +126,9 @@ class _PosCartPageState extends State<PosCartPage> {
     double total = 0;
     for (var entry in _cart.entries) {
       try {
-        final item = widget.controller.allItems.firstWhere((i) => i.id == entry.key);
+        final item = widget.controller.allItems.firstWhere(
+          (i) => i.id == entry.key,
+        );
         total += item.price * entry.value;
       } catch (e) {
         // Handle if an item was deleted from inventory but is still somehow in the local cart.
@@ -135,7 +147,10 @@ class _PosCartPageState extends State<PosCartPage> {
             if (_addToCart(item)) {
               Navigator.pop(context);
               ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text('${item.name} added to cart!'), backgroundColor: Colors.green),
+                SnackBar(
+                  content: Text('${item.name} added to cart!'),
+                  backgroundColor: Colors.green,
+                ),
               );
             }
           },
@@ -148,7 +163,9 @@ class _PosCartPageState extends State<PosCartPage> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
       builder: (context) {
         return FractionallySizedBox(
           heightFactor: 0.6,
@@ -160,11 +177,17 @@ class _PosCartPageState extends State<PosCartPage> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Text('Pending Orders', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                    const Text(
+                      'Pending Orders',
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                     IconButton(
                       icon: const Icon(Icons.close),
                       onPressed: () => Navigator.pop(context),
-                    )
+                    ),
                   ],
                 ),
                 const SizedBox(height: 16),
@@ -172,9 +195,21 @@ class _PosCartPageState extends State<PosCartPage> {
                   child: StreamBuilder<List<CustomerOrder>>(
                     stream: widget.controller.streamOrders(),
                     builder: (context, snapshot) {
-                      if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
-                      final pendingOrders = snapshot.data!.where((o) => o.status == 'prepared' || o.status == 'pending').toList();
-                      if (pendingOrders.isEmpty) return const Center(child: Text('No pending orders.', style: TextStyle(color: Colors.grey, fontSize: 16)));
+                      if (!snapshot.hasData)
+                        return const Center(child: CircularProgressIndicator());
+                      final pendingOrders = snapshot.data!
+                          .where(
+                            (o) =>
+                                o.status == 'prepared' || o.status == 'pending',
+                          )
+                          .toList();
+                      if (pendingOrders.isEmpty)
+                        return const Center(
+                          child: Text(
+                            'No pending orders.',
+                            style: TextStyle(color: Colors.grey, fontSize: 16),
+                          ),
+                        );
 
                       return ListView.builder(
                         itemCount: pendingOrders.length,
@@ -183,53 +218,138 @@ class _PosCartPageState extends State<PosCartPage> {
                           final isReady = o.status == 'prepared';
                           return Card(
                             margin: const EdgeInsets.only(bottom: 8),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: BorderSide(color: isReady ? Colors.green.shade200 : Colors.orange.shade200)),
-                            child: ListTile(
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              side: BorderSide(
+                                color: isReady
+                                    ? Colors.green.shade200
+                                    : Colors.orange.shade200,
+                              ),
+                            ),
+                            child: ExpansionTile(
                               leading: Icon(
-                                isReady ? Icons.check_circle : Icons.hourglass_empty,
+                                isReady
+                                    ? Icons.check_circle
+                                    : Icons.hourglass_empty,
                                 color: isReady ? Colors.green : Colors.orange,
                               ),
-                              title: Text('Order #${o.id.substring(0, 8)} - ${isReady ? "Ready for Pickup" : "Being Prepared"}', style: const TextStyle(fontWeight: FontWeight.bold)),
+                              title: Text(
+                                'Order #${o.id.substring(0, 8)} - ${isReady ? "Ready for Pickup" : "Being Prepared"}',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
                               subtitle: Text('${o.items.length} items'),
-                              trailing: isReady ? ElevatedButton.icon(
-                                icon: const Icon(Icons.check_circle_outline, color: Colors.white, size: 16),
-                                label: const Text('Complete', style: TextStyle(color: Colors.white, fontSize: 12)),
-                                style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
-                                onPressed: () async {
-                                  final confirm = await showDialog<bool>(
-                                    context: context,
-                                    builder: (context) => AlertDialog(
-                                      title: const Text('Confirm Completion'),
-                                      content: const Text('Are you sure you want to complete this order?\n\nPlease confirm:\n• Payment is received\n• Receipt is printed/sent'),
-                                      actions: [
-                                        TextButton(
-                                          onPressed: () => Navigator.pop(context, false),
-                                          child: const Text('Cancel'),
+                              childrenPadding: const EdgeInsets.all(16),
+                              children: [
+                                const Divider(),
+                                ...o.items
+                                    .map(
+                                      (item) => Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                          vertical: 4.0,
                                         ),
-                                        ElevatedButton(
-                                          style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
-                                          onPressed: () => Navigator.pop(context, true),
-                                          child: const Text('Confirm', style: TextStyle(color: Colors.white)),
+                                        child: Row(
+                                          mainAxisAlignment:
+                                              MainAxisAlignment.spaceBetween,
+                                          children: [
+                                            Expanded(
+                                              child: Text(
+                                                item.productName,
+                                                style: const TextStyle(
+                                                  fontWeight: FontWeight.w500,
+                                                ),
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ),
+                                            Text(
+                                              'Qty: ${item.quantity}',
+                                              style: const TextStyle(
+                                                color: Colors.grey,
+                                              ),
+                                            ),
+                                          ],
                                         ),
-                                      ],
+                                      ),
+                                    )
+                                    .toList(),
+                                const SizedBox(height: 16),
+                                if (isReady)
+                                  ElevatedButton.icon(
+                                    icon: const Icon(
+                                      Icons.check_circle_outline,
+                                      color: Colors.white,
+                                      size: 16,
                                     ),
-                                  );
-
-                                  if (confirm == true) {
-                                    await widget.controller.completeOrder(o);
-                                    if (context.mounted) {
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        const SnackBar(content: Text('Transaction completed! Stock deducted.'), backgroundColor: Colors.green),
+                                    label: const Text(
+                                      'Complete Transaction',
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: Colors.green,
+                                    ),
+                                    onPressed: () async {
+                                      final confirm = await showDialog<bool>(
+                                        context: context,
+                                        builder: (context) => AlertDialog(
+                                          title: const Text(
+                                            'Confirm Completion',
+                                          ),
+                                          content: const Text(
+                                            'Are you sure you want to complete this order?\n\nPlease confirm:\n• Payment is received\n• Receipt is printed/sent',
+                                          ),
+                                          actions: [
+                                            TextButton(
+                                              onPressed: () =>
+                                                  Navigator.pop(context, false),
+                                              child: const Text('Cancel'),
+                                            ),
+                                            ElevatedButton(
+                                              style: ElevatedButton.styleFrom(
+                                                backgroundColor: Colors.green,
+                                              ),
+                                              onPressed: () =>
+                                                  Navigator.pop(context, true),
+                                              child: const Text(
+                                                'Confirm',
+                                                style: TextStyle(
+                                                  color: Colors.white,
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
                                       );
-                                    }
-                                  }
-                                },
-                              ) : null,
+
+                                      if (confirm == true) {
+                                        await widget.controller.completeOrder(
+                                          o,
+                                        );
+                                        if (context.mounted) {
+                                          ScaffoldMessenger.of(
+                                            context,
+                                          ).showSnackBar(
+                                            const SnackBar(
+                                              content: Text(
+                                                'Transaction completed!',
+                                              ),
+                                              backgroundColor: Colors.green,
+                                            ),
+                                          );
+                                        }
+                                      }
+                                    },
+                                  ),
+                              ],
                             ),
                           );
                         },
                       );
-                    }
+                    },
                   ),
                 ),
               ],
@@ -244,7 +364,11 @@ class _PosCartPageState extends State<PosCartPage> {
     if (imageUrl.isEmpty) {
       return Container(
         color: Colors.grey.shade200,
-        child: const Icon(Icons.image_not_supported, color: Colors.grey, size: 40),
+        child: const Icon(
+          Icons.image_not_supported,
+          color: Colors.grey,
+          size: 40,
+        ),
       );
     }
     if (kIsWeb || imageUrl.startsWith('http')) {
@@ -275,7 +399,7 @@ class _PosCartPageState extends State<PosCartPage> {
       body: LayoutBuilder(
         builder: (context, constraints) {
           final isDesktop = constraints.maxWidth >= 800;
-          
+
           if (isDesktop) {
             return Row(
               children: [
@@ -293,7 +417,7 @@ class _PosCartPageState extends State<PosCartPage> {
               ],
             );
           }
-        }
+        },
       ),
     );
   }
@@ -328,7 +452,9 @@ class _PosCartPageState extends State<PosCartPage> {
                 ),
                 child: IconButton(
                   icon: Icon(
-                    _isGridView ? Icons.view_list_rounded : Icons.grid_view_rounded,
+                    _isGridView
+                        ? Icons.view_list_rounded
+                        : Icons.grid_view_rounded,
                     color: Colors.black87,
                   ),
                   onPressed: () => setState(() => _isGridView = !_isGridView),
@@ -350,134 +476,166 @@ class _PosCartPageState extends State<PosCartPage> {
         ),
         Expanded(
           child: StreamBuilder(
-            // We listen to the order stream as an indirect way to trigger a rebuild
-            // of the inventory list when an order is completed, which affects stock.
             stream: widget.controller.streamOrders(),
             builder: (context, snapshot) {
               return _isGridView
-                  ? LayoutBuilder(builder: (context, constraints) {
-                      int crossAxisCount = constraints.maxWidth > 600 ? 3 : 2;
-                      return GridView.builder(
-                        padding:
-                            const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: crossAxisCount,
-                          childAspectRatio: 0.70,
-                          crossAxisSpacing: 16,
-                          mainAxisSpacing: 16,
-                        ),
-                        itemCount: _filteredItems.length,
-                        itemBuilder: (context, index) {
-                          final item = _filteredItems[index];
-                          final isLowStock = item.quantity <= 10;
-                          return Card(
-                            clipBehavior: Clip.antiAlias,
-                            elevation: 2,
-                            color: Colors.white,
-                            shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12)),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Expanded(
-                                  child: SizedBox(
-                                    width: double.infinity,
-                                    child: _buildImage(item.imageUrl),
+                  ? LayoutBuilder(
+                      builder: (context, constraints) {
+                        int crossAxisCount = constraints.maxWidth > 600 ? 3 : 2;
+                        return GridView.builder(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 8,
+                          ),
+                          gridDelegate:
+                              SliverGridDelegateWithFixedCrossAxisCount(
+                                crossAxisCount: crossAxisCount,
+                                childAspectRatio: 0.70,
+                                crossAxisSpacing: 16,
+                                mainAxisSpacing: 16,
+                              ),
+                          itemCount: _filteredItems.length,
+                          itemBuilder: (context, index) {
+                            final item = _filteredItems[index];
+
+                            // Calculate the live available stock locally
+                            final cartQty = _cart[item.id] ?? 0;
+                            final availableStock = item.quantity - cartQty;
+                            final isLowStock = availableStock <= 10;
+
+                            return Card(
+                              clipBehavior: Clip.antiAlias,
+                              elevation: 2,
+                              color: Colors.white,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Expanded(
+                                    child: SizedBox(
+                                      width: double.infinity,
+                                      child: _buildImage(item.imageUrl),
+                                    ),
                                   ),
-                                ),
-                                Padding(
-                                  padding: const EdgeInsets.all(8.0),
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Row(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        children: [
-                                          Expanded(
-                                            child: Text(
-                                              item.name,
-                                              style: const TextStyle(
+                                  Padding(
+                                    padding: const EdgeInsets.all(8.0),
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Row(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Expanded(
+                                              child: Text(
+                                                item.name,
+                                                style: const TextStyle(
                                                   fontWeight: FontWeight.bold,
-                                                  fontSize: 13),
-                                              maxLines: 2,
-                                              overflow: TextOverflow.ellipsis,
-                                            ),
-                                          ),
-                                          const SizedBox(width: 4),
-                                          Container(
-                                            padding: const EdgeInsets.symmetric(
-                                                horizontal: 6, vertical: 4),
-                                            decoration: BoxDecoration(
-                                              color: isLowStock
-                                                  ? Colors.red.shade100
-                                                  : Colors.green.shade100,
-                                              borderRadius:
-                                                  BorderRadius.circular(8),
-                                            ),
-                                            child: Text(
-                                              "Stock: ${item.quantity}",
-                                              style: TextStyle(
-                                                color: isLowStock
-                                                    ? Colors.red.shade900
-                                                    : Colors.green.shade900,
-                                                fontSize: 10,
-                                                fontWeight: FontWeight.bold,
+                                                  fontSize: 13,
+                                                ),
+                                                maxLines: 2,
+                                                overflow: TextOverflow.ellipsis,
                                               ),
                                             ),
-                                          ),
-                                        ],
-                                      ),
-                                      const SizedBox(height: 8),
-                                      Row(
-                                        mainAxisAlignment:
-                                            MainAxisAlignment.spaceBetween,
-                                        children: [
-                                          Text(
-                                            "\₱${item.price.toStringAsFixed(2)}",
-                                            style: const TextStyle(
-                                              color: Colors.orange,
-                                              fontWeight: FontWeight.bold,
-                                              fontSize: 16,
-                                            ),
-                                          ),
-                                          InkWell(
-                                            onTap: () => _addToCart(item),
-                                            child: Container(
-                                              padding: const EdgeInsets.all(6),
+                                            const SizedBox(width: 4),
+                                            Container(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                    horizontal: 6,
+                                                    vertical: 4,
+                                                  ),
                                               decoration: BoxDecoration(
-                                                color: item.quantity > 0 ? Colors.orange : Colors.grey,
+                                                color: isLowStock
+                                                    ? Colors.red.shade100
+                                                    : Colors.green.shade100,
                                                 borderRadius:
                                                     BorderRadius.circular(8),
                                               ),
-                                              child: const Icon(Icons.add,
-                                                  color: Colors.white, size: 20),
+                                              child: Text(
+                                                "Stock: $availableStock",
+                                                style: TextStyle(
+                                                  color: isLowStock
+                                                      ? Colors.red.shade900
+                                                      : Colors.green.shade900,
+                                                  fontSize: 10,
+                                                  fontWeight: FontWeight.bold,
+                                                ),
+                                              ),
                                             ),
-                                          ),
-                                        ],
-                                      ),
-                                    ],
+                                          ],
+                                        ),
+                                        const SizedBox(height: 8),
+                                        Row(
+                                          mainAxisAlignment:
+                                              MainAxisAlignment.spaceBetween,
+                                          children: [
+                                            Text(
+                                              "\₱${item.price.toStringAsFixed(2)}",
+                                              style: const TextStyle(
+                                                color: Colors.orange,
+                                                fontWeight: FontWeight.bold,
+                                                fontSize: 16,
+                                              ),
+                                            ),
+                                            InkWell(
+                                              onTap: availableStock > 0
+                                                  ? () => _addToCart(item)
+                                                  : null,
+                                              child: Container(
+                                                padding: const EdgeInsets.all(
+                                                  6,
+                                                ),
+                                                decoration: BoxDecoration(
+                                                  color: availableStock > 0
+                                                      ? Colors.orange
+                                                      : Colors.grey,
+                                                  borderRadius:
+                                                      BorderRadius.circular(8),
+                                                ),
+                                                child: const Icon(
+                                                  Icons.add,
+                                                  color: Colors.white,
+                                                  size: 20,
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ],
+                                    ),
                                   ),
-                                ),
-                              ],
-                            ),
-                          );
-                        },
-                      );
-                    })
+                                ],
+                              ),
+                            );
+                          },
+                        );
+                      },
+                    )
                   : ListView.builder(
-                      padding:
-                          const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 8,
+                      ),
                       itemCount: _filteredItems.length,
                       itemBuilder: (context, index) {
                         final item = _filteredItems[index];
-                        final isLowStock = item.quantity <= 10;
+
+                        // Calculate the live available stock locally
+                        final cartQty = _cart[item.id] ?? 0;
+                        final availableStock = item.quantity - cartQty;
+                        final isLowStock = availableStock <= 10;
+
                         return Card(
                           clipBehavior: Clip.antiAlias,
                           elevation: 2,
                           margin: const EdgeInsets.only(bottom: 12),
                           color: Colors.white,
                           shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12)),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
                           child: Row(
                             children: [
                               SizedBox(
@@ -489,28 +647,34 @@ class _PosCartPageState extends State<PosCartPage> {
                                 child: Padding(
                                   padding: const EdgeInsets.all(12.0),
                                   child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
                                     children: [
                                       Text(
                                         item.name,
                                         style: const TextStyle(
-                                            fontWeight: FontWeight.bold,
-                                            fontSize: 14),
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 14,
+                                        ),
                                         maxLines: 2,
                                         overflow: TextOverflow.ellipsis,
                                       ),
                                       const SizedBox(height: 4),
                                       Container(
                                         padding: const EdgeInsets.symmetric(
-                                            horizontal: 6, vertical: 2),
+                                          horizontal: 6,
+                                          vertical: 2,
+                                        ),
                                         decoration: BoxDecoration(
                                           color: isLowStock
                                               ? Colors.red.shade100
                                               : Colors.green.shade100,
-                                          borderRadius: BorderRadius.circular(8),
+                                          borderRadius: BorderRadius.circular(
+                                            8,
+                                          ),
                                         ),
                                         child: Text(
-                                          "Stock: ${item.quantity}",
+                                          "Stock: $availableStock",
                                           style: TextStyle(
                                             color: isLowStock
                                                 ? Colors.red.shade900
@@ -525,7 +689,9 @@ class _PosCartPageState extends State<PosCartPage> {
                                 ),
                               ),
                               Padding(
-                                padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 16.0,
+                                ),
                                 child: Column(
                                   mainAxisAlignment: MainAxisAlignment.center,
                                   crossAxisAlignment: CrossAxisAlignment.end,
@@ -540,15 +706,24 @@ class _PosCartPageState extends State<PosCartPage> {
                                     ),
                                     const SizedBox(height: 8),
                                     InkWell(
-                                      onTap: () => _addToCart(item),
+                                      onTap: availableStock > 0
+                                          ? () => _addToCart(item)
+                                          : null,
                                       child: Container(
                                         padding: const EdgeInsets.all(6),
                                         decoration: BoxDecoration(
-                                          color: item.quantity > 0 ? Colors.orange : Colors.grey,
-                                          borderRadius: BorderRadius.circular(8),
+                                          color: availableStock > 0
+                                              ? Colors.orange
+                                              : Colors.grey,
+                                          borderRadius: BorderRadius.circular(
+                                            8,
+                                          ),
                                         ),
-                                        child: const Icon(Icons.add,
-                                            color: Colors.white, size: 20),
+                                        child: const Icon(
+                                          Icons.add,
+                                          color: Colors.white,
+                                          size: 20,
+                                        ),
                                       ),
                                     ),
                                   ],
@@ -582,22 +757,41 @@ class _PosCartPageState extends State<PosCartPage> {
                   children: [
                     Icon(Icons.shopping_cart, color: Colors.black87),
                     SizedBox(width: 12),
-                    Text('Current Order Cart', style: TextStyle(color: Colors.black87, fontSize: 18, fontWeight: FontWeight.bold)),
+                    Text(
+                      'Current Order Cart',
+                      style: TextStyle(
+                        color: Colors.black87,
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                   ],
                 ),
                 StreamBuilder<List<CustomerOrder>>(
                   stream: widget.controller.streamOrders(),
                   builder: (context, snapshot) {
-                    final pendingOrders = snapshot.hasData ? snapshot.data!.where((o) => o.status == 'prepared' || o.status == 'pending').toList() : <CustomerOrder>[];
+                    final pendingOrders = snapshot.hasData
+                        ? snapshot.data!
+                              .where(
+                                (o) =>
+                                    o.status == 'prepared' ||
+                                    o.status == 'pending',
+                              )
+                              .toList()
+                        : <CustomerOrder>[];
                     if (pendingOrders.isEmpty) return const SizedBox.shrink();
-                    
+
                     return Stack(
                       clipBehavior: Clip.none,
                       children: [
                         IconButton(
                           padding: EdgeInsets.zero,
                           constraints: const BoxConstraints(),
-                          icon: const Icon(Icons.receipt_long, color: Colors.black87, size: 28),
+                          icon: const Icon(
+                            Icons.receipt_long,
+                            color: Colors.black87,
+                            size: 28,
+                          ),
                           onPressed: () => _showPendingOrdersModal(context),
                         ),
                         Positioned(
@@ -611,20 +805,29 @@ class _PosCartPageState extends State<PosCartPage> {
                             ),
                             child: Text(
                               '${pendingOrders.length}',
-                              style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                              ),
                             ),
                           ),
                         ),
                       ],
                     );
-                  }
+                  },
                 ),
               ],
             ),
           ),
           Expanded(
             child: _cart.isEmpty
-                ? const Center(child: Text('Cart is empty', style: TextStyle(color: Colors.grey, fontSize: 16)))
+                ? const Center(
+                    child: Text(
+                      'Cart is empty',
+                      style: TextStyle(color: Colors.grey, fontSize: 16),
+                    ),
+                  )
                 : ListView.builder(
                     padding: const EdgeInsets.symmetric(vertical: 8),
                     itemCount: _cart.length,
@@ -633,38 +836,67 @@ class _PosCartPageState extends State<PosCartPage> {
                       final qty = _cart[itemId]!;
                       InventoryItem item;
                       try {
-                        item = widget.controller.allItems.firstWhere((i) => i.id == itemId);
+                        item = widget.controller.allItems.firstWhere(
+                          (i) => i.id == itemId,
+                        );
                       } catch (e) {
                         return const SizedBox.shrink();
                       }
-                      
+
                       return Card(
-                        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                        margin: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 6,
+                        ),
                         color: Colors.white,
                         elevation: 1,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: BorderSide(color: Colors.grey.shade200)),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          side: BorderSide(color: Colors.grey.shade200),
+                        ),
                         child: Padding(
                           padding: const EdgeInsets.all(12),
                           child: Column(
                             children: [
                               Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
                                 children: [
-                                  Expanded(child: Text(item.name, style: const TextStyle(fontWeight: FontWeight.w600))),
-                                  Text("\₱${(item.price * qty).toStringAsFixed(2)}", style: const TextStyle(color: Colors.orange, fontWeight: FontWeight.bold, fontSize: 16)),
+                                  Expanded(
+                                    child: Text(
+                                      item.name,
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ),
+                                  Text(
+                                    "\₱${(item.price * qty).toStringAsFixed(2)}",
+                                    style: const TextStyle(
+                                      color: Colors.orange,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 16,
+                                    ),
+                                  ),
                                 ],
                               ),
                               const SizedBox(height: 12),
                               Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
                                 children: [
                                   _QuantityStepper(
                                     initialValue: qty,
-                                    onChanged: (newQty) => _setCartQuantity(itemId, newQty),
+                                    onChanged: (newQty) =>
+                                        _setCartQuantity(itemId, newQty),
                                   ),
                                   IconButton(
-                                    icon: const Icon(LucideIcons.trash2, color: Colors.redAccent),
-                                    onPressed: () => _setCartQuantity(itemId, 0),
+                                    icon: const Icon(
+                                      LucideIcons.trash2,
+                                      color: Colors.redAccent,
+                                    ),
+                                    onPressed: () =>
+                                        _setCartQuantity(itemId, 0),
                                   ),
                                 ],
                               ),
@@ -680,7 +912,11 @@ class _PosCartPageState extends State<PosCartPage> {
             decoration: BoxDecoration(
               color: Colors.white,
               boxShadow: [
-                BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, -5))
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.05),
+                  blurRadius: 10,
+                  offset: const Offset(0, -5),
+                ),
               ],
             ),
             child: Column(
@@ -688,23 +924,58 @@ class _PosCartPageState extends State<PosCartPage> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Text("TOTAL DUE", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.black)),
-                    Text("\₱${_calculateTotal().toStringAsFixed(2)}", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 24, color: Colors.black)),
+                    const Text(
+                      "TOTAL DUE",
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                        color: Colors.black,
+                      ),
+                    ),
+                    Text(
+                      "\₱${_calculateTotal().toStringAsFixed(2)}",
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 24,
+                        color: Colors.black,
+                      ),
+                    ),
                   ],
                 ),
                 const SizedBox(height: 16),
                 ElevatedButton.icon(
-                  onPressed: _cart.isEmpty || _isProcessingCart ? null : _processOrder,
+                  onPressed: _cart.isEmpty || _isProcessingCart
+                      ? null
+                      : _processOrder,
                   icon: _isProcessingCart
-                      ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                      : const Icon(Icons.check_circle_outline, color: Colors.white),
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                            color: Colors.white,
+                            strokeWidth: 2,
+                          ),
+                        )
+                      : const Icon(
+                          Icons.check_circle_outline,
+                          color: Colors.white,
+                        ),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.green[800],
                     disabledBackgroundColor: Colors.grey,
                     minimumSize: const Size(double.infinity, 50),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
                   ),
-                  label: Text(_isProcessingCart ? 'Processing...' : 'Process Order', style: const TextStyle(fontSize: 18, color: Colors.white, fontWeight: FontWeight.bold)),
+                  label: Text(
+                    _isProcessingCart ? 'Processing...' : 'Process Order',
+                    style: const TextStyle(
+                      fontSize: 18,
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
                 ),
               ],
             ),
@@ -737,7 +1008,9 @@ class _QuantityStepperState extends State<_QuantityStepper> {
   @override
   void didUpdateWidget(covariant _QuantityStepper oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.initialValue != widget.initialValue) {
+    // Prevent the text cursor from jumping when re-rendering
+    if (oldWidget.initialValue != widget.initialValue &&
+        _controller.text != widget.initialValue.toString()) {
       _controller.text = widget.initialValue.toString();
     }
   }
@@ -780,6 +1053,13 @@ class _QuantityStepperState extends State<_QuantityStepper> {
               controller: _controller,
               textAlign: TextAlign.center,
               keyboardType: TextInputType.number,
+              // Trigger on type instead of just submit
+              onChanged: (val) {
+                final parsed = int.tryParse(val);
+                if (parsed != null && parsed >= 0) {
+                  widget.onChanged(parsed);
+                }
+              },
               onSubmitted: (_) => _submit(),
               decoration: const InputDecoration(
                 isDense: true,

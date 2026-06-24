@@ -59,7 +59,7 @@ class _OrderQueuePageState extends State<OrderQueuePage> {
           final orders = snapshot.data ?? [];
           final pendingOrders = orders.where((o) => o.status == 'pending').toList();
 
-          pendingOrders.sort((a, b) => a.createdAt.compareTo(b.createdAt));
+         pendingOrders.sort((a, b) => a.createdAt.compareTo(b.createdAt));
 
           return Padding(
             padding: const EdgeInsets.all(16.0),
@@ -91,10 +91,10 @@ class _OrderQueuePageState extends State<OrderQueuePage> {
                               decoration: BoxDecoration(
                                 color: Colors.white,
                                 borderRadius: BorderRadius.circular(8),
-                                border: Border.all(
-                                  color: index == 0 ? const Color(0xFFF58220) : Colors.grey.shade300,
-                                  width: index == 0 ? 2 : 1,
-                                ),
+                                // border: Border.all(
+                                //   color: index == 0 ? const Color(0xFFF58220) : Colors.grey.shade300,
+                                //   width: index == 0 ? 2 : 1,
+                                // ),
                               ),
                               child: Row(
                                 mainAxisAlignment: MainAxisAlignment.spaceBetween,

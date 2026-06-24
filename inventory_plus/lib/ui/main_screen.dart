@@ -215,7 +215,7 @@ class _MainScreenState extends State<MainScreen> {
                           'POS System',
                           activeIcon: Icons.point_of_sale,
                         ),
-                      if (isHelper)
+                      if (isHelper )
                         _buildSidebarItem(
                           orderQueueIndex,
                           Icons.receipt_long_outlined,

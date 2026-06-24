@@ -58,8 +58,16 @@ class _QRScannerState extends State<QRScanner> with SingleTickerProviderStateMix
         children: [
           if (widget.isScanning)
             MobileScanner(
-              fit: BoxFit.cover,
-              onDetect: (capture) {
+  fit: BoxFit.cover,
+  scanWindow: Rect.fromCenter(
+    center: Offset(
+      MediaQuery.of(context).size.width / 2,
+      MediaQuery.of(context).size.height / 2,
+    ),
+    width: 250,
+    height: 250,
+  ),
+  onDetect: (capture) {
                 if (_hasScanned) return;
                 
                 final List<Barcode> barcodes = capture.barcodes;
