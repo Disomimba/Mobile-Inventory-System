@@ -22,8 +22,7 @@ class _DashboardPageState extends State<DashboardPage> {
   String _forecastInsightText = "Loading forecast...";
   bool _isFetchingForecast = false;
 
-  // 1. ADD STATE VARIABLE FOR FORMAT TOGGLE
-  bool _isBulletedFormat = false;
+  bool _isBulletedFormat = true;
 
   final String _groqApiUrl = "https://api.groq.com/openai/v1/chat/completions";
 
@@ -34,25 +33,66 @@ class _DashboardPageState extends State<DashboardPage> {
     _fetchForecast();
   }
 
+  String _getCurrentMonth() {
+    const months = [
+      'January',
+      'February',
+      'March',
+      'April',
+      'May',
+      'June',
+      'July',
+      'August',
+      'September',
+      'October',
+      'November',
+      'December',
+    ];
+    return months[DateTime.now().month - 1];
+  }
+
   Future<void> _fetchForecast() async {
+    if (!mounted) return;
     setState(() => _isFetchingForecast = true);
 
     try {
-      // 2. DYNAMICALLY ADJUST THE FORMAT INSTRUCTION
-      // 1. UPDATE THESE INSTRUCTIONS TO BE STRICTER:
-      String formatInstruction = _isBulletedFormat
-          ? "List the exact same items as a concise bulleted list. Do not add any extra intro or outro text."
-          : "Write the exact same items in 2 concise sentences in paragraph form. Do not add any extra intro or outro text.";
+      final currentMonth = _getCurrentMonth();
+      String forecastingContext;
+      String formatInstruction;
 
-      final prompt = _forecastingFilter == 'Season'
-          ? "You are an AI Demand Forecasting system strictly for a hardware and tool store. Considering external contextual factors like seasonal construction activity and local weather patterns for the current season, predict what hardware items (e.g., tools, building materials, plumbing) will be in highest demand. Do NOT suggest electronics, laptops, or gadgets. $formatInstruction"
-          : "You are an AI Demand Forecasting system strictly for a hardware and tool store. Considering economic indicators and short-term trends, predict what hardware items (e.g., tools, building materials, plumbing) will be in highest demand next month. Do NOT suggest electronics, laptops, or gadgets. $formatInstruction";
+      if (_forecastingFilter == 'Season') {
+        forecastingContext =
+            "Focus purely on the upcoming Philippine seasonal and climate shifts (e.g., entering the rainy/typhoon season or summer heat) based on the current month.";
+      } else {
+        forecastingContext =
+            "Focus strictly on short-term hardware sales trends, local economic activities, and month-to-month demand patterns.";
+      }
+
+      if (_isBulletedFormat) {
+        formatInstruction =
+            "Format the output as a professional, clean bulleted list using the '•' symbol. Recommend SPECIFIC ITEM NAMES in ALL CAPS for emphasis, followed by a brief 5-word reason. Example: '• ROOF SEALANT: Approaching rainy season.' DO NOT use markdown like asterisks (**).";
+      } else {
+        formatInstruction =
+            "Format the output as a professional, concise executive summary paragraph (maximum 3 sentences). DO NOT list specific item names. Instead, explain the upcoming trend and recommend broad PRODUCT CATEGORIES (e.g., 'waterproofing materials', 'structural reinforcements'). DO NOT use markdown like asterisks (**).";
+      }
+
+      final prompt =
+          """
+      You are an AI Demand Forecasting system strictly for a hardware store located in the Philippines. 
+      The current month is $currentMonth.
+      $forecastingContext
+      $formatInstruction
+      Do NOT suggest electronics or gadgets. Do not include any conversational intro or outro text.
+      """;
 
       final groqApiKey = dotenv.env['GROQ_API_KEY']?.trim() ?? '';
 
       if (groqApiKey.isEmpty) {
-        setState(() => _forecastInsightText = "API Key not found.");
-        setState(() => _isFetchingForecast = false);
+        if (!mounted) return;
+        setState(() {
+          _forecastInsightText = "API Key not found.";
+          _isFetchingForecast = false;
+        });
         return;
       }
 
@@ -68,20 +108,23 @@ class _DashboardPageState extends State<DashboardPage> {
             {
               "role": "system",
               "content":
-                  "You are an expert inventory forecasting AI exclusively for a hardware store.",
+                  "You are a professional, highly analytical inventory forecaster in the Philippines.",
             },
             {"role": "user", "content": prompt},
           ],
-          // 2. CHANGE THIS FROM 0.7 TO 0.0
-          "temperature": 0.0,
+          "temperature": 0.2,
         }),
       );
 
+      if (!mounted) return;
+
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
+        String rawContent = data['choices'][0]['message']['content'].trim();
+        String cleanContent = rawContent.replaceAll(RegExp(r'\*+'), '');
+
         setState(() {
-          _forecastInsightText = data['choices'][0]['message']['content']
-              .trim();
+          _forecastInsightText = cleanContent;
         });
       } else {
         setState(() {
@@ -89,13 +132,18 @@ class _DashboardPageState extends State<DashboardPage> {
         });
       }
     } catch (e) {
-      setState(() => _forecastInsightText = "Network error: $e");
+      if (mounted) {
+        setState(() => _forecastInsightText = "Network error: $e");
+      }
     } finally {
-      setState(() => _isFetchingForecast = false);
+      if (mounted) {
+        setState(() => _isFetchingForecast = false);
+      }
     }
   }
 
   Future<void> _fetchAIRecommendations() async {
+    if (!mounted) return;
     setState(() => _isLoadingAI = true);
 
     try {
@@ -103,26 +151,45 @@ class _DashboardPageState extends State<DashboardPage> {
         query: "",
         category: "All",
       );
+
       final criticalItems = allItems
           .where((i) => i.quantity > 0 && i.quantity <= 10)
-          .map((i) => "${i.name} (${i.quantity})")
+          .map((i) => "${i.name} (Qty: ${i.quantity})")
           .join(', ');
+
       final deadItems = allItems
           .where((i) => i.quantity == 0)
           .map((i) => i.name)
           .join(', ');
 
+      // UPDATED PROMPT: Merged logic with justification at the end
       final prompt =
-          "I am managing a hardware inventory. Critical items: $criticalItems. Dead/Out-of-stock items: $deadItems. Give me a 2-3 sentence recommendation on what to restock immediately and any insights.";
+          """
+      I manage a hardware store. Here is my internal inventory data:
+      Out-of-stock items: ${deadItems.isEmpty ? 'None' : deadItems}. 
+      Low Stock (1-10 qty) items: ${criticalItems.isEmpty ? 'None' : criticalItems}. 
+
+      Provide a strict INTERNAL restocking action plan.
+      Follow these strict rules:
+      1. Use the '•' symbol for bullet points.
+      2. Write specific ITEM NAMES in ALL CAPS. DO NOT use markdown formatting like asterisks (**).
+      3. Create a single section titled "URGENT REPLENISH".
+      4. List each item in this format:
+         1. [ITEM NAME]
+            - [Brief 1-sentence reason for urgency]
+            - [Recommended replenishment quantity]
+      5. End the message with a single paragraph of justification explaining why these specific items were prioritized to maximize store revenue and customer satisfaction.
+      6. Keep it extremely brief. No conversational filler.
+      """;
 
       final groqApiKey = dotenv.env['GROQ_API_KEY']?.trim() ?? '';
 
       if (groqApiKey.isEmpty) {
-        setState(
-          () => _aiRecommendation =
-              "API Key not found. Please check your .env file and completely restart the app.",
-        );
-        setState(() => _isLoadingAI = false);
+        if (!mounted) return;
+        setState(() {
+          _aiRecommendation = "API Key not found.";
+          _isLoadingAI = false;
+        });
         return;
       }
 
@@ -137,30 +204,37 @@ class _DashboardPageState extends State<DashboardPage> {
           "messages": [
             {
               "role": "system",
-              "content": "You are an expert inventory manager AI assistant.",
+              "content":
+                  "You are a professional inventory manager. You follow formatting instructions exactly.",
             },
             {"role": "user", "content": prompt},
           ],
-          "temperature": 0.6,
+          "temperature": 0.1,
         }),
       );
 
+      if (!mounted) return;
+
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
+        String rawContent = data['choices'][0]['message']['content'].trim();
+        // Forcefully strip markdown
+        String cleanContent = rawContent.replaceAll(RegExp(r'\*+'), '');
+
         setState(() {
-          _aiRecommendation = data['choices'][0]['message']['content'].trim();
+          _aiRecommendation = cleanContent;
         });
       } else {
-        final errorMessage = response.body;
-        setState(() {
-          _aiRecommendation =
-              "Error fetching insights (Status: ${response.statusCode})\nDetails: $errorMessage";
-        });
+        setState(() => _aiRecommendation = "Error fetching insights.");
       }
     } catch (e) {
-      setState(() => _aiRecommendation = "Network error: $e");
+      if (mounted) {
+        setState(() => _aiRecommendation = "Network error: $e");
+      }
     } finally {
-      setState(() => _isLoadingAI = false);
+      if (mounted) {
+        setState(() => _isLoadingAI = false);
+      }
     }
   }
 
@@ -349,8 +423,8 @@ class _DashboardPageState extends State<DashboardPage> {
 
   Widget _buildForecastingChart() {
     String insightTitle = _forecastingFilter == 'Season'
-        ? "This Season Highly demand"
-        : "This Month Highly demand";
+        ? "Seasonal High-Demand Predictions"
+        : "Next Month Demand Predictions";
 
     return Container(
       padding: const EdgeInsets.all(20),
@@ -386,11 +460,10 @@ class _DashboardPageState extends State<DashboardPage> {
                           title: const Text("About AI Demand Forecasting"),
                           content: const SingleChildScrollView(
                             child: Text(
-                              "• Predicts Future Demand: Uses advanced machine learning algorithms (LSTM, Random Forest, Prophet) to forecast product demand.\n\n"
-                              "• Analyzes Complex Data: Evaluates internal transaction data and external contextual factors like seasonal activity, weather, and economy.\n\n"
-                              "• Optimizes Restocking: Estimates demand changes to determine mathematically optimal restocking schedules in advance.\n\n"
-                              "• Calculates Reorder Points: Automatically calculates ideal reorder points and dynamically adjusts safety stock levels.\n\n"
-                              "• Reduces Errors and Waste: Avoids excessive buildup of unsold goods, cutting forecasting mistakes by 20% to 50%.",
+                              "• Predicts Future Demand: Uses LLM reasoning based on seasonal and economic trends.\n\n"
+                              "• Optimizes Restocking: Estimates demand changes to determine optimal restocking schedules.\n\n"
+                              "• Note: This relies on external contextual data (seasons/economy) rather than your local transaction history.",
+                              style: TextStyle(height: 1.5),
                             ),
                           ),
                           actions: [
@@ -410,50 +483,65 @@ class _DashboardPageState extends State<DashboardPage> {
                   ),
                 ],
               ),
-
-              // 3. ADDED THE FORMAT TOGGLE BUTTON NEXT TO THE DROPDOWN
               Row(
                 children: [
-                  IconButton(
-                    icon: Icon(
-                      _isBulletedFormat
-                          ? LucideIcons.alignHorizontalJustifyStart400
-                          : LucideIcons.list,
-                      color: Colors.blue,
-                      size: 20,
+                  Container(
+                    decoration: BoxDecoration(
+                      color: Colors.blue.shade50,
+                      borderRadius: BorderRadius.circular(8),
                     ),
-                    tooltip: _isBulletedFormat
-                        ? "Switch to Paragraph Format"
-                        : "Switch to Bulleted List",
-                    onPressed: () {
-                      setState(() {
-                        _isBulletedFormat = !_isBulletedFormat;
-                      });
-                      _fetchForecast(); // Refresh the AI with the new format!
-                    },
-                  ),
-                  const SizedBox(width: 4),
-                  DropdownButton<String>(
-                    value: _forecastingFilter,
-                    items: <String>['Season', 'Month'].map((String value) {
-                      return DropdownMenuItem<String>(
-                        value: value,
-                        child: Text(
-                          value,
-                          style: const TextStyle(fontSize: 13),
-                        ),
-                      );
-                    }).toList(),
-                    onChanged: (newValue) {
-                      if (newValue != null && newValue != _forecastingFilter) {
-                        setState(() {
-                          _forecastingFilter = newValue;
-                        });
+                    child: IconButton(
+                      icon: Icon(
+                        _isBulletedFormat
+                            ? LucideIcons.alignHorizontalJustifyStart400
+                            : LucideIcons.list,
+                        color: Colors.blue.shade700,
+                        size: 18,
+                      ),
+                      tooltip: _isBulletedFormat
+                          ? "Switch to Paragraph Format"
+                          : "Switch to Bulleted List",
+                      onPressed: () {
+                        setState(() => _isBulletedFormat = !_isBulletedFormat);
                         _fetchForecast();
-                      }
-                    },
-                    underline: const SizedBox(),
-                    icon: const Icon(Icons.arrow_drop_down, color: Colors.blue),
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Colors.grey.shade300),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: DropdownButtonHideUnderline(
+                      child: DropdownButton<String>(
+                        value: _forecastingFilter,
+                        items: <String>['Season', 'Month'].map((String value) {
+                          return DropdownMenuItem<String>(
+                            value: value,
+                            child: Text(
+                              value,
+                              style: const TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          );
+                        }).toList(),
+                        onChanged: (newValue) {
+                          if (newValue != null &&
+                              newValue != _forecastingFilter) {
+                            setState(() => _forecastingFilter = newValue);
+                            _fetchForecast();
+                          }
+                        },
+                        icon: const Icon(
+                          Icons.arrow_drop_down,
+                          color: Colors.blue,
+                        ),
+                      ),
+                    ),
                   ),
                 ],
               ),
@@ -461,59 +549,56 @@ class _DashboardPageState extends State<DashboardPage> {
           ),
           const SizedBox(height: 8),
           const Text(
-            "Uses ML (LSTM, Random Forest, Prophet) and contextual data to forecast future demand, optimize restocking, and reduce errors.",
+            "Uses contextual market data to forecast future demand and optimize restocking.",
             style: TextStyle(fontSize: 12, color: Colors.grey),
           ),
           const SizedBox(height: 16),
-
-          // Replace the bottom container in _buildForecastingChart() with this:
-          // Inside _buildForecastingChart(), update this section:
           Container(
             width: double.infinity,
-            height: 250, // Fixed height container
-            padding: const EdgeInsets.all(16),
+            height: 250,
+            padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
               color: const Color(0xFFF8FAFC),
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.grey.shade300),
+              border: Border.all(color: Colors.blue.shade100),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
                   insightTitle,
-                  style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.bold,
-                    color: Color(0xFF0F172A),
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                    color: Colors.blue.shade900,
+                    letterSpacing: 0.5,
                   ),
                 ),
-                const SizedBox(height: 8),
-
-                // 1. Expanded ensures it takes up the remaining height in the Container
+                const SizedBox(height: 12),
                 Expanded(
                   child: _isFetchingForecast
                       ? const Center(
                           child: SizedBox(
                             width: 20,
                             height: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2),
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.blue,
+                            ),
                           ),
                         )
                       : SizedBox(
-                        width: double.infinity,
+                          width: double.infinity,
                           height: double.infinity,
                           child: SingleChildScrollView(
-                            scrollDirection:
-                                Axis.vertical, // Explicitly vertical
-                            physics:
-                                const AlwaysScrollableScrollPhysics(), // Force scrollable
+                            physics: const AlwaysScrollableScrollPhysics(),
                             child: Text(
                               _forecastInsightText,
                               style: const TextStyle(
-                                fontSize: 13,
-                                color: Colors.black87,
-                                height: 1.5,
+                                fontSize: 14,
+                                color: Color(0xFF334155),
+                                height: 1.6,
+                                letterSpacing: 0.2,
                               ),
                             ),
                           ),
@@ -528,7 +613,6 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   Widget _buildActionableAlerts(List<InventoryItem> criticalItems) {
-    // 1. Determine how many to show on the dashboard (max 5)
     final showViewAll = criticalItems.length > 5;
     final itemsToShow = criticalItems.take(5).toList();
 
@@ -549,54 +633,97 @@ class _DashboardPageState extends State<DashboardPage> {
                 children: [
                   Icon(LucideIcons.triangleAlert, color: Colors.red, size: 20),
                   SizedBox(width: 8),
-                  Text("Restock Priority", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.red)),
+                  Text(
+                    "Restock Priority",
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.red,
+                    ),
+                  ),
                 ],
               ),
-              // 2. Add View All button if count > 5
               if (showViewAll)
                 TextButton(
                   onPressed: () => _showAllAlertsModal(criticalItems),
-                  child: const Text("View All", style: TextStyle(color: Colors.orange, fontWeight: FontWeight.bold)),
+                  child: const Text(
+                    "View All",
+                    style: TextStyle(
+                      color: Colors.orange,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
                 ),
             ],
           ),
           const Divider(height: 24),
           if (criticalItems.isEmpty)
-            const Text("No critical stock alerts at this time.", style: TextStyle(color: Colors.grey))
+            const Text(
+              "No critical stock alerts at this time.",
+              style: TextStyle(color: Colors.grey),
+            )
           else
-            ...itemsToShow.map((item) => Padding(
-              padding: const EdgeInsets.only(bottom: 12.0),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Expanded(child: Text(item.name, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13), overflow: TextOverflow.ellipsis)),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(color: Colors.red.withOpacity(0.1), borderRadius: BorderRadius.circular(6)),
-                    child: Text("${item.quantity} Left", style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 12)),
-                  ),
-                ],
+            ...itemsToShow.map(
+              (item) => Padding(
+                padding: const EdgeInsets.only(bottom: 12.0),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        item.name,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w600,
+                          fontSize: 13,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.red.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        "${item.quantity} ${item.unit}",
+                        style: const TextStyle(
+                          color: Colors.red,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            )),
+            ),
         ],
       ),
     );
   }
 
-  // 3. New Modal to show all items
   void _showAllAlertsModal(List<InventoryItem> items) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
       builder: (context) => SizedBox(
         height: MediaQuery.of(context).size.height * 0.7,
         child: Column(
           children: [
             const Padding(
               padding: EdgeInsets.all(16.0),
-              child: Text("All Critical Items", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              child: Text(
+                "All Critical Items",
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
             ),
             const Divider(),
             Expanded(
@@ -606,8 +733,28 @@ class _DashboardPageState extends State<DashboardPage> {
                 itemBuilder: (context, index) {
                   final item = items[index];
                   return ListTile(
-                    title: Text(item.name),
-                    trailing: Text("${item.quantity} Left", style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+                    title: Text(
+                      item.name,
+                      style: const TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                    trailing: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.red.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        "${item.quantity} ${item.unit}",
+                        style: const TextStyle(
+                          color: Colors.red,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
                   );
                 },
               ),
@@ -624,6 +771,13 @@ class _DashboardPageState extends State<DashboardPage> {
       decoration: BoxDecoration(
         color: const Color(0xFF0F172A),
         borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.1),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -635,8 +789,9 @@ class _DashboardPageState extends State<DashboardPage> {
                 children: [
                   Icon(LucideIcons.sparkles, color: Colors.orange, size: 20),
                   SizedBox(width: 8),
+                  // HEADER RENAMED:
                   Text(
-                    "AI Restocking Suggestions",
+                    "AI Restocking Recommendation",
                     style: TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
@@ -656,12 +811,13 @@ class _DashboardPageState extends State<DashboardPage> {
             ],
           ),
           const SizedBox(height: 16),
-          // Example Recommendation
           Container(
-            padding: const EdgeInsets.all(12),
+            width: double.infinity,
+            padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.1),
+              color: Colors.white.withOpacity(0.05),
               borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.white.withOpacity(0.1)),
             ),
             child: _isLoadingAI
                 ? const Center(
@@ -670,20 +826,14 @@ class _DashboardPageState extends State<DashboardPage> {
                       child: CircularProgressIndicator(color: Colors.orange),
                     ),
                   )
-                : Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      
-                      const SizedBox(height: 8),
-                      Text(
-                        _aiRecommendation,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 13,
-                          height: 1.5,
-                        ),
-                      ),
-                    ],
+                : Text(
+                    _aiRecommendation,
+                    style: const TextStyle(
+                      color: Color(0xFFE2E8F0),
+                      fontSize: 13,
+                      height: 1.6,
+                      letterSpacing: 0.2,
+                    ),
                   ),
           ),
         ],

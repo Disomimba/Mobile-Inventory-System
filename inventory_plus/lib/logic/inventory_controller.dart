@@ -81,14 +81,12 @@ class InventoryController {
           .update({'layout_data': jsonDecode(encodedData)})
           .eq('id', locId);
     } catch (e) {
-      print("Error saving layout: $e");
     }
   }
 
   Future<void> addItem(InventoryItem newItem) async {
     final locId = activeLocationId;
     if (locId == null) {
-      print("Error: No activeLocationId found. Are you logged in?");
       return;
     }
 
@@ -126,9 +124,7 @@ class InventoryController {
         newQuantity: savedItem.quantity,
       );
 
-      print("SUCCESS: Item saved to Supabase with ID: ${savedItem.id}");
     } catch (e) {
-      print("DATABASE ERROR: $e");
       rethrow;
     }
   }
@@ -157,7 +153,6 @@ class InventoryController {
 
       await supabase.from('transaction_history').insert(insertData);
     } catch (e) {
-      print("Error logging transaction: $e");
     }
   }
 
@@ -174,7 +169,6 @@ class InventoryController {
           .getPublicUrl(path);
       return imageUrl;  
     } catch (e) {
-      print("Error uploading image: $e");
       return null;
     }
   }
@@ -196,7 +190,6 @@ class InventoryController {
           .getPublicUrl(path);
       return imageUrl;
     } catch (e) {
-      print("Error uploading image bytes: $e");
       return null;
     }
   }
@@ -240,7 +233,6 @@ class InventoryController {
           })
           .eq('id', updatedItem.id);
     } catch (e) {
-      print("Error updating item: $e");
     }
   }
 
@@ -261,7 +253,6 @@ class InventoryController {
         );
       }
     } catch (e) {
-      print("Error deleting item: $e");
     }
   }
 
@@ -293,7 +284,6 @@ class InventoryController {
         );
       }
     } catch (e) {
-      print("Error assigning location: $e");
     }
   }
 
@@ -309,7 +299,6 @@ class InventoryController {
         await assignItemToLocation(item.id, null);
       }
     } catch (e) {
-      print("Error deleting map element: $e");
     }
   }
 
@@ -325,7 +314,6 @@ class InventoryController {
         await assignItemToLocation(item.id, null);
       }
     } catch (e) {
-      print("Error clearing map layout: $e");
     }
   }
 
@@ -355,7 +343,6 @@ class InventoryController {
         );
       }
     } catch (e) {
-      print("Error updating location details: $e");
     }
   }
 
@@ -470,7 +457,7 @@ class InventoryController {
   InventoryItem calculateCheckout(InventoryItem item, double quantity) {
     return item.copyWith(quantity: (item.quantity - quantity).clamp(0.0, 999999.0));
   }
-  
+
   InventoryItem? findItemByCode(String code) {
     try {
       return _items.firstWhere((item) => item.sku.trim() == code.trim());
@@ -500,7 +487,6 @@ class InventoryController {
           .eq('location_id', locId);
       return List<Map<String, dynamic>>.from(response);
     } catch (e) {
-      print("Error fetching staff: $e");
       return [];
     }
   }
@@ -525,7 +511,6 @@ class InventoryController {
       });
       return true;
     } catch (e) {
-      print("Error creating staff: $e");
       return false;
     }
   }
@@ -535,7 +520,6 @@ class InventoryController {
       await supabase.from('profiles').update({'role': newRole}).eq('id', id);
       return true;
     } catch (e) {
-      print("Error updating staff role: $e");
       return false;
     }
   }
@@ -545,7 +529,6 @@ class InventoryController {
       await supabase.from('profiles').delete().eq('id', id);
       return true;
     } catch (e) {
-      print("Error deleting staff: $e");
       return false;
     }
   }
@@ -577,7 +560,6 @@ class InventoryController {
           .eq('id', currentUserId!);
       return null;
     } catch (e) {
-      print("Error changing password: $e");
       return "An error occurred while changing the password.";
     }
   }
@@ -593,7 +575,6 @@ class InventoryController {
           .order('created_at', ascending: false);
       return List<Map<String, dynamic>>.from(response);
     } catch (e) {
-      print("Error fetching transaction history: $e");
       return [];
     }
   }
@@ -609,7 +590,6 @@ class InventoryController {
           .order('created_at', ascending: false);
       return List<Map<String, dynamic>>.from(response);
     } catch (e) {
-      print("Error fetching all transaction history: $e");
       return [];
     }
   }
@@ -623,7 +603,6 @@ class InventoryController {
           .delete()
           .eq('location_id', locId);
     } catch (e) {
-      print("Error clearing transaction history: $e");
     }
   }
 
@@ -731,7 +710,6 @@ class InventoryController {
 
       return analyticsList;
     } catch (e) {
-      print("Error generating inventory analytics: $e");
       return [];
     }
   }
@@ -744,7 +722,6 @@ class InventoryController {
     final locId = activeLocationId;
 
     if (locId == null) {
-      print("ERROR: locId is null, aborting!");
       return;
     }
 
@@ -771,7 +748,6 @@ class InventoryController {
         }
       }
     } catch (e) {
-      print("ERROR inserting order: $e");
     }
   }
 
@@ -798,7 +774,6 @@ class InventoryController {
       }
       await supabase.from('orders').update(updateData).eq('id', orderId);
     } catch (e) {
-      print("Error updating order status: $e");
     }
   }
 
@@ -822,7 +797,6 @@ class InventoryController {
       // Stock is NO LONGER deducted here because it was reserved in createCustomerOrder.
       await updateOrderStatus(order.id, 'completed');
     } catch (e) {
-      print("Error completing order: $e");
     } finally {
       _processingOrders!.remove(order.id);
     }
