@@ -57,7 +57,7 @@ class InventoryItem {
   final String name;
   final String sku;
   final double price;
-  final int quantity;
+  final double quantity;
   final String category;
   final String description;
   final String imageUrl;
@@ -94,7 +94,7 @@ class InventoryItem {
       name: map['product_name'] ?? 'Unknown Item',
       category: map['category'] ?? 'General',
       price: (map['product_price'] as num?)?.toDouble() ?? 0.0,
-      quantity: map['product_quantity'] as int? ?? 0,
+      quantity: (map['product_quantity'] as num?)?.toDouble() ?? 0.0,
       description: map['description'] ?? '',
       imageUrl: map['image_url'] ?? '',
       locationId: map['map_element_id'],
@@ -110,7 +110,7 @@ class InventoryItem {
     String? name,
     String? sku,
     double? price,
-    int? quantity,
+    double? quantity,
     String? description,
     String? imageUrl,
     String? locationId,
@@ -142,7 +142,7 @@ class InventoryItem {
 class CustomerOrderItem {
   final String productId;
   final String productName;
-  final int quantity;
+  final double quantity;
 
   CustomerOrderItem({
     required this.productId,
@@ -160,7 +160,7 @@ class CustomerOrderItem {
       CustomerOrderItem(
         productId: json['product_id'],
         productName: json['product_name'],
-        quantity: json['quantity'],
+        quantity: (json['quantity'] as num).toDouble(),
       );
 }
 

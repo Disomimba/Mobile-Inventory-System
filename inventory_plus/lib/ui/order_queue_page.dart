@@ -278,7 +278,7 @@ class _OrderChecklistPageState extends State<OrderChecklistPage> {
   }
   // SHOW DEDUCTION MODAL
   // SHOW DEDUCTION MODAL
-  void _showDeductionSheet(InventoryItem dbItem, int targetQuantity) {
+  void _showDeductionSheet(InventoryItem dbItem, double targetQuantity) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -286,7 +286,7 @@ class _OrderChecklistPageState extends State<OrderChecklistPage> {
       builder: (context) => DeductionBottomSheet(
         item: dbItem,
         targetQuantity: targetQuantity,
-        onConfirm: (deductedQty) async {
+        onConfirm: (deductedQty) async { // deductedQty is now double
           
           // ==========================================================
           // 🐛 FIX: LIVE DATABASE DEDUCTION REMOVED HERE
@@ -478,7 +478,7 @@ class _OrderChecklistPageState extends State<OrderChecklistPage> {
                         borderRadius: BorderRadius.circular(4),
                       ),
                       child: Text(
-                        'QTY: ${item.quantity.toString().padLeft(2, '0')}',
+                        'QTY: ${item.quantity}',
                         style: TextStyle(
                           fontSize: 10,
                           fontWeight: FontWeight.bold,
@@ -550,8 +550,8 @@ class _OrderChecklistPageState extends State<OrderChecklistPage> {
 
 class DeductionBottomSheet extends StatefulWidget {
   final InventoryItem item;
-  final int targetQuantity;
-  final Function(int) onConfirm;
+  final double targetQuantity;
+  final Function(double) onConfirm;
 
   const DeductionBottomSheet({
     super.key,
@@ -566,7 +566,7 @@ class DeductionBottomSheet extends StatefulWidget {
 
 class _DeductionBottomSheetState extends State<DeductionBottomSheet> {
   late TextEditingController _qtyController;
-  late int _currentQty;
+  late double _currentQty;
 
   @override
   void initState() {
@@ -581,7 +581,7 @@ class _DeductionBottomSheetState extends State<DeductionBottomSheet> {
     super.dispose();
   }
 
-  void _updateQuantity(int newQty) {
+  void _updateQuantity(double newQty) {
     if (newQty < 1) newQty = 1;
     if (newQty > widget.item.quantity) newQty = widget.item.quantity; // Max available
     setState(() {
@@ -591,7 +591,7 @@ class _DeductionBottomSheetState extends State<DeductionBottomSheet> {
   }
 
   void _submitManualEntry() {
-    final val = int.tryParse(_qtyController.text);
+    final val = double.tryParse(_qtyController.text);
     if (val != null) {
       _updateQuantity(val);
     } else {
@@ -601,7 +601,7 @@ class _DeductionBottomSheetState extends State<DeductionBottomSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final int remainingStock = widget.item.quantity - _currentQty;
+    final double remainingStock = widget.item.quantity - _currentQty;
     final String locationString = (widget.item.shelfLevel != null || widget.item.binNumber != null)
         ? "${widget.item.shelfLevel ?? ''} ${widget.item.binNumber ?? ''}".trim()
         : "Unassigned";
@@ -738,7 +738,7 @@ class _DeductionBottomSheetState extends State<DeductionBottomSheet> {
                           child: TextField(
                             controller: _qtyController,
                             textAlign: TextAlign.center,
-                            keyboardType: TextInputType.number,
+                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
                             onSubmitted: (_) => _submitManualEntry(),
                             style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.black87),
                             decoration: const InputDecoration(
@@ -789,7 +789,7 @@ class _DeductionBottomSheetState extends State<DeductionBottomSheet> {
                   const SizedBox(width: 12),
                   Expanded(
                     child: Text(
-                      "After deduction, $remainingStock units will remain at shelf Location $locationString.",
+                      "After deduction, ${remainingStock.toStringAsFixed(2)} units will remain at shelf Location $locationString.",
                       style: TextStyle(color: Colors.blueGrey.shade800, fontSize: 13),
                     ),
                   ),

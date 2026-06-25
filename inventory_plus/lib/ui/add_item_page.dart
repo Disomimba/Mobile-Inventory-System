@@ -376,7 +376,7 @@ class _AddItemPageState extends State<AddItemPage> {
                                 child: _buildTextField(
                                   _quantityController,
                                   "Initial Stock",
-                                  LucideIcons.archive,
+                                 LucideIcons.weight,
                                   isNumber: true,
                                 ),
                               ),

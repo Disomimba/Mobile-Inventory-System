@@ -135,8 +135,8 @@ class InventoryController {
   Future<void> _logTransaction({
     String? productId,
     required String type,
-    required int quantityChange,
-    required int newQuantity,
+    required double quantityChange,
+    required double newQuantity,
   }) async {
     final locId = activeLocationId;
     final userId = currentUserId;
@@ -213,7 +213,7 @@ class InventoryController {
         if (quantityChange != 0) {
           await _logTransaction(
             productId: updatedItem.id,
-            type: quantityChange > 0 ? 'stock_in' : 'checkout',
+            type: quantityChange > 0 ? 'stock_in' : 'checkout', // This logic is fine for double as well
             quantityChange: quantityChange,
             newQuantity: updatedItem.quantity,
           );
@@ -416,7 +416,7 @@ class InventoryController {
       name: newName,
       sku: newSku,
       price: double.tryParse(newPrice) ?? originalItem.price,
-      quantity: int.tryParse(newStock) ?? originalItem.quantity,
+      quantity: double.tryParse(newStock) ?? originalItem.quantity,
       description: newDesc,
       locationId: locationId,
       manufacturer: manufacturer,
@@ -428,8 +428,8 @@ class InventoryController {
     );
   }
 
-  InventoryItem calculateCheckout(InventoryItem item, int quantity) {
-    return item.copyWith(quantity: (item.quantity - quantity).clamp(0, 999999));
+  InventoryItem calculateCheckout(InventoryItem item, double quantity) {
+    return item.copyWith(quantity: (item.quantity - quantity).clamp(0.0, 999999.0));
   }
 
   InventoryItem createNewItem({
@@ -451,8 +451,8 @@ class InventoryController {
       id: '',
       name: name,
       sku: sku,
-      price: double.tryParse(price) ?? 0.0,
-      quantity: int.tryParse(quantity) ?? 0,
+      price: double.tryParse(price) ?? 0.0, // No change needed here
+      quantity: double.tryParse(quantity) ?? 0.0,
       category: category,
       description: description,
       locationId: mapLocationId,
@@ -650,7 +650,7 @@ class InventoryController {
       // Aggregate sales volume per product
       Map<String, int> salesData = {};
       for (var tx in transactions) {
-        final String? pId = tx['product_id'];
+        final String? pId = tx['product_id']?.toString();
         if (pId != null) {
           final int qty = (tx['quantity_change'] as num).abs().toInt();
           salesData[pId] = (salesData[pId] ?? 0) + qty;
@@ -672,11 +672,11 @@ class InventoryController {
           classification = 'Slow-Moving';
         }
 
-        int daysUntilStockout = -1;
+        double daysUntilStockout = -1;
         DateTime? stockoutDate;
         if (dailySalesVelocity > 0) {
-          daysUntilStockout = (item.quantity / dailySalesVelocity).floor();
-          stockoutDate = DateTime.now().add(Duration(days: daysUntilStockout));
+          daysUntilStockout = item.quantity / dailySalesVelocity;
+          stockoutDate = DateTime.now().add(Duration(days: daysUntilStockout.floor()));
         }
 
         int safetyStock = 0;
@@ -718,9 +718,7 @@ class InventoryController {
         if (a['needsReorder'] && !b['needsReorder']) return -1;
         if (!a['needsReorder'] && b['needsReorder']) return 1;
         if (a['daysUntilStockout'] != -1 && b['daysUntilStockout'] != -1) {
-          return (a['daysUntilStockout'] as int).compareTo(
-            b['daysUntilStockout'] as int,
-          );
+          return (a['daysUntilStockout'] as double).compareTo(b['daysUntilStockout'] as double);
         }
         return 0;
       });

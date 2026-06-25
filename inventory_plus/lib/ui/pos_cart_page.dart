@@ -17,7 +17,7 @@ class PosCartPage extends StatefulWidget {
 
 class _PosCartPageState extends State<PosCartPage> {
   String _searchQuery = '';
-  final Map<String, int> _cart = {};
+  final Map<String, double> _cart = {};
   bool _isGridView = true;
   bool _isProcessingCart = false;
 
@@ -46,19 +46,7 @@ class _PosCartPageState extends State<PosCartPage> {
     return true;
   }
 
-  void _removeFromCart(String itemId) {
-    setState(() {
-      if (_cart.containsKey(itemId)) {
-        if (_cart[itemId]! > 1) {
-          _cart[itemId] = _cart[itemId]! - 1;
-        } else {
-          _cart.remove(itemId);
-        }
-      }
-    });
-  }
-
-  void _setCartQuantity(String itemId, int qty) {
+  void _setCartQuantity(String itemId, double qty) {
     try {
       final item = widget.controller.allItems.firstWhere((i) => i.id == itemId);
       if (qty > item.quantity) {
@@ -98,7 +86,7 @@ class _PosCartPageState extends State<PosCartPage> {
         return CustomerOrderItem(
           productId: item.id,
           productName: item.name,
-          quantity: entry.value,
+          quantity: entry.value, // entry.value is already a double
         );
       }).toList();
 
@@ -835,7 +823,7 @@ class _PosCartPageState extends State<PosCartPage> {
                       final itemId = _cart.keys.elementAt(index);
                       final qty = _cart[itemId]!;
                       InventoryItem item;
-                      try {
+                      try { // This try-catch is good, handles deleted items
                         item = widget.controller.allItems.firstWhere(
                           (i) => i.id == itemId,
                         );
@@ -887,7 +875,7 @@ class _PosCartPageState extends State<PosCartPage> {
                                 children: [
                                   _QuantityStepper(
                                     initialValue: qty,
-                                    onChanged: (newQty) =>
+                                    onChanged: (newQty) => // newQty is double
                                         _setCartQuantity(itemId, newQty),
                                   ),
                                   IconButton(
@@ -895,7 +883,7 @@ class _PosCartPageState extends State<PosCartPage> {
                                       LucideIcons.trash2,
                                       color: Colors.redAccent,
                                     ),
-                                    onPressed: () =>
+                                    onPressed: () => // Set to 0 to remove
                                         _setCartQuantity(itemId, 0),
                                   ),
                                 ],
@@ -987,10 +975,10 @@ class _PosCartPageState extends State<PosCartPage> {
 }
 
 class _QuantityStepper extends StatefulWidget {
-  final int initialValue;
-  final ValueChanged<int> onChanged;
+  final double initialValue;
+  final ValueChanged<double> onChanged;
 
-  const _QuantityStepper({required this.initialValue, required this.onChanged});
+  const _QuantityStepper({required this.initialValue, required this.onChanged}); // No key needed
 
   @override
   State<_QuantityStepper> createState() => _QuantityStepperState();
@@ -1003,7 +991,7 @@ class _QuantityStepperState extends State<_QuantityStepper> {
   void initState() {
     super.initState();
     _controller = TextEditingController(text: widget.initialValue.toString());
-  }
+  } // Good
 
   @override
   void didUpdateWidget(covariant _QuantityStepper oldWidget) {
@@ -1022,7 +1010,7 @@ class _QuantityStepperState extends State<_QuantityStepper> {
   }
 
   void _submit() {
-    final val = int.tryParse(_controller.text);
+    final val = double.tryParse(_controller.text);
     if (val != null && val >= 0) {
       widget.onChanged(val);
     } else {
@@ -1037,7 +1025,7 @@ class _QuantityStepperState extends State<_QuantityStepper> {
       children: [
         IconButton(
           icon: const Icon(Icons.remove_circle_outline, color: Colors.orange),
-          onPressed: () {
+          onPressed: () { // Good
             if (widget.initialValue > 1) {
               widget.onChanged(widget.initialValue - 1);
             }
@@ -1052,12 +1040,12 @@ class _QuantityStepperState extends State<_QuantityStepper> {
             child: TextField(
               controller: _controller,
               textAlign: TextAlign.center,
-              keyboardType: TextInputType.number,
-              // Trigger on type instead of just submit
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              // This is a good change, allows real-time updates
               onChanged: (val) {
-                final parsed = int.tryParse(val);
+                final parsed = double.tryParse(val);
                 if (parsed != null && parsed >= 0) {
-                  widget.onChanged(parsed);
+                  widget.onChanged(parsed.toDouble());
                 }
               },
               onSubmitted: (_) => _submit(),
@@ -1071,7 +1059,7 @@ class _QuantityStepperState extends State<_QuantityStepper> {
         ),
         IconButton(
           icon: const Icon(Icons.add_circle_outline, color: Colors.orange),
-          onPressed: () => widget.onChanged(widget.initialValue + 1),
+          onPressed: () => widget.onChanged(widget.initialValue + 1), // Good
         ),
       ],
     );

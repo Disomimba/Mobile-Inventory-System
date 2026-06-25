@@ -323,7 +323,7 @@ class _SettingsPageState extends State<SettingsPage> {
       }
 
       double grandTotalValue = 0;
-      int grandTotalItems = 0;
+      double grandTotalItems = 0.0;
       
       final tableRows = <pw.TableRow>[];
 
@@ -427,7 +427,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   pw.Column(
                     crossAxisAlignment: pw.CrossAxisAlignment.end,
                     children: [
-                      pw.Text('Total Items in Stock (Ending): $grandTotalItems',
+                      pw.Text('Total Items in Stock (Ending): ${grandTotalItems.toStringAsFixed(2)}',
                           style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 12)),
                       pw.SizedBox(height: 4),
                       pw.Text(

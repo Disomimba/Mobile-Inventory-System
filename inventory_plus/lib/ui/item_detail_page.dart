@@ -276,7 +276,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
     }
   }
 
-  Future<void> _handleCheckout(int qty) async {
+  Future<void> _handleCheckout(double qty) async {
     final updated = widget.controller.calculateCheckout(_currentItem, qty);
     await widget.onUpdate(updated);
     if (mounted) {
@@ -321,7 +321,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                           ),
                           const SizedBox(width: 12),
                           _buildStatCard(
-                            "Stock",
+                            "Stock (Qty)",
                             _currentItem.quantity.toString(),
                             LucideIcons.package,
                             _currentItem.quantity < 20
@@ -1032,7 +1032,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
   }
 
   void _showCheckoutSheet() {
-    int checkoutQty = 1;
+    double checkoutQty = 1.0;
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -1054,24 +1054,22 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   IconButton(
-                    onPressed: () => setModalState(
-                      () => checkoutQty = checkoutQty > 1 ? checkoutQty - 1 : 1,
-                    ),
+                    onPressed: () {
+                      if (checkoutQty > 1) setModalState(() => checkoutQty--);
+                    },
                     icon: const Icon(Icons.remove_circle_outline, size: 40),
                   ),
                   Text(
-                    "$checkoutQty",
+                    checkoutQty.toStringAsFixed(checkoutQty.truncateToDouble() == checkoutQty ? 0 : 1),
                     style: const TextStyle(
                       fontSize: 30,
                       fontWeight: FontWeight.bold,
                     ),
                   ),
                   IconButton(
-                    onPressed: () => setModalState(
-                      () => checkoutQty = checkoutQty < _currentItem.quantity
-                          ? checkoutQty + 1
-                          : checkoutQty,
-                    ),
+                    onPressed: () {
+                      if (checkoutQty < _currentItem.quantity) setModalState(() => checkoutQty++);
+                    },
                     icon: const Icon(Icons.add_circle_outline, size: 40),
                   ),
                 ],
