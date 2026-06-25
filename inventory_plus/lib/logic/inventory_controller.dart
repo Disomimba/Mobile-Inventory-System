@@ -806,18 +806,42 @@ class InventoryController {
     required String userId,
     required String name,
     required String email,
+    required String location, // This parameter is still named 'location' in your Dart code
+    required String phone,
   }) async {
     try {
-      final updateData = {'name': name, 'email': email.isEmpty ? null : email};
+      final updateData = {
+        'name': name, 
+        'email': email.isEmpty ? null : email,
+        'address': location, // Map the 'location' parameter to the 'address' DB column
+        'phone': phone,      // Ensure your DB column is actually named 'phone'
+      };
 
       await Supabase.instance.client
           .from('profiles')
           .update(updateData)
           .eq('id', userId);
-
-      loggedInUserEmail = email;
     } catch (e) {
       throw Exception("Failed to save changes to the database.");
+    }
+  }
+  // ==========================================
+  // ADMIN FUNCTIONS
+  // ==========================================
+
+  /// Allows an admin to forcefully reset a staff member's password
+  Future<bool> adminResetUserPassword(String targetUserId, String newPassword) async {
+    try {
+      final hashedNewPassword = _hashPassword(newPassword);
+
+      await supabase
+          .from('profiles')
+          .update({'password': hashedNewPassword})
+          .eq('id', targetUserId);
+          
+      return true;
+    } catch (e) {
+      return false;
     }
   }
 }

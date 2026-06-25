@@ -16,6 +16,7 @@ class _LoginPageState extends State<LoginPage> {
   final _usernameController = TextEditingController();
   final _passwordController = TextEditingController();
   final _authService = AuthService();
+  final _passwordFocusNode = FocusNode();
 
   bool _isPasswordVisible = false;
   bool _isLoading = false;
@@ -115,6 +116,7 @@ class _LoginPageState extends State<LoginPage> {
   void dispose() {
     _usernameController.dispose();
     _passwordController.dispose();
+    _passwordFocusNode.dispose();
     super.dispose();
   }
 
@@ -189,6 +191,9 @@ class _LoginPageState extends State<LoginPage> {
                       "Enter your operator ID",
                       LucideIcons.user,
                       false,
+                      onSubmitted: (_) {
+                        FocusScope.of(context).requestFocus(_passwordFocusNode);
+                      },
                     ),
 
                     const SizedBox(height: 20),
@@ -207,6 +212,8 @@ class _LoginPageState extends State<LoginPage> {
                       "••••••••",
                       LucideIcons.lock,
                       true,
+                      focusNode: _passwordFocusNode,
+                      onSubmitted: (_) => _handleLogin(),
                       suffix: IconButton(
                         icon: Icon(
                           _isPasswordVisible
@@ -314,11 +321,14 @@ Align(
     String hint,
     IconData icon,
     bool isPassword, {
+    FocusNode? focusNode,
+    ValueChanged<String>? onSubmitted,
     Widget? suffix,
   }) {
     return TextFormField(
       controller: controller,
       obscureText: isPassword && !_isPasswordVisible,
+      focusNode: focusNode,
       style: const TextStyle(color: Colors.white, fontSize: 14),
       validator: (value) {
         final text = value?.trim() ?? '';
@@ -333,6 +343,7 @@ Align(
         }
         return null;
       },
+      onFieldSubmitted: onSubmitted,
       decoration: InputDecoration(
         hintText: hint,
         hintStyle: const TextStyle(color: Colors.white24),

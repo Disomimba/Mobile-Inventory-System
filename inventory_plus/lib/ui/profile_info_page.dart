@@ -26,9 +26,11 @@ class ProfileInfoPage extends StatefulWidget {
 class _ProfileInfoPageState extends State<ProfileInfoPage> {
   late TextEditingController _nameController;
   late TextEditingController _emailController;
+late TextEditingController _locationController; 
+  late TextEditingController _phoneController;
   bool _isLoading = false;
   bool _isFetching = true;
-  
+
   // ADD STATE VARIABLE FOR EDIT MODE
   bool _isEditing = false;
 
@@ -37,36 +39,40 @@ class _ProfileInfoPageState extends State<ProfileInfoPage> {
     super.initState();
     _nameController = TextEditingController(text: widget.currentName);
     _emailController = TextEditingController(text: widget.currentEmail ?? "");
-    
+    _locationController = TextEditingController(); 
+    _phoneController = TextEditingController();
     // Fetch latest data from database immediately on load
     _loadLatestDataFromDatabase();
   }
 
   Future<void> _loadLatestDataFromDatabase() async {
     try {
+      // ADD 'location' and 'phone' to the select statement
       final data = await Supabase.instance.client
           .from('profiles')
-          .select('email, name')
+          .select('email, name, address, phone')
           .eq('id', widget.userId)
           .maybeSingle();
 
       if (data != null && mounted) {
         setState(() {
-          _emailController.text = data['email'] ?? "";
-          _nameController.text = data['name'] ?? widget.currentName;
+  _emailController.text = data['email'] ?? "";
+  _nameController.text = data['name'] ?? widget.currentName;
+  _locationController.text = data['address'] ?? ""; // Use controller
+  _phoneController.text = data['phone'] ?? "";       // Use controller
+  _isFetching = false;
+});
+      } else if (mounted) {
+        setState(() {
           _isFetching = false;
         });
-      } else if (mounted) {
-         setState(() {
-            _isFetching = false;
-         });
       }
     } catch (e) {
       debugPrint("Error fetching latest profile data: $e");
       if (mounted) {
-         setState(() {
-            _isFetching = false;
-         });
+        setState(() {
+          _isFetching = false;
+        });
       }
     }
   }
@@ -75,6 +81,8 @@ class _ProfileInfoPageState extends State<ProfileInfoPage> {
   void dispose() {
     _nameController.dispose();
     _emailController.dispose();
+    _locationController.dispose(); // Dispose
+    _phoneController.dispose();
     super.dispose();
   }
 
@@ -84,6 +92,10 @@ class _ProfileInfoPageState extends State<ProfileInfoPage> {
     try {
       final newName = _nameController.text.trim();
       final newEmail = _emailController.text.trim();
+      
+      // FIX: Use the controllers instead of the old variables
+      final newAddress = _locationController.text.trim(); 
+      final newPhone = _phoneController.text.trim();
 
       if (newName.isEmpty) {
         throw Exception("Name cannot be empty.");
@@ -93,7 +105,10 @@ class _ProfileInfoPageState extends State<ProfileInfoPage> {
         userId: widget.userId,
         name: newName,
         email: newEmail,
+        location: newAddress, // Use new variable
+        phone: newPhone,      // Use new variable
       );
+
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -209,15 +224,24 @@ class _ProfileInfoPageState extends State<ProfileInfoPage> {
                           if (currentPasswordController.text.isEmpty ||
                               newPasswordController.text.isEmpty ||
                               confirmPasswordController.text.isEmpty) {
-                            setState(() => errorMessage = "Please fill in all fields.");
+                            setState(
+                              () => errorMessage = "Please fill in all fields.",
+                            );
                             return;
                           }
                           if (newPasswordController.text.trim().length <= 6) {
-                            setState(() => errorMessage = "Password must be more than 6 characters.");
+                            setState(
+                              () => errorMessage =
+                                  "Password must be more than 6 characters.",
+                            );
                             return;
                           }
-                          if (newPasswordController.text != confirmPasswordController.text) {
-                            setState(() => errorMessage = "New passwords do not match.");
+                          if (newPasswordController.text !=
+                              confirmPasswordController.text) {
+                            setState(
+                              () =>
+                                  errorMessage = "New passwords do not match.",
+                            );
                             return;
                           }
 
@@ -241,7 +265,9 @@ class _ProfileInfoPageState extends State<ProfileInfoPage> {
                               Navigator.pop(context);
                               ScaffoldMessenger.of(context).showSnackBar(
                                 const SnackBar(
-                                  content: Text("Password changed successfully!"),
+                                  content: Text(
+                                    "Password changed successfully!",
+                                  ),
                                   backgroundColor: Colors.green,
                                 ),
                               );
@@ -267,10 +293,12 @@ class _ProfileInfoPageState extends State<ProfileInfoPage> {
     );
   }
 
+  // ... inside _ProfileInfoPageState class ...
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF8FAFC),
+      backgroundColor: Colors.white,
       appBar: AppBar(
         backgroundColor: Colors.white,
         elevation: 0,
@@ -280,114 +308,150 @@ class _ProfileInfoPageState extends State<ProfileInfoPage> {
         ),
         title: const Text(
           "Profile Info",
-          style: TextStyle(color: Colors.black87, fontSize: 16, fontWeight: FontWeight.bold),
+          style: TextStyle(
+            color: Colors.black87,
+            fontSize: 16,
+            fontWeight: FontWeight.bold,
+          ),
         ),
         actions: [
-          // TOGGLE BETWEEN EDIT AND SAVE BUTTONS
-          if (!_isEditing)
-            TextButton(
-              onPressed: () {
-                setState(() {
-                  _isEditing = true;
-                });
-              },
-              child: const Text("Edit", style: TextStyle(color: Colors.orange, fontWeight: FontWeight.bold)),
-            )
-          else
-            TextButton(
-              onPressed: (_isLoading || _isFetching) ? null : _saveProfile,
-              child: _isLoading
-                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                  : const Text("Save", style: TextStyle(color: Colors.orange, fontWeight: FontWeight.bold)),
+          TextButton(
+            onPressed: () {
+              if (_isEditing) {
+                _saveProfile();
+              } else {
+                setState(() => _isEditing = true);
+              }
+            },
+            child: Text(
+              _isEditing ? "Save" : "Edit",
+              style: const TextStyle(
+                color: Colors.orange,
+                fontWeight: FontWeight.bold,
+              ),
             ),
+          ),
         ],
       ),
-      body: _isFetching 
-        ? const Center(child: CircularProgressIndicator(color: Colors.orange))
-        : SingleChildScrollView(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // JUST A STATIC AVATAR NOW
-            Center(
-              child: CircleAvatar(
-                radius: 40,
-                backgroundColor: Colors.orange.withOpacity(0.1),
-                child: const Icon(LucideIcons.user, color: Colors.orange, size: 40),
-              ),
-            ),
-            const SizedBox(height: 32),
+      body: _isFetching
+          ? const Center(child: CircularProgressIndicator(color: Colors.orange))
+          : SingleChildScrollView(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                    child: CircleAvatar(
+                      radius: 40,
+                      backgroundColor: Colors.orange.withOpacity(0.1),
+                      child: const Icon(
+                        LucideIcons.user,
+                        color: Colors.orange,
+                        size: 40,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 32),
 
-            const Text("Role", style: TextStyle(color: Colors.grey, fontSize: 12, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.grey.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Text(
-                widget.role.toUpperCase(),
-                style: const TextStyle(color: Colors.black54, fontWeight: FontWeight.bold),
+                  _buildField(
+                    "Role",
+                    widget.role.toUpperCase(),
+                    null,
+                    readOnly: true,
+                  ),
+                  _buildField(
+                    "Full Name",
+                    "",
+                    _nameController,
+                    icon: LucideIcons.user,
+                  ),
+                  _buildField(
+                    "Email Address",
+                    "",
+                    _emailController,
+                    icon: LucideIcons.mail,
+                    type: TextInputType.emailAddress,
+                  ),
+                  _buildField(
+                    "Location",
+                    "",
+                    null,
+                    icon: LucideIcons.mapPin,
+                  ),
+                  _buildField(
+                    "Phone Number",
+                    "",
+                    null,
+                    icon: LucideIcons.phone,
+                  ),
+                  const SizedBox(height: 40),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 50,
+                    child: OutlinedButton.icon(
+                      onPressed: () => _showChangePasswordDialog(context),
+                      icon: const Icon(LucideIcons.lock, size: 18),
+                      label: const Text("Change Password"),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.black87,
+                        side: const BorderSide(color: Colors.black12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
+    );
+  }
 
-            const SizedBox(height: 24),
-            const Text("Full Name", style: TextStyle(color: Colors.grey, fontSize: 12, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
-            TextField(
-              controller: _nameController,
-              readOnly: !_isEditing, // MAKE READ-ONLY IF NOT EDITING
-              decoration: InputDecoration(
-                filled: true,
-                fillColor: _isEditing ? Colors.white : Colors.transparent, // Remove background when viewing
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8), 
-                  borderSide: _isEditing ? BorderSide.none : const BorderSide(color: Colors.black12),
-                ),
-                prefixIcon: const Icon(LucideIcons.user, color: Colors.grey, size: 18),
-              ),
-            ),
-
-            const SizedBox(height: 24),
-            const Text("Email Address", style: TextStyle(color: Colors.grey, fontSize: 12, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
-            TextField(
-              controller: _emailController,
-              readOnly: !_isEditing, // MAKE READ-ONLY IF NOT EDITING
-              keyboardType: TextInputType.emailAddress,
-              decoration: InputDecoration(
-                hintText: _isEditing ? "Enter your email" : "No email set",
-                filled: true,
-                fillColor: _isEditing ? Colors.white : Colors.transparent, // Remove background when viewing
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8), 
-                  borderSide: _isEditing ? BorderSide.none : const BorderSide(color: Colors.black12),
-                ),
-                prefixIcon: const Icon(LucideIcons.mail, color: Colors.grey, size: 18),
-              ),
-            ),
-
-            const SizedBox(height: 40),
-            SizedBox(
-              width: double.infinity,
-              height: 50,
-              child: OutlinedButton.icon(
-                onPressed: () => _showChangePasswordDialog(context),
-                icon: const Icon(LucideIcons.lock, size: 18),
-                label: const Text("Change Password"),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: Colors.black87,
-                  side: const BorderSide(color: Colors.black12),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                ),
-              ),
-            ),
-          ],
+  // Helper to build consistent fields
+  Widget _buildField(
+    String label,
+    String? staticValue,
+    TextEditingController? controller, {
+    IconData? icon,
+    bool readOnly = false,
+    TextInputType type = TextInputType.text,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: const TextStyle(
+            color: Colors.grey,
+            fontSize: 12,
+            fontWeight: FontWeight.bold,
+          ),
         ),
-      ),
+        const SizedBox(height: 8),
+        TextField(
+          controller: controller,
+          readOnly: readOnly || !_isEditing,
+          keyboardType: type,
+          decoration: InputDecoration(
+            // SAFE NULL CHECK HERE
+            hintText: (staticValue != null && staticValue.isNotEmpty)
+                ? staticValue
+                : "Enter $label",
+            filled: true,
+            fillColor: _isEditing && controller != null
+                ? Colors.white
+                : Colors.grey.withOpacity(0.05),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: BorderSide.none,
+            ),
+            prefixIcon: icon != null
+                ? Icon(icon, size: 18, color: Colors.grey)
+                : null,
+          ),
+        ),
+        const SizedBox(height: 24),
+      ],
     );
   }
 }
