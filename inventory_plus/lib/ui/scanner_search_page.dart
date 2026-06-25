@@ -29,24 +29,20 @@ class _ScannerSearchPageState extends State<ScannerSearchPage> {
     return role == 'admin' || role == 'staff';
   }
 
-  void _handleRealScan(String scannedValue) {
+  void _handleRealScan(String scannedValue) async {
     if (!_isScanning) return;
     setState(() => _isScanning = false);
 
-    InventoryItem? foundItem;
     try {
       final cleanValue = scannedValue.trim();
 
-      foundItem = widget.controller.allItems.firstWhere(
+      final foundItem = widget.controller.allItems.firstWhere(
         (item) => item.sku == cleanValue || item.id == cleanValue,
       );
+      // If an item is found, immediately use the callback.
+      widget.onSelectItem(foundItem);
     } catch (_) {
-      foundItem = null; // firstWhere throws an error if no match is found
-    }
-
-    if (foundItem != null) {
-      setState(() => _scannedItem = foundItem);
-    } else {
+      // If firstWhere throws, no item was found. Show an error and reset.
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text("Code: $scannedValue not found"),
@@ -54,12 +50,16 @@ class _ScannerSearchPageState extends State<ScannerSearchPage> {
         ),
       );
       _resetScanner();
+      // Add a small delay before re-enabling scanning to prevent rapid-fire errors.
+      await Future.delayed(const Duration(seconds: 2));
+      if (mounted) setState(() => _isScanning = true);
     }
   }
 
+  // This method was accidentally removed. It's needed to reset the scanner after an error.
   void _resetScanner() {
     setState(() {
-      _scannedItem = null;
+      _scannedItem = null; // Though not used for display, good for state clarity
       _isScanning = true;
     });
   }
@@ -70,28 +70,20 @@ class _ScannerSearchPageState extends State<ScannerSearchPage> {
       body: Stack(
         children: [
           Positioned.fill(
-            child: AnimatedSwitcher(
-              duration: const Duration(milliseconds: 300),
-              child: _scannedItem == null
-                  ? QRScanner(
-                      onScan: _handleRealScan,
-                      isScanning: _isScanning,
-                    )
-                  : Container(
-                      color: Colors.grey[50],
-                      padding: const EdgeInsets.only(top: 140, left: 16, right: 16),
-                      child: _buildScannedResultView(),
-                    ),
+            // SIMPLIFIED: Always show the QR Scanner. The result view is no longer needed.
+            child: QRScanner(
+              key: ValueKey(_isScanning), // Ensures scanner restarts correctly
+              onScan: _handleRealScan,
+              isScanning: _isScanning,
             ),
           ),
-
           Positioned(
-            top: 0, left: 0, right: 0,
+            top: 0,
+            left: 0,
+            right: 0,
             child: _buildHeader(),
           ),
-          
-          if (_scannedItem == null)
-            _buildScannerInstructions(),
+          _buildScannerInstructions(),
         ],
       ),
     );
@@ -121,7 +113,8 @@ class _ScannerSearchPageState extends State<ScannerSearchPage> {
               Row(
                 children: [
                   IconButton(
-                    icon: const Icon(LucideIcons.chevronLeft, color: Colors.white),
+                    icon:
+                        const Icon(LucideIcons.chevronLeft, color: Colors.white),
                     onPressed: () => Navigator.pop(context),
                   ),
                   const SizedBox(width: 4),
@@ -176,70 +169,28 @@ class _ScannerSearchPageState extends State<ScannerSearchPage> {
     );
   }
 
-  Widget _buildScannedResultView() {
-    return Column(
-      key: const ValueKey("result"),
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            const Row(
-              children: [
-                CircleAvatar(radius: 4, backgroundColor: Colors.green),
-                SizedBox(width: 8),
-                Text("Item Found", style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold)),
-              ],
-            ),
-            TextButton(
-              onPressed: _resetScanner,
-              style: TextButton.styleFrom(backgroundColor: Colors.orange[50], shape: const StadiumBorder()),
-              child: const Text("Scan Another", style: TextStyle(color: Colors.orange, fontSize: 12)),
-            ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        ItemCard(item: _scannedItem!, onClick: widget.onSelectItem),
-        const SizedBox(height: 16),
-        _buildQuickActionNotice(),
-      ],
-    );
-  }
-
-  Widget _buildQuickActionNotice() {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.blue[50],
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.blue[100]!),
-      ),
-      child: const Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text("Quick Action", style: TextStyle(color: Colors.blue, fontWeight: FontWeight.bold)),
-          SizedBox(height: 4),
-          Text(
-            "Tap the card above to view full details or update inventory.",
-            style: TextStyle(color: Colors.blue, fontSize: 12),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildScannerInstructions() {
     return Positioned(
-      bottom: 40, left: 0, right: 0,
+      bottom: 40,
+      left: 0,
+      right: 0,
       child: Column(
         children: [
           const Text(
-            "Scan Barcode or QR",
-            style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold, shadows: [Shadow(blurRadius: 10)]),
+            "Scan QR",
+            style: TextStyle(
+                color: Colors.white,
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                shadows: [Shadow(blurRadius: 10)]),
           ),
           const SizedBox(height: 4),
           Text(
             "Align the code within the frame",
-            style: TextStyle(color: Colors.white.withOpacity(0.8), fontSize: 14, shadows: const [Shadow(blurRadius: 10)]),
+            style: TextStyle(
+                color: Colors.white.withOpacity(0.8),
+                fontSize: 14,
+                shadows: const [Shadow(blurRadius: 10)]),
           ),
         ],
       ),

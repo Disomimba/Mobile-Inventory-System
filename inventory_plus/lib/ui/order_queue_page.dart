@@ -243,6 +243,39 @@ class _OrderChecklistPageState extends State<OrderChecklistPage> {
     }
   }
 
+  // NEW: Tutorial Modal
+  void _showTutorialModal() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.help_outline, color: Colors.orange),
+            SizedBox(width: 10),
+            Text("How to Prepare an Order"),
+          ],
+        ),
+        content: const Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text("1. Tap any item in the list to open the QR scanner."),
+            SizedBox(height: 8),
+            Text("2. Scan the QR code on the physical product."),
+            SizedBox(height: 8),
+            Text("3. Confirm the quantity to deduct."),
+            SizedBox(height: 8),
+            Text("4. The item will be automatically checked off."),
+            SizedBox(height: 16),
+            Text("Once all items are checked, the 'Notify Cashier' button will be enabled."),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Got it!", style: TextStyle(color: Colors.orange, fontWeight: FontWeight.bold))),
+        ],
+      ),
+    );
+  }
   // SHOW DEDUCTION MODAL
   // SHOW DEDUCTION MODAL
   void _showDeductionSheet(InventoryItem dbItem, int targetQuantity) {
@@ -331,13 +364,27 @@ class _OrderChecklistPageState extends State<OrderChecklistPage> {
                         Text("ID: #ORD-$shortId", style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.black87)),
                       ],
                     ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFFBEADB),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Text("$_checkedCount/$_totalCount", style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF9E651D))),
+                    Row(
+                      children: [
+                        // Tutorial Button
+                        InkWell(
+                          onTap: _showTutorialModal,
+                          child: const CircleAvatar(
+                            radius: 14,
+                            backgroundColor: Color(0xFF3E322C),
+                            child: Icon(Icons.question_mark, color: Colors.white, size: 16),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFBEADB),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text("$_checkedCount/$_totalCount", style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF9E651D))),
+                        ),
+                      ],
                     ),
                   ],
                 ),
@@ -357,131 +404,107 @@ class _OrderChecklistPageState extends State<OrderChecklistPage> {
           
           const SizedBox(height: 20),
 
-          // FULL WIDTH SCAN BUTTON
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: SizedBox(
-              width: double.infinity,
-              height: 48,
-              child: ElevatedButton.icon(
-                onPressed: _openScannerToCheckoff,
-                icon: const Icon(Icons.camera_alt, size: 18),
-                label: const Text("Scan to Checkoff", style: TextStyle(fontWeight: FontWeight.bold)),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF3E322C), 
-                  foregroundColor: Colors.white,
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                ),
-              ),
-            ),
-          ),
+          // FULL WIDTH SCAN BUTTON (REMOVED)
           
-          const SizedBox(height: 20),
-
           // CHECKLIST ITEMS
           Expanded(
             child: ListView.builder(
               padding: const EdgeInsets.symmetric(horizontal: 20),
               itemCount: widget.order.items.length,
               itemBuilder: (context, index) {
-                final item = widget.order.items[index];
-                final bool isChecked = _checkedItems[item.productId] ?? false;
+  final item = widget.order.items[index];
+  final bool isChecked = _checkedItems[item.productId] ?? false;
 
-                return GestureDetector(
-                  onTap: () {
-                    if (!isChecked) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Please scan the item\'s QR code to check it off.'),
-                          duration: Duration(seconds: 2),
-                        ),
-                      );
-                      _openScannerToCheckoff();
-                    } else {
-                      // Uncheck manually
-                      setState(() {
-                        _checkedItems[item.productId] = false;
-                      });
-                    }
-                  },
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 200),
-                    margin: const EdgeInsets.only(bottom: 12),
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: isChecked ? const Color(0xFFE8F5E9) : Colors.white,
-                      border: Border.all(
-                        color: isChecked ? const Color(0xFFC8E6C9) : const Color(0xFFFBEADB),
-                      ),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Row(
-                      children: [
-                        // Checkbox UI
-                        Container(
-                          width: 24,
-                          height: 24,
-                          decoration: BoxDecoration(
-                            color: isChecked ? const Color(0xFFF58220) : Colors.white,
-                            border: Border.all(color: isChecked ? const Color(0xFFF58220) : Colors.grey.shade400, width: 2),
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          child: isChecked ? const Icon(Icons.check, size: 16, color: Colors.white) : null,
-                        ),
-                        const SizedBox(width: 16),
-                        
-                        // Item Details
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                item.productName,
-                                style: TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 15,
-                                  color: Colors.black87,
-                                  decoration: isChecked ? TextDecoration.lineThrough : null,
-                                ),
-                              ),
-                              const SizedBox(height: 6),
-                              Row(
-                                children: [
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                    decoration: BoxDecoration(
-                                      color: isChecked ? const Color(0xFF81C784) : const Color(0xFFFBEADB),
-                                      borderRadius: BorderRadius.circular(4),
-                                    ),
-                                    child: Text(
-                                      'QTY: ${item.quantity.toString().padLeft(2, '0')}',
-                                      style: TextStyle(
-                                        fontSize: 10,
-                                        fontWeight: FontWeight.bold,
-                                        color: isChecked ? Colors.white : const Color(0xFF9E651D),
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Text("AISLE 12 • BIN A", style: TextStyle(color: Colors.grey.shade600, fontSize: 10, fontWeight: FontWeight.bold)),
-                                ],
-                              ),
-                            ],
-                          ),
-                        ),
-                        
-                        // Location Pin Action
-                        IconButton(
-                          icon: const Icon(Icons.map_outlined, color: Colors.black54),
-                          onPressed: () => _showItemLocationOnMap(item.productId),
-                          tooltip: 'View Location Map',
-                        ),
-                      ],
-                    ),
+  return GestureDetector(
+    onTap: () {
+      if (!isChecked) {
+        _openScannerToCheckoff();
+      } else {
+        // Uncheck manually
+        setState(() {
+          _checkedItems[item.productId] = false;
+        });
+      }
+    },
+    child: Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: isChecked ? const Color(0xFFE8F5E9) : Colors.white,
+        border: Border.all(
+          color: isChecked ? const Color(0xFFC8E6C9) : const Color(0xFFFBEADB),
+        ),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        children: [
+          // Checkbox UI
+          Container(
+            width: 24,
+            height: 24,
+            decoration: BoxDecoration(
+              color: isChecked ? const Color(0xFFF58220) : Colors.white,
+              border: Border.all(
+                color: isChecked ? const Color(0xFFF58220) : Colors.grey.shade400,
+                width: 2,
+              ),
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: isChecked ? const Icon(Icons.check, size: 16, color: Colors.white) : null,
+          ),
+          const SizedBox(width: 16),
+          
+          // Item Details
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  item.productName,
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 15,
+                    color: Colors.black87,
+                    decoration: isChecked ? TextDecoration.lineThrough : null,
                   ),
-                );
-              },
+                ),
+                const SizedBox(height: 6),
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: isChecked ? const Color(0xFF81C784) : const Color(0xFFFBEADB),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        'QTY: ${item.quantity.toString().padLeft(2, '0')}',
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                          color: isChecked ? Colors.white : const Color(0xFF9E651D),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text("AISLE 12 • BIN A", style: TextStyle(color: Colors.grey.shade600, fontSize: 10, fontWeight: FontWeight.bold)),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          
+          // Location Pin Action
+          IconButton(
+            icon: const Icon(Icons.map_outlined, color: Colors.black54),
+            onPressed: () => _showItemLocationOnMap(item.productId),
+            tooltip: 'View Location Map',
+          ),
+        ],
+      ),
+    ),
+  );
+},
             ),
           ),
           

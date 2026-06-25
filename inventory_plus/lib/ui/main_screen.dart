@@ -131,8 +131,8 @@ class _MainScreenState extends State<MainScreen> {
         // 2. DYNAMIC INDICES BASED ON ROLE
         int pageIndex = 0;
         final int dashboardIndex = isAdmin ? pageIndex++ : -1;
-        final int posIndex = isCashier ? pageIndex++ : -1;
-        final int orderQueueIndex = isHelper ? pageIndex++ : -1;
+        final int posIndex = (isCashier || isAdmin) ? pageIndex++ : -1;
+        final int orderQueueIndex = (isHelper || isAdmin) ? pageIndex++ : -1;
         final int inventoryIndex = pageIndex++;
         final int settingsIndex = pageIndex++;
 
@@ -142,10 +142,10 @@ class _MainScreenState extends State<MainScreen> {
         if (isAdmin) {
           pages.add(DashboardPage(controller: widget.controller));
         }
-        if (isCashier) {
+        if (isCashier || isAdmin) {
           pages.add(PosCartPage(controller: widget.controller));
         }
-        if (isHelper) {
+        if (isHelper || isAdmin) {
           pages.add(OrderQueuePage(controller: widget.controller));
         }
         
@@ -208,14 +208,14 @@ class _MainScreenState extends State<MainScreen> {
                           'Dashboard',
                           activeIcon: Icons.dashboard,
                         ),
-                      if (isCashier)
+                      if (isCashier || isAdmin)
                         _buildSidebarItem(
                           posIndex,
                           Icons.point_of_sale_outlined,
                           'POS System',
                           activeIcon: Icons.point_of_sale,
                         ),
-                      if (isHelper )
+                      if (isHelper || isAdmin)
                         _buildSidebarItem(
                           orderQueueIndex,
                           Icons.receipt_long_outlined,
@@ -285,13 +285,13 @@ class _MainScreenState extends State<MainScreen> {
                     selectedIcon: Icon(Icons.dashboard, color: Colors.white),
                     label: 'Dashboard',
                   ),
-                if (isCashier)
+                if (isCashier || isAdmin)
                   const NavigationDestination(
                     icon: Icon(Icons.point_of_sale_outlined, color: Colors.grey),
                     selectedIcon: Icon(Icons.point_of_sale, color: Colors.white),
                     label: 'POS',
                   ),
-                if (isHelper)
+                if (isHelper || isAdmin)
                   const NavigationDestination(
                     icon: Icon(Icons.receipt_long_outlined, color: Colors.grey),
                     selectedIcon: Icon(Icons.receipt_long, color: Colors.white),

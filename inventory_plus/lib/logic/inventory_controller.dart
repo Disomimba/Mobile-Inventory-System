@@ -753,8 +753,6 @@ class InventoryController {
         'created_by': currentUserNumericId,
       }).select();
 
-      print("SUCCESS: Order inserted: $result");
-
       // 2. DEDUCT STOCK IMMEDIATELY (Reserve it)
       // This prevents double booking by updating the inventory instantly for all users
       for (var orderItem in items) {
