@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'dart:io';
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -27,7 +28,6 @@ class _PosCartPageState extends State<PosCartPage> {
   bool _addToCart(InventoryItem item) {
     final currentQty = _cart[item.id] ?? 0;
 
-    // Check against the total inventory limit
     if (currentQty >= item.quantity) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -86,7 +86,7 @@ class _PosCartPageState extends State<PosCartPage> {
         return CustomerOrderItem(
           productId: item.id,
           productName: item.name,
-          quantity: entry.value, // entry.value is already a double
+          quantity: entry.value,
         );
       }).toList();
 
@@ -119,7 +119,7 @@ class _PosCartPageState extends State<PosCartPage> {
         );
         total += item.price * entry.value;
       } catch (e) {
-        // Handle if an item was deleted from inventory but is still somehow in the local cart.
+        // Handle if an item was deleted
       }
     }
     return total;
@@ -288,7 +288,7 @@ class _PosCartPageState extends State<PosCartPage> {
                                             'Confirm Completion',
                                           ),
                                           content: const Text(
-                                            'Are you sure you want to complete this order?\n\nPlease confirm:\n• Payment is received\n• Receipt is printed/sent',
+                                            'Are you sure you want to complete this order?\n\nPlease confirm:\n• Payment is received\n• Receipt is created',
                                           ),
                                           actions: [
                                             TextButton(
@@ -387,7 +387,6 @@ class _PosCartPageState extends State<PosCartPage> {
       body: LayoutBuilder(
         builder: (context, constraints) {
           final isDesktop = constraints.maxWidth >= 800;
-
           if (isDesktop) {
             return Row(
               children: [
@@ -485,8 +484,6 @@ class _PosCartPageState extends State<PosCartPage> {
                           itemCount: _filteredItems.length,
                           itemBuilder: (context, index) {
                             final item = _filteredItems[index];
-
-                            // Calculate the live available stock locally
                             final cartQty = _cart[item.id] ?? 0;
                             final availableStock = item.quantity - cartQty;
                             final isLowStock = availableStock <= 10;
@@ -542,8 +539,9 @@ class _PosCartPageState extends State<PosCartPage> {
                                                 borderRadius:
                                                     BorderRadius.circular(8),
                                               ),
+                                              // UPDATED: Show unit here
                                               child: Text(
-                                                "Stock: $availableStock",
+                                                "Stock: ${availableStock.toStringAsFixed(availableStock.truncateToDouble() == availableStock ? 0 : 2)}${item.unit}",
                                                 style: TextStyle(
                                                   color: isLowStock
                                                       ? Colors.red.shade900
@@ -610,8 +608,6 @@ class _PosCartPageState extends State<PosCartPage> {
                       itemCount: _filteredItems.length,
                       itemBuilder: (context, index) {
                         final item = _filteredItems[index];
-
-                        // Calculate the live available stock locally
                         final cartQty = _cart[item.id] ?? 0;
                         final availableStock = item.quantity - cartQty;
                         final isLowStock = availableStock <= 10;
@@ -661,8 +657,9 @@ class _PosCartPageState extends State<PosCartPage> {
                                             8,
                                           ),
                                         ),
+                                        // UPDATED: Show unit here
                                         child: Text(
-                                          "Stock: $availableStock",
+                                          "Stock: ${availableStock.toStringAsFixed(availableStock.truncateToDouble() == availableStock ? 0 : 2)}${item.unit}",
                                           style: TextStyle(
                                             color: isLowStock
                                                 ? Colors.red.shade900
@@ -823,7 +820,7 @@ class _PosCartPageState extends State<PosCartPage> {
                       final itemId = _cart.keys.elementAt(index);
                       final qty = _cart[itemId]!;
                       InventoryItem item;
-                      try { // This try-catch is good, handles deleted items
+                      try {
                         item = widget.controller.allItems.firstWhere(
                           (i) => i.id == itemId,
                         );
@@ -873,9 +870,11 @@ class _PosCartPageState extends State<PosCartPage> {
                                 mainAxisAlignment:
                                     MainAxisAlignment.spaceBetween,
                                 children: [
+                                  // --- DYNAMIC QUANTITY STEPPER ---
                                   _QuantityStepper(
                                     initialValue: qty,
-                                    onChanged: (newQty) => // newQty is double
+                                    unit: item.unit,
+                                    onChanged: (newQty) =>
                                         _setCartQuantity(itemId, newQty),
                                   ),
                                   IconButton(
@@ -883,7 +882,7 @@ class _PosCartPageState extends State<PosCartPage> {
                                       LucideIcons.trash2,
                                       color: Colors.redAccent,
                                     ),
-                                    onPressed: () => // Set to 0 to remove
+                                    onPressed: () =>
                                         _setCartQuantity(itemId, 0),
                                   ),
                                 ],
@@ -974,11 +973,18 @@ class _PosCartPageState extends State<PosCartPage> {
   }
 }
 
+// --- DYNAMIC STEPPER ---
+// Removes the grey dropdown but keeps fractions dynamically updating next to the text!
 class _QuantityStepper extends StatefulWidget {
   final double initialValue;
+  final String unit;
   final ValueChanged<double> onChanged;
 
-  const _QuantityStepper({required this.initialValue, required this.onChanged}); // No key needed
+  const _QuantityStepper({
+    required this.initialValue,
+    required this.unit,
+    required this.onChanged,
+  });
 
   @override
   State<_QuantityStepper> createState() => _QuantityStepperState();
@@ -986,20 +992,21 @@ class _QuantityStepper extends StatefulWidget {
 
 class _QuantityStepperState extends State<_QuantityStepper> {
   late TextEditingController _controller;
+  bool _isFocused = false;
 
   @override
   void initState() {
     super.initState();
-    _controller = TextEditingController(text: widget.initialValue.toString());
-  } // Good
+    _controller = TextEditingController(
+      text: _formatDisplay(widget.initialValue),
+    );
+  }
 
   @override
   void didUpdateWidget(covariant _QuantityStepper oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // Prevent the text cursor from jumping when re-rendering
-    if (oldWidget.initialValue != widget.initialValue &&
-        _controller.text != widget.initialValue.toString()) {
-      _controller.text = widget.initialValue.toString();
+    if (oldWidget.initialValue != widget.initialValue && !_isFocused) {
+      _controller.text = _formatDisplay(widget.initialValue);
     }
   }
 
@@ -1009,25 +1016,69 @@ class _QuantityStepperState extends State<_QuantityStepper> {
     super.dispose();
   }
 
+  bool _isSolidItem() {
+    final u = widget.unit.toLowerCase();
+    return u == 'pcs' || u == 'box' || u == 'pack' || u == '';
+  }
+
+  String _formatDisplay(double val) {
+    if (_isSolidItem()) return val.toInt().toString();
+    // Keeps clean decimals inside the text box so it's easy to edit
+    return val.truncateToDouble() == val
+        ? val.toInt().toString()
+        : val
+              .toString()
+              .replaceAll(RegExp(r'0*$'), '')
+              .replaceAll(RegExp(r'\.$'), '');
+  }
+
+  // Smart fraction formatter for the label outside the box
+  String _getFractionLabel(double val) {
+    if (val == 0) return "0";
+    int whole = val.truncate();
+    double decimal = val - whole;
+
+    String fraction = "";
+    if ((decimal - 0.25).abs() < 0.001)
+      fraction = "1/4";
+    else if ((decimal - 0.50).abs() < 0.001)
+      fraction = "1/2";
+    else if ((decimal - 0.75).abs() < 0.001)
+      fraction = "3/4";
+
+    if (fraction.isEmpty) {
+      return decimal == 0 ? whole.toString() : "";
+    }
+
+    if (whole == 0) return fraction;
+    return "$whole $fraction";
+  }
+
   void _submit() {
     final val = double.tryParse(_controller.text);
     if (val != null && val >= 0) {
-      widget.onChanged(val);
+      widget.onChanged(_isSolidItem() ? val.truncateToDouble() : val);
     } else {
-      _controller.text = widget.initialValue.toString();
+      _controller.text = _formatDisplay(widget.initialValue);
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final isSolid = _isSolidItem();
+    final step = isSolid ? 1.0 : 0.25; // 0.25 steps for kilos
+    final fractionLabel = !isSolid
+        ? _getFractionLabel(widget.initialValue)
+        : "";
+
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
         IconButton(
           icon: const Icon(Icons.remove_circle_outline, color: Colors.orange),
-          onPressed: () { // Good
-            if (widget.initialValue > 1) {
-              widget.onChanged(widget.initialValue - 1);
+          onPressed: () {
+            if (widget.initialValue > step) {
+              widget.onChanged(widget.initialValue - step);
             }
           },
         ),
@@ -1035,32 +1086,63 @@ class _QuantityStepperState extends State<_QuantityStepper> {
           width: 50,
           child: Focus(
             onFocusChange: (hasFocus) {
+              setState(() => _isFocused = hasFocus);
               if (!hasFocus) _submit();
             },
             child: TextField(
               controller: _controller,
               textAlign: TextAlign.center,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              // This is a good change, allows real-time updates
+              keyboardType: TextInputType.numberWithOptions(decimal: !isSolid),
+              inputFormatters: isSolid
+                  ? [FilteringTextInputFormatter.digitsOnly]
+                  : [FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*'))],
               onChanged: (val) {
                 final parsed = double.tryParse(val);
                 if (parsed != null && parsed >= 0) {
-                  widget.onChanged(parsed.toDouble());
+                  widget.onChanged(
+                    isSolid ? parsed.truncateToDouble() : parsed,
+                  );
                 }
               },
               onSubmitted: (_) => _submit(),
               decoration: const InputDecoration(
                 isDense: true,
                 contentPadding: EdgeInsets.symmetric(vertical: 8),
-                border: UnderlineInputBorder(),
+                border: UnderlineInputBorder(
+                  borderSide: BorderSide(color: Colors.orange),
+                ),
+                focusedBorder: UnderlineInputBorder(
+                  borderSide: BorderSide(color: Colors.orange, width: 2),
+                ),
               ),
             ),
           ),
         ),
         IconButton(
           icon: const Icon(Icons.add_circle_outline, color: Colors.orange),
-          onPressed: () => widget.onChanged(widget.initialValue + 1), // Good
+          onPressed: () => widget.onChanged(widget.initialValue + step),
         ),
+        // Renders the beautiful orange pill: e.g. "1 1/2 kl"
+        if (!isSolid)
+          Container(
+            margin: const EdgeInsets.only(left: 4),
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+            decoration: BoxDecoration(
+              color: Colors.orange.shade50,
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(color: Colors.orange.shade200),
+            ),
+            child: Text(
+              fractionLabel.isNotEmpty
+                  ? "$fractionLabel ${widget.unit}"
+                  : widget.unit,
+              style: const TextStyle(
+                fontWeight: FontWeight.bold,
+                color: Colors.orange,
+                fontSize: 13,
+              ),
+            ),
+          ),
       ],
     );
   }

@@ -109,7 +109,7 @@ class ItemCard extends StatelessWidget {
               const Icon(LucideIcons.package, size: 12),
               const SizedBox(width: 4),
               Text(
-                '${item.quantity} in stock',
+                "${item.quantity.toStringAsFixed(item.quantity.truncateToDouble() == item.quantity ? 0 : 2)}${item.unit}",
                 style: TextStyle(
                   fontSize: 12,
                   color: isLowStock ? Colors.red : Colors.grey.shade600,

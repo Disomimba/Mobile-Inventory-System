@@ -5,7 +5,7 @@ enum ElementType { door, rack, shelf, cashier, pathway }
 class MapElement {
   final String id;
   final ElementType type;
-  Offset position; 
+  Offset position;
   Size size;
   final String label;
   double rotation;
@@ -21,7 +21,7 @@ class MapElement {
 
   Map<String, dynamic> toJson() => {
     'id': id,
-    'type': type.index, 
+    'type': type.index,
     'dx': position.dx,
     'dy': position.dy,
     'width': size.width,
@@ -33,8 +33,14 @@ class MapElement {
   factory MapElement.fromJson(Map<String, dynamic> json) => MapElement(
     id: json['id'],
     type: ElementType.values[json['type'] ?? 0],
-    position: Offset((json['dx'] ?? 0.0).toDouble(), (json['dy'] ?? 0.0).toDouble()),
-    size: Size((json['width'] ?? 100.0).toDouble(), (json['height'] ?? 100.0).toDouble()),
+    position: Offset(
+      (json['dx'] ?? 0.0).toDouble(),
+      (json['dy'] ?? 0.0).toDouble(),
+    ),
+    size: Size(
+      (json['width'] ?? 100.0).toDouble(),
+      (json['height'] ?? 100.0).toDouble(),
+    ),
     label: json['label'] ?? "",
     rotation: (json['rotation'] ?? 0.0).toDouble(),
   );
@@ -61,13 +67,14 @@ class InventoryItem {
   final String category;
   final String description;
   final String imageUrl;
-  final ItemLocation? location; 
-  final String? locationId;    
+  final ItemLocation? location;
+  final String? locationId;
   final String? manufacturer;
   final String? model;
   final String? productSize;
   final String? shelfLevel;
   final String? binNumber;
+  final String unit; // ADDED UNIT
 
   InventoryItem({
     required this.id,
@@ -85,6 +92,7 @@ class InventoryItem {
     this.productSize,
     this.shelfLevel,
     this.binNumber,
+    this.unit = 'pcs', // DEFAULT UNIT
   });
 
   factory InventoryItem.fromSupabase(Map<String, dynamic> map) {
@@ -103,6 +111,7 @@ class InventoryItem {
       productSize: map['product_size'],
       shelfLevel: map['shelf_level'],
       binNumber: map['bin_number'],
+      unit: map['unit'] ?? 'pcs', // READ FROM DB
     );
   }
 
@@ -111,6 +120,7 @@ class InventoryItem {
     String? sku,
     double? price,
     double? quantity,
+    String? category,
     String? description,
     String? imageUrl,
     String? locationId,
@@ -119,6 +129,7 @@ class InventoryItem {
     String? productSize,
     String? shelfLevel,
     String? binNumber,
+    String? unit, // ADDED PARAMETER
   }) {
     return InventoryItem(
       id: this.id,
@@ -126,15 +137,16 @@ class InventoryItem {
       sku: sku ?? this.sku,
       price: price ?? this.price,
       quantity: quantity ?? this.quantity,
-      category: this.category,
-      imageUrl: imageUrl ?? this.imageUrl,
+      category: category ?? this.category,
       description: description ?? this.description,
+      imageUrl: imageUrl ?? this.imageUrl,
       locationId: locationId ?? this.locationId,
       manufacturer: manufacturer ?? this.manufacturer,
       model: model ?? this.model,
       productSize: productSize ?? this.productSize,
       shelfLevel: shelfLevel ?? this.shelfLevel,
       binNumber: binNumber ?? this.binNumber,
+      unit: unit ?? this.unit, // ASSIGN UNIT
     );
   }
 }

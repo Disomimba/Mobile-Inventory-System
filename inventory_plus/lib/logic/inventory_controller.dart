@@ -110,6 +110,7 @@ class InventoryController {
             'product_size': newItem.productSize,
             'shelf_level': newItem.shelfLevel,
             'bin_number': newItem.binNumber,
+            'unit': newItem.unit, // PASS TO DB
           })
           .select()
           .single();
@@ -171,7 +172,7 @@ class InventoryController {
       final imageUrl = supabase.storage
           .from('product_images')
           .getPublicUrl(path);
-      return imageUrl;
+      return imageUrl;  
     } catch (e) {
       print("Error uploading image: $e");
       return null;
@@ -207,13 +208,13 @@ class InventoryController {
         final oldItem = _items[index];
         final quantityChange = updatedItem.quantity - oldItem.quantity;
 
-        // Optimistically update local state immediately to prevent race conditions
+        // Optimistically update local state immediately
         _items[index] = updatedItem;
 
         if (quantityChange != 0) {
           await _logTransaction(
             productId: updatedItem.id,
-            type: quantityChange > 0 ? 'stock_in' : 'checkout', // This logic is fine for double as well
+            type: quantityChange > 0 ? 'stock_in' : 'checkout',
             quantityChange: quantityChange,
             newQuantity: updatedItem.quantity,
           );
@@ -235,6 +236,7 @@ class InventoryController {
             'bin_number': updatedItem.binNumber,
             'image_url': updatedItem.imageUrl,
             'map_element_id': updatedItem.locationId,
+            'unit': updatedItem.unit, // PASS TO DB
           })
           .eq('id', updatedItem.id);
     } catch (e) {
@@ -411,6 +413,7 @@ class InventoryController {
     String? shelfLevel,
     String? binNumber,
     String? imageUrl,
+    String? unit, // ADDED
   }) {
     return originalItem.copyWith(
       name: newName,
@@ -425,11 +428,8 @@ class InventoryController {
       shelfLevel: shelfLevel,
       binNumber: binNumber,
       imageUrl: imageUrl,
+      unit: unit, // ADDED
     );
-  }
-
-  InventoryItem calculateCheckout(InventoryItem item, double quantity) {
-    return item.copyWith(quantity: (item.quantity - quantity).clamp(0.0, 999999.0));
   }
 
   InventoryItem createNewItem({
@@ -446,12 +446,13 @@ class InventoryController {
     String? shelfLevel,
     String? binNumber,
     String? imageUrl,
+    String unit = 'pcs', // ADDED
   }) {
     return InventoryItem(
       id: '',
       name: name,
       sku: sku,
-      price: double.tryParse(price) ?? 0.0, // No change needed here
+      price: double.tryParse(price) ?? 0.0,
       quantity: double.tryParse(quantity) ?? 0.0,
       category: category,
       description: description,
@@ -462,9 +463,14 @@ class InventoryController {
       shelfLevel: shelfLevel,
       binNumber: binNumber,
       imageUrl: imageUrl ?? '',
+      unit: unit, // ADDED
     );
   }
 
+  InventoryItem calculateCheckout(InventoryItem item, double quantity) {
+    return item.copyWith(quantity: (item.quantity - quantity).clamp(0.0, 999999.0));
+  }
+  
   InventoryItem? findItemByCode(String code) {
     try {
       return _items.firstWhere((item) => item.sku.trim() == code.trim());

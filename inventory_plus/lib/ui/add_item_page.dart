@@ -40,6 +40,9 @@ class _AddItemPageState extends State<AddItemPage> {
   XFile? _selectedImage;
   final ImagePicker _picker = ImagePicker();
 
+  // State to hold the selected unit of measurement
+  String _selectedUnit = 'pcs';
+
   @override
   void dispose() {
     _nameController.dispose();
@@ -145,7 +148,9 @@ class _AddItemPageState extends State<AddItemPage> {
         return Dialog(
           insetPadding: const EdgeInsets.all(16),
           clipBehavior: Clip.antiAlias,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
           child: Column(
             children: [
               AppBar(
@@ -161,7 +166,8 @@ class _AddItemPageState extends State<AddItemPage> {
                 child: StoreMap(
                   controller: widget.controller,
                   mode: MapMode.pick,
-                  onElementSelected: (element) => Navigator.pop(context, element),
+                  onElementSelected: (element) =>
+                      Navigator.pop(context, element),
                 ),
               ),
             ],
@@ -173,7 +179,6 @@ class _AddItemPageState extends State<AddItemPage> {
   }
 
   void _submitData() async {
-    // TRIGGER FORM VALIDATION
     if (!_formKey.currentState!.validate()) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -224,6 +229,7 @@ class _AddItemPageState extends State<AddItemPage> {
         binNumber: _binNumberController.text.trim(),
         mapLocationId: _selectedMapElement?.id,
         imageUrl: finalImageUrl ?? '',
+        unit: _selectedUnit, // Pass the selected unit to controller
       );
 
       await widget.controller.addItem(newItem);
@@ -376,18 +382,31 @@ class _AddItemPageState extends State<AddItemPage> {
                                 child: _buildTextField(
                                   _quantityController,
                                   "Initial Stock",
-                                 LucideIcons.weight,
+                                  LucideIcons.archive,
                                   isNumber: true,
                                 ),
                               ),
                             ],
                           ),
                           const SizedBox(height: 16),
-                          _buildTextField(
-                            _categoryController,
-                            "Category",
-                            LucideIcons.tag,
+
+                          // Custom Unit Dropdown & Category
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(flex: 1, child: _buildUnitDropdown()),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                flex: 1,
+                                child: _buildTextField(
+                                  _categoryController,
+                                  "Category",
+                                  LucideIcons.tag,
+                                ),
+                              ),
+                            ],
                           ),
+
                           const SizedBox(height: 16),
                           _buildTextField(
                             _descController,
@@ -407,6 +426,71 @@ class _AddItemPageState extends State<AddItemPage> {
                 ],
               ),
             ),
+    );
+  }
+
+  // Widget builder for the Unit Dropdown with descriptions
+  Widget _buildUnitDropdown() {
+    // Map the short database values to user-friendly display labels
+    final Map<String, String> unitLabels = {
+      'pcs': 'Pieces (pcs)',
+      'box': 'Boxes (box)',
+      'pack': 'Packs (pack)',
+      'kl': 'Kilos (kl)',
+      'g': 'Grams (g)',
+      'L': 'Liters (L)',
+      'm': 'Meters (m)',
+    };
+
+    return DropdownButtonFormField<String>(
+      value: _selectedUnit,
+      isExpanded: true, // Prevents text overflow
+      decoration: InputDecoration(
+        labelText: "Unit of Measure",
+        // This is the description telling them WHY they need to pick this
+        helperText:
+            "Sets POS rules: Whole numbers (Pieces) vs. Decimals (Kilos).",
+        helperMaxLines: 2,
+        helperStyle: TextStyle(
+          fontSize: 11,
+          color: Colors.grey.shade600,
+          fontStyle: FontStyle.italic,
+        ),
+        prefixIcon: const Icon(
+          LucideIcons.scale,
+          size: 18,
+          color: Colors.orange,
+        ),
+        filled: true,
+        fillColor: Colors.white,
+        contentPadding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: Colors.grey.shade200),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: Colors.grey.shade200),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: Colors.orange, width: 2),
+        ),
+      ),
+      items: unitLabels.entries.map((entry) {
+        return DropdownMenuItem(
+          value: entry.key, // Saves 'pcs' or 'kl' to the database
+          child: Text(
+            entry.value,
+            style: const TextStyle(fontSize: 14),
+          ), // Shows 'Pieces (pcs)' to the user
+        );
+      }).toList(),
+      onChanged: (val) {
+        if (val != null) {
+          setState(() => _selectedUnit = val);
+        }
+      },
     );
   }
 
