@@ -32,7 +32,12 @@ class _InventoryPageState extends State<InventoryPage> {
 
   @override
   Widget build(BuildContext context) {
-    final categories = widget.controller.getUniqueCategories();
+    // Fetch categories and immediately remove 'Unassigned'
+    final categories = widget.controller
+        .getUniqueCategories()
+        .where((category) => category.toLowerCase() != 'unassigned')
+        .toList();
+
     final filteredInventory = widget.controller.filterInventory(
       query: _searchQuery,
       category: _selectedCategory,
@@ -73,51 +78,50 @@ class _InventoryPageState extends State<InventoryPage> {
                         color: Color(0xFF111827),
                       ),
                     ),
-                    // ADD THIS IF STATEMENT:
                     if (widget.controller.isAdmin)
                       ElevatedButton.icon(
                         onPressed: () {
-                        final isDesktop =
-                            MediaQuery.of(context).size.width >= 600;
-                        if (isDesktop) {
-                          showDialog(
-                            context: context,
-                            builder: (context) => Dialog(
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(16),
+                          final isDesktop =
+                              MediaQuery.of(context).size.width >= 600;
+                          if (isDesktop) {
+                            showDialog(
+                              context: context,
+                              builder: (context) => Dialog(
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(16),
+                                ),
+                                clipBehavior: Clip.antiAlias,
+                                child: SizedBox(
+                                  width: 500, // Capped width for Desktop Modal
+                                  height: 750,
+                                  child: AddItemPage(
+                                    controller: widget.controller,
+                                    onAdd: (newItem) => setState(() {}),
+                                  ),
+                                ),
                               ),
-                              clipBehavior: Clip.antiAlias,
-                              child: SizedBox(
-                                width: 500, // Capped width for Desktop Modal
-                                height: 750,
-                                child: AddItemPage(
+                            );
+                          } else {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => AddItemPage(
                                   controller: widget.controller,
                                   onAdd: (newItem) => setState(() {}),
                                 ),
                               ),
-                            ),
-                          );
-                        } else {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) => AddItemPage(
-                                controller: widget.controller,
-                                onAdd: (newItem) => setState(() {}),
-                              ),
-                            ),
-                          );
-                        }
-                      },
-                      icon: const Icon(LucideIcons.plus, size: 14),
-                      label: const Text("New Item"),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.orange,
-                        foregroundColor: Colors.white,
-                        elevation: 0,
-                        shape: const StadiumBorder(),
+                            );
+                          }
+                        },
+                        icon: const Icon(LucideIcons.plus, size: 14),
+                        label: const Text("New Item"),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.orange,
+                          foregroundColor: Colors.white,
+                          elevation: 0,
+                          shape: const StadiumBorder(),
+                        ),
                       ),
-                    ),
                   ],
                 ),
                 const SizedBox(height: 16),
