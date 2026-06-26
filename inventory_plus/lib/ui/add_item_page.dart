@@ -457,7 +457,7 @@ class _AddItemPageState extends State<AddItemPage> {
     };
 
     return DropdownButtonFormField<String>(
-      value: _selectedUnit,
+      initialValue: _selectedUnit,
       isExpanded: true, // Prevents text overflow
       decoration: InputDecoration(
         labelText: "Unit of Measure",

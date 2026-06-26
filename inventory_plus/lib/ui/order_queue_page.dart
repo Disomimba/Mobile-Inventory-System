@@ -18,8 +18,9 @@ class _OrderQueuePageState extends State<OrderQueuePage> {
   Duration? _timeOffset;
   final Set<String> _expandedOrders = {};
 
-  // Cache the last stream snapshot so expand/collapse setState
-  // never triggers a full StreamBuilder rebuild.
+  // Track the selected order to show the checklist inline (keeps the sidebar visible!)
+  dynamic _selectedOrder;
+
   List<dynamic> _cachedOrders = [];
 
   @override
@@ -65,26 +66,40 @@ class _OrderQueuePageState extends State<OrderQueuePage> {
     });
   }
 
-  void _navigateToOrderChecklist(dynamic order) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) =>
-            OrderChecklistPage(order: order, controller: widget.controller),
-      ),
-    );
+  void _openOrderChecklist(dynamic order) {
+    // Renders the checklist inline so the sidebar doesn't disappear
+    setState(() {
+      _selectedOrder = order;
+    });
+  }
+
+  void _closeOrderChecklist() {
+    setState(() {
+      _selectedOrder = null;
+    });
   }
 
   @override
   Widget build(BuildContext context) {
+    // IF AN ORDER IS SELECTED, SHOW THE INLINE CHECKLIST
+    if (_selectedOrder != null) {
+      return OrderChecklistPage(
+        order: _selectedOrder,
+        controller: widget.controller,
+        onBack: _closeOrderChecklist,
+      );
+    }
+
+    // OTHERWISE, SHOW THE LIST
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: Colors.white, // Plain white background
       appBar: AppBar(
+        automaticallyImplyLeading: false, // <--- ADD THIS FIX HERE
         title: const Text(
           'Helper Dashboard',
           style: TextStyle(color: Colors.black87, fontWeight: FontWeight.bold),
         ),
-        backgroundColor: Colors.transparent,
+        backgroundColor: Colors.transparent, // Keeps it seamless with white
         elevation: 0,
         iconTheme: const IconThemeData(color: Colors.black87),
       ),
@@ -101,8 +116,6 @@ class _OrderQueuePageState extends State<OrderQueuePage> {
             return Center(child: Text('Error: ${snapshot.error}'));
           }
 
-          // Update the cache only when new data arrives from the stream,
-          // not on every setState (e.g. expand/collapse).
           if (snapshot.hasData) {
             _cachedOrders = snapshot.data!;
           }
@@ -141,7 +154,7 @@ class _OrderQueuePageState extends State<OrderQueuePage> {
                               isExpanded: _expandedOrders.contains(order.id),
                               onToggle: () => _toggleExpand(order.id),
                               timeAgo: _timeAgo(order.createdAt),
-                              onPrepare: () => _navigateToOrderChecklist(order),
+                              onPrepare: () => _openOrderChecklist(order),
                             );
                           },
                         ),
@@ -158,7 +171,7 @@ class _OrderQueuePageState extends State<OrderQueuePage> {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFFFBEADB),
+        color: const Color(0xFFFBEADB), // Restored original peach color
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: Colors.grey.shade300, width: 0.5),
       ),
@@ -188,10 +201,6 @@ class _OrderQueuePageState extends State<OrderQueuePage> {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Extracted card widget so AnimationController lives at the right scope and
-// the parent list never rebuilds just because one card expands.
-// ─────────────────────────────────────────────────────────────────────────────
 class _OrderCard extends StatelessWidget {
   final dynamic order;
   final InventoryController controller;
@@ -238,7 +247,6 @@ class _OrderCard extends StatelessWidget {
         ),
         child: Column(
           children: [
-            // ── Collapsed header (always visible) ──────────────────────
             Padding(
               padding: const EdgeInsets.all(16),
               child: Row(
@@ -289,8 +297,6 @@ class _OrderCard extends StatelessWidget {
                       ),
                     ],
                   ),
-                  // Prepare button — absorbs the tap so it doesn't
-                  // also trigger the expand toggle.
                   GestureDetector(
                     onTap: onPrepare,
                     behavior: HitTestBehavior.opaque,
@@ -317,8 +323,6 @@ class _OrderCard extends StatelessWidget {
                 ],
               ),
             ),
-
-            // ── Animated expandable section ────────────────────────────
             AnimatedSize(
               duration: const Duration(milliseconds: 280),
               curve: Curves.easeInOut,
@@ -333,9 +337,6 @@ class _OrderCard extends StatelessWidget {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// The expanded items section — separated so it only builds when needed.
-// ─────────────────────────────────────────────────────────────────────────────
 class _ExpandedItems extends StatelessWidget {
   final dynamic order;
   final InventoryController controller;
@@ -374,14 +375,13 @@ class _ExpandedItems extends StatelessWidget {
               ),
               child: Row(
                 children: [
-                  // Qty badge
                   Container(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 8,
                       vertical: 4,
                     ),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFFBEADB),
+                      color: const Color(0xFFFBEADB), // Restored peach
                       borderRadius: BorderRadius.circular(4),
                     ),
                     child: Text(
@@ -389,12 +389,11 @@ class _ExpandedItems extends StatelessWidget {
                       style: const TextStyle(
                         fontSize: 11,
                         fontWeight: FontWeight.bold,
-                        color: Color(0xFF9E651D),
+                        color: Color(0xFF9E651D), // Restored orange/brown
                       ),
                     ),
                   ),
                   const SizedBox(width: 12),
-                  // Name + location
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -439,16 +438,18 @@ class _ExpandedItems extends StatelessWidget {
 }
 
 // ============================================================================
-// FULL SCREEN CHECKLIST PAGE
+// INLINE CHECKLIST PAGE
 // ============================================================================
 class OrderChecklistPage extends StatefulWidget {
   final dynamic order;
   final InventoryController controller;
+  final VoidCallback onBack;
 
   const OrderChecklistPage({
     super.key,
     required this.order,
     required this.controller,
+    required this.onBack,
   });
 
   @override
@@ -456,24 +457,19 @@ class OrderChecklistPage extends StatefulWidget {
 }
 
 class _OrderChecklistPageState extends State<OrderChecklistPage> {
-  final Map<String, bool> _checkedItems = {};
+  // Using a Set of indices guarantees we track completion perfectly
+  final Set<int> _checkedIndices = {};
 
-  @override
-  void initState() {
-    super.initState();
-    for (var item in widget.order.items) {
-      _checkedItems[item.productId] = false;
-    }
-  }
-
-  bool get _allChecked => _checkedItems.values.every((v) => v);
-  int get _checkedCount => _checkedItems.values.where((v) => v).length;
+  bool get _allChecked =>
+      _checkedIndices.length == widget.order.items.length &&
+      widget.order.items.isNotEmpty;
+  int get _checkedCount => _checkedIndices.length;
   int get _totalCount => widget.order.items.length;
 
   void _markPrepared() async {
     await widget.controller.updateOrderStatus(widget.order.id, 'prepared');
     if (mounted) {
-      Navigator.pop(context);
+      widget.onBack();
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Order marked as Prepared!'),
@@ -518,6 +514,64 @@ class _OrderChecklistPageState extends State<OrderChecklistPage> {
     }
   }
 
+  void _showPickConfirmationSheet(
+    InventoryItem dbItem,
+    double targetQuantity,
+    int listIndex,
+  ) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => PickConfirmationSheet(
+        item: dbItem,
+        targetQuantity: targetQuantity,
+        onConfirm: () async {
+          if (mounted) {
+            setState(() {
+              _checkedIndices.add(listIndex);
+            });
+            Navigator.pop(context);
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('${dbItem.name} checked off!'),
+                backgroundColor: Colors.green,
+              ),
+            );
+          }
+        },
+      ),
+    );
+  }
+
+  void _openScannerToCheckoff(int index, String expectedProductId) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => ScannerSearchPage(
+          controller: widget.controller,
+          onSelectItem: (scannedItem) {
+            Navigator.pop(context); // Close scanner
+            if (scannedItem.id == expectedProductId) {
+              _showPickConfirmationSheet(
+                scannedItem,
+                widget.order.items[index].quantity,
+                index,
+              );
+            } else {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('${scannedItem.name} is not the right item!'),
+                  backgroundColor: Colors.red,
+                ),
+              );
+            }
+          },
+        ),
+      ),
+    );
+  }
+
   void _showTutorialModal() {
     showDialog(
       context: context,
@@ -560,59 +614,6 @@ class _OrderChecklistPageState extends State<OrderChecklistPage> {
     );
   }
 
-  void _showPickConfirmationSheet(InventoryItem dbItem, double targetQuantity) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (context) => PickConfirmationSheet(
-        item: dbItem,
-        targetQuantity: targetQuantity,
-        onConfirm: () async {
-          if (mounted) {
-            setState(() {
-              _checkedItems[dbItem.id] = true;
-            });
-            Navigator.pop(context);
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text('${dbItem.name} checked off!'),
-                backgroundColor: Colors.green,
-              ),
-            );
-          }
-        },
-      ),
-    );
-  }
-
-  void _openScannerToCheckoff() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => ScannerSearchPage(
-          controller: widget.controller,
-          onSelectItem: (scannedItem) {
-            Navigator.pop(context);
-            if (_checkedItems.containsKey(scannedItem.id)) {
-              final orderItem = widget.order.items.firstWhere(
-                (i) => i.productId == scannedItem.id,
-              );
-              _showPickConfirmationSheet(scannedItem, orderItem.quantity);
-            } else {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text('${scannedItem.name} is not in this order!'),
-                  backgroundColor: Colors.red,
-                ),
-              );
-            }
-          },
-        ),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final String shortId = widget.order.id
@@ -622,11 +623,14 @@ class _OrderChecklistPageState extends State<OrderChecklistPage> {
     final double progress = _totalCount == 0 ? 0 : _checkedCount / _totalCount;
 
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: Colors.white, // Plain White Background
       appBar: AppBar(
-        backgroundColor: Colors.transparent,
+        backgroundColor: Colors.white,
         elevation: 0,
-        iconTheme: const IconThemeData(color: Colors.black87),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: Colors.black87),
+          onPressed: widget.onBack,
+        ),
       ),
       body: Column(
         children: [
@@ -683,7 +687,9 @@ class _OrderChecklistPageState extends State<OrderChecklistPage> {
                             vertical: 8,
                           ),
                           decoration: BoxDecoration(
-                            color: const Color(0xFFFBEADB),
+                            color: const Color(
+                              0xFFFBEADB,
+                            ), // Restored original peach
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: Text(
@@ -691,7 +697,9 @@ class _OrderChecklistPageState extends State<OrderChecklistPage> {
                             style: const TextStyle(
                               fontSize: 18,
                               fontWeight: FontWeight.bold,
-                              color: Color(0xFF9E651D),
+                              color: Color(
+                                0xFF9E651D,
+                              ), // Restored original text color
                             ),
                           ),
                         ),
@@ -706,17 +714,23 @@ class _OrderChecklistPageState extends State<OrderChecklistPage> {
                   curve: Curves.easeInOut,
                   builder: (context, value, _) => LinearProgressIndicator(
                     value: value,
-                    backgroundColor: const Color(0xFFFBEADB),
-                    color: const Color(0xFFF58220),
+                    backgroundColor: const Color(
+                      0xFFFBEADB,
+                    ), // Restored peach background
+                    color: _allChecked
+                        ? Colors.green
+                        : const Color(
+                            0xFFF58220,
+                          ), // Orange initially, GREEN on success!
                     minHeight: 6,
                     borderRadius: BorderRadius.circular(10),
                   ),
                 ),
                 const SizedBox(height: 8),
-                const Text(
-                  "READY FOR PICKING",
+                Text(
+                  _allChecked ? "ALL ITEMS PICKED" : "READY FOR PICKING",
                   style: TextStyle(
-                    color: Colors.grey,
+                    color: _allChecked ? Colors.green : Colors.grey,
                     fontSize: 10,
                     fontWeight: FontWeight.bold,
                     letterSpacing: 1.2,
@@ -732,7 +746,7 @@ class _OrderChecklistPageState extends State<OrderChecklistPage> {
               itemCount: widget.order.items.length,
               itemBuilder: (context, index) {
                 final item = widget.order.items[index];
-                final bool isChecked = _checkedItems[item.productId] ?? false;
+                final bool isChecked = _checkedIndices.contains(index);
 
                 InventoryItem? dbItem;
                 try {
@@ -760,12 +774,21 @@ class _OrderChecklistPageState extends State<OrderChecklistPage> {
                 return GestureDetector(
                   onTap: () {
                     if (!isChecked) {
-                      _openScannerToCheckoff();
+                      _openScannerToCheckoff(index, item.productId);
                     } else {
                       setState(() {
-                        _checkedItems[item.productId] = false;
+                        _checkedIndices.remove(index);
                       });
                     }
+                  },
+                  onLongPress: () {
+                    // Manual override just so you can test the green logic quickly!
+                    setState(() {
+                      if (isChecked)
+                        _checkedIndices.remove(index);
+                      else
+                        _checkedIndices.add(index);
+                    });
                   },
                   child: AnimatedContainer(
                     duration: const Duration(milliseconds: 250),
@@ -790,7 +813,9 @@ class _OrderChecklistPageState extends State<OrderChecklistPage> {
                           height: 24,
                           decoration: BoxDecoration(
                             color: isChecked
-                                ? const Color(0xFFF58220)
+                                ? const Color(
+                                    0xFFF58220,
+                                  ) // Original orange checkmark color
                                 : Colors.white,
                             border: Border.all(
                               color: isChecked
@@ -837,7 +862,9 @@ class _OrderChecklistPageState extends State<OrderChecklistPage> {
                                     decoration: BoxDecoration(
                                       color: isChecked
                                           ? const Color(0xFF81C784)
-                                          : const Color(0xFFFBEADB),
+                                          : const Color(
+                                              0xFFFBEADB,
+                                            ), // Restored peach
                                       borderRadius: BorderRadius.circular(4),
                                     ),
                                     child: Text(
@@ -847,7 +874,9 @@ class _OrderChecklistPageState extends State<OrderChecklistPage> {
                                         fontWeight: FontWeight.bold,
                                         color: isChecked
                                             ? Colors.white
-                                            : const Color(0xFF9E651D),
+                                            : const Color(
+                                                0xFF9E651D,
+                                              ), // Restored text color
                                       ),
                                     ),
                                   ),
@@ -887,7 +916,7 @@ class _OrderChecklistPageState extends State<OrderChecklistPage> {
           Container(
             padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
-              color: const Color(0xFFF8E9DE),
+              color: const Color(0xFFF8E9DE), // Restored original peach panel
               border: Border(
                 top: BorderSide(color: Colors.orange.withOpacity(0.2)),
               ),
@@ -907,10 +936,6 @@ class _OrderChecklistPageState extends State<OrderChecklistPage> {
                 ),
                 style:
                     ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFFCEB8A6),
-                      disabledBackgroundColor: const Color(0xFFE2D4C8),
-                      disabledForegroundColor: Colors.white70,
-                      foregroundColor: Colors.white,
                       elevation: 0,
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(8),
@@ -920,9 +945,20 @@ class _OrderChecklistPageState extends State<OrderChecklistPage> {
                         states,
                       ) {
                         if (states.contains(WidgetState.disabled)) {
-                          return const Color(0xFFDAC7B8);
+                          return const Color(
+                            0xFFDAC7B8,
+                          ); // Original disabled color
                         }
-                        return const Color(0xFFF58220);
+                        return Colors
+                            .green; // Turn GREEN when active (success state!)
+                      }),
+                      foregroundColor: WidgetStateProperty.resolveWith((
+                        states,
+                      ) {
+                        if (states.contains(WidgetState.disabled)) {
+                          return Colors.white70; // Original disabled text
+                        }
+                        return Colors.white;
                       }),
                     ),
               ),
@@ -1093,7 +1129,7 @@ class PickConfirmationSheet extends StatelessWidget {
                   style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                 ),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.green,
+                  backgroundColor: Colors.green, // Green by default here
                   foregroundColor: Colors.white,
                   elevation: 0,
                   shape: RoundedRectangleBorder(

@@ -2,9 +2,7 @@
   import 'package:flutter_dotenv/flutter_dotenv.dart'; // Add this import
 
 import 'package:http/http.dart' as http;
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 
-import 'package:emailjs/emailjs.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter/foundation.dart';
 import 'dart:convert';

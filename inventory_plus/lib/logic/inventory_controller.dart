@@ -791,7 +791,6 @@ class InventoryController {
       // 1. Update order status to completed ONLY.
       // Stock is NO LONGER deducted here because it was reserved in createCustomerOrder.
       await updateOrderStatus(order.id, 'completed');
-    } catch (e) {
     } finally {
       _processingOrders!.remove(order.id);
     }

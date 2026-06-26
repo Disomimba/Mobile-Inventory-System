@@ -261,12 +261,15 @@ class _LoginPageState extends State<LoginPage> {
       style: const TextStyle(color: Colors.white, fontSize: 14),
       validator: (value) {
         final text = value?.trim() ?? '';
-        if (text.isEmpty)
+        if (text.isEmpty) {
           return isPassword ? 'Password is required' : 'Username is required';
-        if (isPassword && text.length < 6)
+        }
+        if (isPassword && text.length < 6) {
           return 'Password must be at least 6 characters';
-        if (!isPassword && text.length < 3)
+        }
+        if (!isPassword && text.length < 3) {
           return 'Username must be at least 3 characters';
+        }
         return null;
       },
       onFieldSubmitted: onSubmitted,

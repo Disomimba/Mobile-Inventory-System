@@ -145,7 +145,7 @@ class _StaffManagementPageState extends State<StaffManagementPage> {
             backgroundColor: Colors.white,
             shape:
                 RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            child: Container(
+            child: SizedBox(
               width: 420,
               child: SingleChildScrollView(
                 padding: const EdgeInsets.all(28),
@@ -244,7 +244,7 @@ class _StaffManagementPageState extends State<StaffManagementPage> {
                                 fontWeight: FontWeight.w600)),
                         const SizedBox(height: 6),
                         DropdownButtonFormField<String>(
-                          value: selectedRole,
+                          initialValue: selectedRole,
                           dropdownColor: Colors.white,
                           style: const TextStyle(
                               color: Color(0xFF1A1F36), fontSize: 14),

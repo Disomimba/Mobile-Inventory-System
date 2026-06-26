@@ -4,7 +4,6 @@ import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'package:fl_chart/fl_chart.dart';
 import '../logic/inventory_controller.dart';
 import '../data/inventory.dart';
 
@@ -996,7 +995,7 @@ class _RestockModalContentState extends State<_RestockModalContent> {
                       ),
                     ),
                     Text(
-                      "Price: \₱${widget.item.price.toStringAsFixed(2)}",
+                      "Price: ₱${widget.item.price.toStringAsFixed(2)}",
                       style: const TextStyle(
                         color: Colors.grey,
                         fontWeight: FontWeight.w500,
@@ -1134,9 +1133,9 @@ class _DashboardQuantityStepperState extends State<_DashboardQuantityStepper> {
     double decimal = val - whole;
 
     String fraction = "";
-    if ((decimal - 0.25).abs() < 0.001)
+    if ((decimal - 0.25).abs() < 0.001) {
       fraction = "1/4";
-    else if ((decimal - 0.50).abs() < 0.001)
+    } else if ((decimal - 0.50).abs() < 0.001)
       fraction = "1/2";
     else if ((decimal - 0.75).abs() < 0.001)
       fraction = "3/4";

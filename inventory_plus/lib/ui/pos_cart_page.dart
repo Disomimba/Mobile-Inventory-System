@@ -267,21 +267,23 @@ class _PosCartPageState extends State<PosCartPage>
                   child: StreamBuilder<List<CustomerOrder>>(
                     stream: widget.controller.streamOrders(),
                     builder: (context, snapshot) {
-                      if (!snapshot.hasData)
+                      if (!snapshot.hasData) {
                         return const Center(child: CircularProgressIndicator());
+                      }
                       final pendingOrders = snapshot.data!
                           .where(
                             (o) =>
                                 o.status == 'prepared' || o.status == 'pending',
                           )
                           .toList();
-                      if (pendingOrders.isEmpty)
+                      if (pendingOrders.isEmpty) {
                         return const Center(
                           child: Text(
                             'No pending orders.',
                             style: TextStyle(color: Colors.grey, fontSize: 16),
                           ),
                         );
+                      }
 
                       return ListView.builder(
                         itemCount: pendingOrders.length,
@@ -444,7 +446,7 @@ class _PosCartPageState extends State<PosCartPage>
       return Image.network(
         imageUrl,
         fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) => Container(
+        errorBuilder: (_, _, _) => Container(
           color: Colors.grey.shade200,
           child: const Icon(Icons.image_not_supported, color: Colors.grey),
         ),
@@ -453,7 +455,7 @@ class _PosCartPageState extends State<PosCartPage>
       return Image.file(
         File(imageUrl),
         fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) => Container(
+        errorBuilder: (_, _, _) => Container(
           color: Colors.grey.shade200,
           child: const Icon(Icons.image_not_supported, color: Colors.grey),
         ),
@@ -684,7 +686,7 @@ class _PosCartPageState extends State<PosCartPage>
                                           MainAxisAlignment.spaceBetween,
                                       children: [
                                         Text(
-                                          "\₱${item.price.toStringAsFixed(2)}",
+                                          "₱${item.price.toStringAsFixed(2)}",
                                           style: const TextStyle(
                                             color: Colors.orange,
                                             fontWeight: FontWeight.bold,
@@ -802,7 +804,7 @@ class _PosCartPageState extends State<PosCartPage>
                               crossAxisAlignment: CrossAxisAlignment.end,
                               children: [
                                 Text(
-                                  "\₱${item.price.toStringAsFixed(2)}",
+                                  "₱${item.price.toStringAsFixed(2)}",
                                   style: const TextStyle(
                                     color: Colors.orange,
                                     fontWeight: FontWeight.bold,
@@ -1018,7 +1020,7 @@ class _PosCartPageState extends State<PosCartPage>
                                               ),
                                             ),
                                             Text(
-                                              "\₱${(item.price * qty).toStringAsFixed(2)}",
+                                              "₱${(item.price * qty).toStringAsFixed(2)}",
                                               style: const TextStyle(
                                                 color: Colors.orange,
                                                 fontWeight: FontWeight.bold,
@@ -1107,7 +1109,7 @@ class _PosCartPageState extends State<PosCartPage>
                                 ),
                                 TextSpan(
                                   text:
-                                      "\₱${_calculateTotal().toStringAsFixed(2)}",
+                                      "₱${_calculateTotal().toStringAsFixed(2)}",
                                   style: TextStyle(
                                     fontWeight: FontWeight.bold,
                                     fontSize: amountFontSize,
@@ -1300,9 +1302,9 @@ class _QuantityStepperState extends State<_QuantityStepper> {
 
     // Check for clean quarter-steps first — show nice fractions.
     String fraction = "";
-    if ((decimal - 0.25).abs() < 0.001)
+    if ((decimal - 0.25).abs() < 0.001) {
       fraction = "1/4";
-    else if ((decimal - 0.50).abs() < 0.001)
+    } else if ((decimal - 0.50).abs() < 0.001)
       fraction = "1/2";
     else if ((decimal - 0.75).abs() < 0.001)
       fraction = "3/4";

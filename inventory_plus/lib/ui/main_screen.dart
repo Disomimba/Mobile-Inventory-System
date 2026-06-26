@@ -261,9 +261,9 @@ class _MainScreenState extends State<MainScreen> {
           bottomNavigationBar: NavigationBarTheme(
             data: NavigationBarThemeData(
               indicatorColor: Colors.orange,
-              labelTextStyle: MaterialStateProperty.resolveWith<TextStyle>(
-                (Set<MaterialState> states) {
-                  if (states.contains(MaterialState.selected)) {
+              labelTextStyle: WidgetStateProperty.resolveWith<TextStyle>(
+                (Set<WidgetState> states) {
+                  if (states.contains(WidgetState.selected)) {
                     return const TextStyle(color: Colors.orange, fontWeight: FontWeight.bold, fontSize: 12);
                   }
                   return const TextStyle(color: Colors.grey, fontSize: 12);

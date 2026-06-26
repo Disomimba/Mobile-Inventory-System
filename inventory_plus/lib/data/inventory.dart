@@ -138,7 +138,7 @@ class InventoryItem {
     String? unit,
   }) {
     return InventoryItem(
-      id: this.id,
+      id: id,
       name: name ?? this.name,
       sku: sku ?? this.sku,
       price: price ?? this.price,

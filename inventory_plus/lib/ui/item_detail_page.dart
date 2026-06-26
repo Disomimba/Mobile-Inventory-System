@@ -882,7 +882,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                     vertical: 12,
                   ),
                   itemCount: _transactionHistory.length,
-                  separatorBuilder: (_, __) =>
+                  separatorBuilder: (_, _) =>
                       Divider(height: 1, color: Colors.grey.shade100),
                   itemBuilder: (context, index) =>
                       _buildTransactionTile(_transactionHistory[index]),
@@ -1119,8 +1119,9 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                   ),
                   IconButton(
                     onPressed: () {
-                      if (checkoutQty < _currentItem.quantity)
+                      if (checkoutQty < _currentItem.quantity) {
                         setModalState(() => checkoutQty++);
+                      }
                     },
                     icon: const Icon(Icons.add_circle_outline, size: 40),
                   ),

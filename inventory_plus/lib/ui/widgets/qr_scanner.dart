@@ -84,7 +84,7 @@ class _QRScannerState extends State<QRScanner> with SingleTickerProviderStateMix
   // Use corners instead of boundingBox
   final corners = barcode.corners;
   
-  if (corners != null && corners.isNotEmpty) {
+  if (corners.isNotEmpty) {
     // Calculate the bounding box from the corners
     final double minX = corners.map((c) => c.dx).reduce((a, b) => a < b ? a : b);
     final double minY = corners.map((c) => c.dy).reduce((a, b) => a < b ? a : b);
