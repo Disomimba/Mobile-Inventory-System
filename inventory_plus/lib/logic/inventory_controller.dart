@@ -484,6 +484,9 @@ class InventoryController {
     required String username,
     required String password,
     required String role,
+    String? email,
+    String? phone,
+    String? address,
   }) async {
     final locId = activeLocationId;
     if (locId == null) return false;
@@ -496,6 +499,9 @@ class InventoryController {
         'password': hashedPassword,
         'role': role,
         'location_id': locId,
+        'email': email,
+        'phone': phone,
+        'address': address,
       });
       return true;
     } catch (e) {
