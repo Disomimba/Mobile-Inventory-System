@@ -498,38 +498,47 @@ class _PosCartPageState extends State<PosCartPage>
 
           return Stack(
             children: [
+              // 1. Background Content
               Positioned.fill(
                 child: Padding(
                   padding: EdgeInsets.only(bottom: cartHeight),
                   child: _buildItemList(),
                 ),
               ),
+
+              // 2. Cart Sheet - ENSURE this is the last child in the Stack
+              // Using Positioned with hitTestBehavior allows the sheet to
+              // capture the drag before the background does.
               Positioned(
                 left: 0,
                 right: 0,
                 bottom: 0,
                 height: cartHeight,
-                child: Padding(
-                  padding: EdgeInsets.only(bottom: bottomInset),
-                  child: _DraggableCartSheet(
-                    onDragStart: (details) {
-                      _snapAnim.stop();
-                      _dragStart = details.globalPosition.dy;
-                      _fractionAtDragStart = cartHeight / totalHeight;
-                    },
-                    onDragUpdate: (details) {
-                      final delta = _dragStart - details.globalPosition.dy;
-                      final newFraction =
-                          _fractionAtDragStart + delta / totalHeight;
-                      setState(() {
-                        _cartHeightFraction = newFraction.clamp(
-                          minCartHeight / totalHeight,
-                          maxCartHeight / totalHeight,
-                        );
-                      });
-                    },
-                    onDragEnd: _onDragEnd,
-                    child: _buildCartPanel(),
+                child: GestureDetector(
+                  // FIX: Explicitly set behavior to opaque so it captures all clicks
+                  behavior: HitTestBehavior.opaque,
+                  child: Padding(
+                    padding: EdgeInsets.only(bottom: bottomInset),
+                    child: _DraggableCartSheet(
+                      onDragStart: (details) {
+                        _snapAnim.stop();
+                        _dragStart = details.globalPosition.dy;
+                        _fractionAtDragStart = cartHeight / totalHeight;
+                      },
+                      onDragUpdate: (details) {
+                        final delta = _dragStart - details.globalPosition.dy;
+                        final newFraction =
+                            _fractionAtDragStart + delta / totalHeight;
+                        setState(() {
+                          _cartHeightFraction = newFraction.clamp(
+                            minCartHeight / totalHeight,
+                            maxCartHeight / totalHeight,
+                          );
+                        });
+                      },
+                      onDragEnd: _onDragEnd,
+                      child: _buildCartPanel(),
+                    ),
                   ),
                 ),
               ),
