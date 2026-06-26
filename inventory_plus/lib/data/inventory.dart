@@ -63,7 +63,8 @@ class InventoryItem {
   final String name;
   final String sku;
   final double price;
-  final double quantity;
+  double quantity;
+  final double maxQuantity; // ADDED MAX QUANTITY
   final String category;
   final String description;
   final String imageUrl;
@@ -74,7 +75,7 @@ class InventoryItem {
   final String? productSize;
   final String? shelfLevel;
   final String? binNumber;
-  final String unit; // ADDED UNIT
+  final String unit;
 
   InventoryItem({
     required this.id,
@@ -82,6 +83,7 @@ class InventoryItem {
     required this.sku,
     required this.price,
     required this.quantity,
+    required this.maxQuantity, // ADDED MAX QUANTITY
     required this.category,
     required this.description,
     required this.imageUrl,
@@ -92,7 +94,7 @@ class InventoryItem {
     this.productSize,
     this.shelfLevel,
     this.binNumber,
-    this.unit = 'pcs', // DEFAULT UNIT
+    this.unit = 'pcs',
   });
 
   factory InventoryItem.fromSupabase(Map<String, dynamic> map) {
@@ -103,6 +105,9 @@ class InventoryItem {
       category: map['category'] ?? 'General',
       price: (map['product_price'] as num?)?.toDouble() ?? 0.0,
       quantity: (map['product_quantity'] as num?)?.toDouble() ?? 0.0,
+      maxQuantity:
+          (map['max_quantity'] as num?)?.toDouble() ??
+          100.0, // READ FROM DB WITH FALLBACK
       description: map['description'] ?? '',
       imageUrl: map['image_url'] ?? '',
       locationId: map['map_element_id'],
@@ -111,7 +116,7 @@ class InventoryItem {
       productSize: map['product_size'],
       shelfLevel: map['shelf_level'],
       binNumber: map['bin_number'],
-      unit: map['unit'] ?? 'pcs', // READ FROM DB
+      unit: map['unit'] ?? 'pcs',
     );
   }
 
@@ -120,6 +125,7 @@ class InventoryItem {
     String? sku,
     double? price,
     double? quantity,
+    double? maxQuantity, // ADDED MAX QUANTITY
     String? category,
     String? description,
     String? imageUrl,
@@ -129,7 +135,7 @@ class InventoryItem {
     String? productSize,
     String? shelfLevel,
     String? binNumber,
-    String? unit, // ADDED PARAMETER
+    String? unit,
   }) {
     return InventoryItem(
       id: this.id,
@@ -137,6 +143,7 @@ class InventoryItem {
       sku: sku ?? this.sku,
       price: price ?? this.price,
       quantity: quantity ?? this.quantity,
+      maxQuantity: maxQuantity ?? this.maxQuantity, // ADDED MAX QUANTITY
       category: category ?? this.category,
       description: description ?? this.description,
       imageUrl: imageUrl ?? this.imageUrl,
@@ -146,7 +153,7 @@ class InventoryItem {
       productSize: productSize ?? this.productSize,
       shelfLevel: shelfLevel ?? this.shelfLevel,
       binNumber: binNumber ?? this.binNumber,
-      unit: unit ?? this.unit, // ASSIGN UNIT
+      unit: unit ?? this.unit,
     );
   }
 }
@@ -163,10 +170,10 @@ class CustomerOrderItem {
   });
 
   Map<String, dynamic> toJson() => {
-        'product_id': productId,
-        'product_name': productName,
-        'quantity': quantity,
-      };
+    'product_id': productId,
+    'product_name': productName,
+    'quantity': quantity,
+  };
 
   factory CustomerOrderItem.fromJson(Map<String, dynamic> json) =>
       CustomerOrderItem(
@@ -199,7 +206,7 @@ class CustomerOrder {
     return CustomerOrder(
       id: map['id'].toString(),
       status: map['status'] ?? 'pending',
-      createdAt: DateTime.parse(map['created_at']),
+      createdAt: DateTime.parse(map['created_at']).toLocal(),
       items: itemsList,
     );
   }

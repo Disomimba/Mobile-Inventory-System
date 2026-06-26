@@ -1,13 +1,12 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../data/inventory.dart';
 import '../logic/inventory_controller.dart';
-import 'item_detail_page.dart';
 import 'scanner_search_page.dart';
-import 'store_map.dart'; // Added import for the map view
+import 'store_map.dart';
 
 class OrderQueuePage extends StatefulWidget {
   final InventoryController controller;
-
   const OrderQueuePage({super.key, required this.controller});
 
   @override
@@ -15,22 +14,63 @@ class OrderQueuePage extends StatefulWidget {
 }
 
 class _OrderQueuePageState extends State<OrderQueuePage> {
-  // Helper to format "time ago"
+  Timer? _timer;
+  Duration? _timeOffset;
+  final Set<String> _expandedOrders = {};
+
+  // Cache the last stream snapshot so expand/collapse setState
+  // never triggers a full StreamBuilder rebuild.
+  List<dynamic> _cachedOrders = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(minutes: 1), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
   String _timeAgo(DateTime date) {
-    final diff = DateTime.now().difference(date);
-    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    var now = DateTime.now();
+    if (date.isAfter(now)) {
+      final drift = date.difference(now);
+      if (_timeOffset == null || drift > _timeOffset!) {
+        _timeOffset = drift;
+      }
+    }
+    if (_timeOffset != null) {
+      now = now.add(_timeOffset!);
+    }
+    final diff = now.difference(date);
+    final minutes = diff.inMinutes;
+    if (minutes < 1) return 'Just now';
+    if (minutes < 60) return '${minutes}m ago';
     if (diff.inHours < 24) return '${diff.inHours}h ago';
     return '${diff.inDays}d ago';
+  }
+
+  void _toggleExpand(String orderId) {
+    setState(() {
+      if (_expandedOrders.contains(orderId)) {
+        _expandedOrders.remove(orderId);
+      } else {
+        _expandedOrders.add(orderId);
+      }
+    });
   }
 
   void _navigateToOrderChecklist(dynamic order) {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => OrderChecklistPage(
-          order: order,
-          controller: widget.controller,
-        ),
+        builder: (context) =>
+            OrderChecklistPage(order: order, controller: widget.controller),
       ),
     );
   }
@@ -38,39 +78,50 @@ class _OrderQueuePageState extends State<OrderQueuePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFFFF7F0), // Light cream background
+      backgroundColor: Colors.white,
       appBar: AppBar(
-        title: const Text('Helper Dashboard', style: TextStyle(color: Colors.black87, fontWeight: FontWeight.bold)),
+        title: const Text(
+          'Helper Dashboard',
+          style: TextStyle(color: Colors.black87, fontWeight: FontWeight.bold),
+        ),
         backgroundColor: Colors.transparent,
         elevation: 0,
         iconTheme: const IconThemeData(color: Colors.black87),
-        
       ),
-      body: StreamBuilder<List<dynamic>>( // Assuming CustomerOrder type
+      body: StreamBuilder<List<dynamic>>(
         stream: widget.controller.streamOrders(),
         builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator(color: Color(0xFFF58220)));
+          if (snapshot.connectionState == ConnectionState.waiting &&
+              _cachedOrders.isEmpty) {
+            return const Center(
+              child: CircularProgressIndicator(color: Color(0xFFF58220)),
+            );
           }
           if (snapshot.hasError) {
             return Center(child: Text('Error: ${snapshot.error}'));
           }
-          
-          final orders = snapshot.data ?? [];
-          final pendingOrders = orders.where((o) => o.status == 'pending').toList();
 
-         pendingOrders.sort((a, b) => a.createdAt.compareTo(b.createdAt));
+          // Update the cache only when new data arrives from the stream,
+          // not on every setState (e.g. expand/collapse).
+          if (snapshot.hasData) {
+            _cachedOrders = snapshot.data!;
+          }
+
+          final pendingOrders =
+              _cachedOrders.where((o) => o.status == 'pending').toList()
+                ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
 
           return Padding(
             padding: const EdgeInsets.all(16.0),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // TOP STATS ROW (Removed Dwell Time)
-                _buildStatCard("ACTIVE QUEUE", "${pendingOrders.length}", const Color(0xFFD67E24)),
+                _buildStatCard(
+                  "ACTIVE QUEUE",
+                  "${pendingOrders.length}",
+                  const Color(0xFFD67E24),
+                ),
                 const SizedBox(height: 16),
-
-                // ORDER LIST
                 Expanded(
                   child: pendingOrders.isEmpty
                       ? const Center(
@@ -83,61 +134,14 @@ class _OrderQueuePageState extends State<OrderQueuePage> {
                           itemCount: pendingOrders.length,
                           itemBuilder: (context, index) {
                             final order = pendingOrders[index];
-                            final String shortId = order.id.toString().substring(0, 8).toUpperCase();
-                            
-                            return Container(
-                              margin: const EdgeInsets.only(bottom: 12),
-                              padding: const EdgeInsets.all(16),
-                              decoration: BoxDecoration(
-                                color: Colors.white,
-                                borderRadius: BorderRadius.circular(8),
-                                // border: Border.all(
-                                //   color: index == 0 ? const Color(0xFFF58220) : Colors.grey.shade300,
-                                //   width: index == 0 ? 2 : 1,
-                                // ),
-                              ),
-                              child: Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                children: [
-                                  Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Row(
-                                        children: [
-                                          Text(
-                                            '#ORD-$shortId',
-                                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.black87),
-                                          ),
-                                          
-                                        ],
-                                      ),
-                                      const SizedBox(height: 8),
-                                      Row(
-                                        children: [
-                                          const Icon(Icons.inventory_2_outlined, size: 14, color: Colors.grey),
-                                          const SizedBox(width: 4),
-                                          Text('${order.items.length} items', style: const TextStyle(color: Colors.grey, fontSize: 13)),
-                                          const SizedBox(width: 12),
-                                          const Icon(Icons.access_time, size: 14, color: Colors.grey),
-                                          const SizedBox(width: 4),
-                                          Text(_timeAgo(order.createdAt), style: const TextStyle(color: Colors.grey, fontSize: 13)),
-                                        ],
-                                      ),
-                                    ],
-                                  ),
-                                  ElevatedButton(
-                                    onPressed: () => _navigateToOrderChecklist(order),
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: const Color(0xFFF58220),
-                                      foregroundColor: Colors.white,
-                                      elevation: 0,
-                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-                                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                                    ),
-                                    child: const Text('Prepare', style: TextStyle(fontWeight: FontWeight.bold)),
-                                  ),
-                                ],
-                              ),
+                            return _OrderCard(
+                              key: ValueKey(order.id),
+                              order: order,
+                              controller: widget.controller,
+                              isExpanded: _expandedOrders.contains(order.id),
+                              onToggle: () => _toggleExpand(order.id),
+                              timeAgo: _timeAgo(order.createdAt),
+                              onPrepare: () => _navigateToOrderChecklist(order),
                             );
                           },
                         ),
@@ -161,11 +165,275 @@ class _OrderQueuePageState extends State<OrderQueuePage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(title, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF3E322C))),
+          Text(
+            title,
+            style: const TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF3E322C),
+            ),
+          ),
           const SizedBox(height: 4),
-          Text(value, style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: valueColor)),
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: 24,
+              fontWeight: FontWeight.bold,
+              color: valueColor,
+            ),
+          ),
         ],
       ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Extracted card widget so AnimationController lives at the right scope and
+// the parent list never rebuilds just because one card expands.
+// ─────────────────────────────────────────────────────────────────────────────
+class _OrderCard extends StatelessWidget {
+  final dynamic order;
+  final InventoryController controller;
+  final bool isExpanded;
+  final VoidCallback onToggle;
+  final String timeAgo;
+  final VoidCallback onPrepare;
+
+  const _OrderCard({
+    super.key,
+    required this.order,
+    required this.controller,
+    required this.isExpanded,
+    required this.onToggle,
+    required this.timeAgo,
+    required this.onPrepare,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final String shortId = order.id.toString().substring(0, 8).toUpperCase();
+
+    return GestureDetector(
+      onTap: onToggle,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 250),
+        curve: Curves.easeInOut,
+        margin: const EdgeInsets.only(bottom: 12),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: isExpanded ? const Color(0xFFF58220) : Colors.grey.shade200,
+          ),
+          boxShadow: isExpanded
+              ? [
+                  BoxShadow(
+                    color: const Color(0xFFF58220).withOpacity(0.08),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2),
+                  ),
+                ]
+              : [],
+        ),
+        child: Column(
+          children: [
+            // ── Collapsed header (always visible) ──────────────────────
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '#ORD-$shortId',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                          color: Colors.black87,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          const Icon(
+                            Icons.inventory_2_outlined,
+                            size: 14,
+                            color: Colors.grey,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            '${order.items.length} item${order.items.length == 1 ? '' : 's'}',
+                            style: const TextStyle(
+                              color: Colors.grey,
+                              fontSize: 13,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          const Icon(
+                            Icons.access_time,
+                            size: 14,
+                            color: Colors.grey,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            timeAgo,
+                            style: const TextStyle(
+                              color: Colors.grey,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                  // Prepare button — absorbs the tap so it doesn't
+                  // also trigger the expand toggle.
+                  GestureDetector(
+                    onTap: onPrepare,
+                    behavior: HitTestBehavior.opaque,
+                    child: ElevatedButton(
+                      onPressed: onPrepare,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFFF58220),
+                        foregroundColor: Colors.white,
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 20,
+                          vertical: 12,
+                        ),
+                      ),
+                      child: const Text(
+                        'Prepare',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            // ── Animated expandable section ────────────────────────────
+            AnimatedSize(
+              duration: const Duration(milliseconds: 280),
+              curve: Curves.easeInOut,
+              child: isExpanded
+                  ? _ExpandedItems(order: order, controller: controller)
+                  : const SizedBox.shrink(),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The expanded items section — separated so it only builds when needed.
+// ─────────────────────────────────────────────────────────────────────────────
+class _ExpandedItems extends StatelessWidget {
+  final dynamic order;
+  final InventoryController controller;
+
+  const _ExpandedItems({required this.order, required this.controller});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Divider(height: 1, thickness: 1, color: Colors.grey.shade100),
+        ...order.items.map<Widget>((item) {
+          String locationLabel = 'Unassigned';
+          try {
+            final dbItem = controller.allItems.firstWhere(
+              (i) => i.id == item.productId,
+            );
+            final parts = <String>[];
+            if (dbItem.shelfLevel != null && dbItem.shelfLevel!.isNotEmpty) {
+              parts.add('Shelf ${dbItem.shelfLevel}');
+            }
+            if (dbItem.binNumber != null && dbItem.binNumber!.isNotEmpty) {
+              parts.add('Bin ${dbItem.binNumber}');
+            }
+            if (parts.isNotEmpty) locationLabel = parts.join(' • ');
+          } catch (_) {}
+
+          return AnimatedOpacity(
+            opacity: 1.0,
+            duration: const Duration(milliseconds: 200),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFAFAFA),
+                border: Border(bottom: BorderSide(color: Colors.grey.shade100)),
+              ),
+              child: Row(
+                children: [
+                  // Qty badge
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFBEADB),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      'x${item.quantity.toInt()}',
+                      style: const TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF9E651D),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  // Name + location
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          item.productName,
+                          style: const TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.black87,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Row(
+                          children: [
+                            Icon(
+                              Icons.location_on_outlined,
+                              size: 11,
+                              color: Colors.grey.shade500,
+                            ),
+                            const SizedBox(width: 2),
+                            Text(
+                              locationLabel,
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: Colors.grey.shade500,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }),
+      ],
     );
   }
 }
@@ -173,9 +441,8 @@ class _OrderQueuePageState extends State<OrderQueuePage> {
 // ============================================================================
 // FULL SCREEN CHECKLIST PAGE
 // ============================================================================
-
 class OrderChecklistPage extends StatefulWidget {
-  final dynamic order; 
+  final dynamic order;
   final InventoryController controller;
 
   const OrderChecklistPage({
@@ -206,17 +473,21 @@ class _OrderChecklistPageState extends State<OrderChecklistPage> {
   void _markPrepared() async {
     await widget.controller.updateOrderStatus(widget.order.id, 'prepared');
     if (mounted) {
-      Navigator.pop(context); // Go back to queue
+      Navigator.pop(context);
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Order marked as Prepared!'), backgroundColor: Colors.green),
+        const SnackBar(
+          content: Text('Order marked as Prepared!'),
+          backgroundColor: Colors.green,
+        ),
       );
     }
   }
 
-  // UPDATED: Now opens the StoreMap view directly instead of the full ItemDetailPage
   void _showItemLocationOnMap(String productId) {
     try {
-      final item = widget.controller.allItems.firstWhere((i) => i.id == productId);
+      final item = widget.controller.allItems.firstWhere(
+        (i) => i.id == productId,
+      );
       Navigator.push(
         context,
         MaterialPageRoute(
@@ -225,11 +496,15 @@ class _OrderChecklistPageState extends State<OrderChecklistPage> {
               title: Text('Location: ${item.name}'),
               backgroundColor: Colors.white,
               iconTheme: const IconThemeData(color: Colors.black87),
-              titleTextStyle: const TextStyle(color: Colors.black87, fontSize: 18, fontWeight: FontWeight.bold),
+              titleTextStyle: const TextStyle(
+                color: Colors.black87,
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
             ),
             body: StoreMap(
               controller: widget.controller,
-              highlightId: item.locationId, 
+              highlightId: item.locationId,
               itemName: item.name,
               mode: MapMode.view,
             ),
@@ -243,7 +518,6 @@ class _OrderChecklistPageState extends State<OrderChecklistPage> {
     }
   }
 
-  // NEW: Tutorial Modal
   void _showTutorialModal() {
     showDialog(
       context: context,
@@ -263,52 +537,55 @@ class _OrderChecklistPageState extends State<OrderChecklistPage> {
             SizedBox(height: 8),
             Text("2. Scan the QR code on the physical product."),
             SizedBox(height: 8),
-            Text("3. Confirm the quantity to deduct."),
-            SizedBox(height: 8),
-            Text("4. The item will be automatically checked off."),
+            Text("3. Confirm the pick to check it off the list."),
             SizedBox(height: 16),
-            Text("Once all items are checked, the 'Notify Cashier' button will be enabled."),
+            Text(
+              "Once all items are checked, the 'Notify Cashier' button will be enabled.",
+            ),
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Got it!", style: TextStyle(color: Colors.orange, fontWeight: FontWeight.bold))),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text(
+              "Got it!",
+              style: TextStyle(
+                color: Colors.orange,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
         ],
       ),
     );
   }
-  // SHOW DEDUCTION MODAL
-  // SHOW DEDUCTION MODAL
-  void _showDeductionSheet(InventoryItem dbItem, double targetQuantity) {
+
+  void _showPickConfirmationSheet(InventoryItem dbItem, double targetQuantity) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (context) => DeductionBottomSheet(
+      builder: (context) => PickConfirmationSheet(
         item: dbItem,
         targetQuantity: targetQuantity,
-        onConfirm: (deductedQty) async { // deductedQty is now double
-          
-          // ==========================================================
-          // 🐛 FIX: LIVE DATABASE DEDUCTION REMOVED HERE
-          // ==========================================================
-          // We deleted `widget.controller.updateItem()` so the Helper 
-          // no longer deducts stock. The Cashier will deduct the stock 
-          // when they click "Complete" on their end.
-          
-          // Just mark the item as checked off on the Helper's UI
+        onConfirm: () async {
           if (mounted) {
             setState(() {
               _checkedItems[dbItem.id] = true;
             });
-            Navigator.pop(context); // Close bottom sheet
+            Navigator.pop(context);
             ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('${dbItem.name} checked off!'), backgroundColor: Colors.green),
+              SnackBar(
+                content: Text('${dbItem.name} checked off!'),
+                backgroundColor: Colors.green,
+              ),
             );
           }
         },
       ),
     );
   }
+
   void _openScannerToCheckoff() {
     Navigator.push(
       context,
@@ -316,14 +593,18 @@ class _OrderChecklistPageState extends State<OrderChecklistPage> {
         builder: (context) => ScannerSearchPage(
           controller: widget.controller,
           onSelectItem: (scannedItem) {
-            Navigator.pop(context); // Close the scanner view
+            Navigator.pop(context);
             if (_checkedItems.containsKey(scannedItem.id)) {
-              // Find the quantity required for this specific order
-              final orderItem = widget.order.items.firstWhere((i) => i.productId == scannedItem.id);
-              _showDeductionSheet(scannedItem, orderItem.quantity);
+              final orderItem = widget.order.items.firstWhere(
+                (i) => i.productId == scannedItem.id,
+              );
+              _showPickConfirmationSheet(scannedItem, orderItem.quantity);
             } else {
               ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text('${scannedItem.name} is not in this order!'), backgroundColor: Colors.red),
+                SnackBar(
+                  content: Text('${scannedItem.name} is not in this order!'),
+                  backgroundColor: Colors.red,
+                ),
               );
             }
           },
@@ -334,11 +615,14 @@ class _OrderChecklistPageState extends State<OrderChecklistPage> {
 
   @override
   Widget build(BuildContext context) {
-    final String shortId = widget.order.id.toString().substring(0, 8).toUpperCase();
+    final String shortId = widget.order.id
+        .toString()
+        .substring(0, 8)
+        .toUpperCase();
     final double progress = _totalCount == 0 ? 0 : _checkedCount / _totalCount;
 
     return Scaffold(
-      backgroundColor: const Color(0xFFFFF7F0), 
+      backgroundColor: Colors.white,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
@@ -346,7 +630,6 @@ class _OrderChecklistPageState extends State<OrderChecklistPage> {
       ),
       body: Column(
         children: [
-          // HEADER SECTION
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 20),
             child: Column(
@@ -359,161 +642,255 @@ class _OrderChecklistPageState extends State<OrderChecklistPage> {
                     Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text("ORDER ASSIGNMENT", style: TextStyle(color: Colors.grey, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1.2)),
+                        const Text(
+                          "ORDER ASSIGNMENT",
+                          style: TextStyle(
+                            color: Colors.grey,
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 1.2,
+                          ),
+                        ),
                         const SizedBox(height: 4),
-                        Text("ID: #ORD-$shortId", style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.black87)),
+                        Text(
+                          "ID: #ORD-$shortId",
+                          style: const TextStyle(
+                            fontSize: 22,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.black87,
+                          ),
+                        ),
                       ],
                     ),
                     Row(
                       children: [
-                        // Tutorial Button
                         InkWell(
                           onTap: _showTutorialModal,
                           child: const CircleAvatar(
                             radius: 14,
                             backgroundColor: Color(0xFF3E322C),
-                            child: Icon(Icons.question_mark, color: Colors.white, size: 16),
+                            child: Icon(
+                              Icons.question_mark,
+                              color: Colors.white,
+                              size: 16,
+                            ),
                           ),
                         ),
                         const SizedBox(width: 12),
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 8,
+                          ),
                           decoration: BoxDecoration(
                             color: const Color(0xFFFBEADB),
                             borderRadius: BorderRadius.circular(8),
                           ),
-                          child: Text("$_checkedCount/$_totalCount", style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF9E651D))),
+                          child: Text(
+                            "$_checkedCount/$_totalCount",
+                            style: const TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xFF9E651D),
+                            ),
+                          ),
                         ),
                       ],
                     ),
                   ],
                 ),
                 const SizedBox(height: 16),
-                LinearProgressIndicator(
-                  value: progress,
-                  backgroundColor: const Color(0xFFFBEADB),
-                  color: const Color(0xFFF58220),
-                  minHeight: 6,
-                  borderRadius: BorderRadius.circular(10),
+                TweenAnimationBuilder<double>(
+                  tween: Tween(begin: 0, end: progress),
+                  duration: const Duration(milliseconds: 400),
+                  curve: Curves.easeInOut,
+                  builder: (context, value, _) => LinearProgressIndicator(
+                    value: value,
+                    backgroundColor: const Color(0xFFFBEADB),
+                    color: const Color(0xFFF58220),
+                    minHeight: 6,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
                 ),
                 const SizedBox(height: 8),
-                const Text("READY FOR PICKING • ZONE B", style: TextStyle(color: Colors.grey, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1.2)),
+                const Text(
+                  "READY FOR PICKING",
+                  style: TextStyle(
+                    color: Colors.grey,
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 1.2,
+                  ),
+                ),
               ],
             ),
           ),
-          
           const SizedBox(height: 20),
-
-          // FULL WIDTH SCAN BUTTON (REMOVED)
-          
-          // CHECKLIST ITEMS
           Expanded(
             child: ListView.builder(
               padding: const EdgeInsets.symmetric(horizontal: 20),
               itemCount: widget.order.items.length,
               itemBuilder: (context, index) {
-  final item = widget.order.items[index];
-  final bool isChecked = _checkedItems[item.productId] ?? false;
+                final item = widget.order.items[index];
+                final bool isChecked = _checkedItems[item.productId] ?? false;
 
-  return GestureDetector(
-    onTap: () {
-      if (!isChecked) {
-        _openScannerToCheckoff();
-      } else {
-        // Uncheck manually
-        setState(() {
-          _checkedItems[item.productId] = false;
-        });
-      }
-    },
-    child: Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: isChecked ? const Color(0xFFE8F5E9) : Colors.white,
-        border: Border.all(
-          color: isChecked ? const Color(0xFFC8E6C9) : const Color(0xFFFBEADB),
-        ),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Row(
-        children: [
-          // Checkbox UI
-          Container(
-            width: 24,
-            height: 24,
-            decoration: BoxDecoration(
-              color: isChecked ? const Color(0xFFF58220) : Colors.white,
-              border: Border.all(
-                color: isChecked ? const Color(0xFFF58220) : Colors.grey.shade400,
-                width: 2,
-              ),
-              borderRadius: BorderRadius.circular(4),
-            ),
-            child: isChecked ? const Icon(Icons.check, size: 16, color: Colors.white) : null,
-          ),
-          const SizedBox(width: 16),
-          
-          // Item Details
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  item.productName,
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 15,
-                    color: Colors.black87,
-                    decoration: isChecked ? TextDecoration.lineThrough : null,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: isChecked ? const Color(0xFF81C784) : const Color(0xFFFBEADB),
-                        borderRadius: BorderRadius.circular(4),
+                InventoryItem? dbItem;
+                try {
+                  dbItem = widget.controller.allItems.firstWhere(
+                    (i) => i.id == item.productId,
+                  );
+                } catch (_) {}
+
+                String locationString = "UNASSIGNED";
+                if (dbItem != null) {
+                  final parts = <String>[];
+                  if (dbItem.shelfLevel != null &&
+                      dbItem.shelfLevel!.isNotEmpty) {
+                    parts.add("Shelf ${dbItem.shelfLevel}");
+                  }
+                  if (dbItem.binNumber != null &&
+                      dbItem.binNumber!.isNotEmpty) {
+                    parts.add("Bin ${dbItem.binNumber}");
+                  }
+                  if (parts.isNotEmpty) {
+                    locationString = parts.join(" • ").toUpperCase();
+                  }
+                }
+
+                return GestureDetector(
+                  onTap: () {
+                    if (!isChecked) {
+                      _openScannerToCheckoff();
+                    } else {
+                      setState(() {
+                        _checkedItems[item.productId] = false;
+                      });
+                    }
+                  },
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 250),
+                    curve: Curves.easeInOut,
+                    margin: const EdgeInsets.only(bottom: 12),
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: isChecked ? const Color(0xFFE8F5E9) : Colors.white,
+                      border: Border.all(
+                        color: isChecked
+                            ? const Color(0xFFC8E6C9)
+                            : Colors.grey.shade300,
                       ),
-                      child: Text(
-                        'QTY: ${item.quantity}',
-                        style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.bold,
-                          color: isChecked ? Colors.white : const Color(0xFF9E651D),
-                        ),
-                      ),
+                      borderRadius: BorderRadius.circular(8),
                     ),
-                    const SizedBox(width: 8),
-                    Text("AISLE 12 • BIN A", style: TextStyle(color: Colors.grey.shade600, fontSize: 10, fontWeight: FontWeight.bold)),
-                  ],
-                ),
-              ],
+                    child: Row(
+                      children: [
+                        AnimatedContainer(
+                          duration: const Duration(milliseconds: 200),
+                          curve: Curves.easeInOut,
+                          width: 24,
+                          height: 24,
+                          decoration: BoxDecoration(
+                            color: isChecked
+                                ? const Color(0xFFF58220)
+                                : Colors.white,
+                            border: Border.all(
+                              color: isChecked
+                                  ? const Color(0xFFF58220)
+                                  : Colors.grey.shade400,
+                              width: 2,
+                            ),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: isChecked
+                              ? const Icon(
+                                  Icons.check,
+                                  size: 16,
+                                  color: Colors.white,
+                                )
+                              : null,
+                        ),
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              AnimatedDefaultTextStyle(
+                                duration: const Duration(milliseconds: 200),
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 15,
+                                  color: Colors.black87,
+                                  decoration: isChecked
+                                      ? TextDecoration.lineThrough
+                                      : TextDecoration.none,
+                                ),
+                                child: Text(item.productName),
+                              ),
+                              const SizedBox(height: 6),
+                              Row(
+                                children: [
+                                  AnimatedContainer(
+                                    duration: const Duration(milliseconds: 200),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 6,
+                                      vertical: 2,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: isChecked
+                                          ? const Color(0xFF81C784)
+                                          : const Color(0xFFFBEADB),
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: Text(
+                                      'QTY: ${item.quantity}',
+                                      style: TextStyle(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.bold,
+                                        color: isChecked
+                                            ? Colors.white
+                                            : const Color(0xFF9E651D),
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      locationString,
+                                      style: TextStyle(
+                                        color: Colors.grey.shade600,
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(
+                            Icons.map_outlined,
+                            color: Colors.black54,
+                          ),
+                          onPressed: () =>
+                              _showItemLocationOnMap(item.productId),
+                          tooltip: 'View Location Map',
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
             ),
           ),
-          
-          // Location Pin Action
-          IconButton(
-            icon: const Icon(Icons.map_outlined, color: Colors.black54),
-            onPressed: () => _showItemLocationOnMap(item.productId),
-            tooltip: 'View Location Map',
-          ),
-        ],
-      ),
-    ),
-  );
-},
-            ),
-          ),
-          
-          // BOTTOM NOTIFY BUTTON
           Container(
             padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
               color: const Color(0xFFF8E9DE),
-              border: Border(top: BorderSide(color: Colors.orange.withOpacity(0.2))),
+              border: Border(
+                top: BorderSide(color: Colors.orange.withOpacity(0.2)),
+              ),
             ),
             child: SizedBox(
               width: double.infinity,
@@ -521,20 +898,33 @@ class _OrderChecklistPageState extends State<OrderChecklistPage> {
               child: ElevatedButton.icon(
                 onPressed: _allChecked ? _markPrepared : null,
                 icon: const Icon(Icons.check_circle_outline),
-                label: const Text("NOTIFY CASHIER (PREPARED)", style: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 1)),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFFCEB8A6), 
-                  disabledBackgroundColor: const Color(0xFFE2D4C8),
-                  disabledForegroundColor: Colors.white70,
-                  foregroundColor: Colors.white,
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                ).copyWith(
-                  backgroundColor: WidgetStateProperty.resolveWith((states) {
-                    if (states.contains(WidgetState.disabled)) return const Color(0xFFDAC7B8);
-                    return const Color(0xFFF58220); 
-                  }),
+                label: const Text(
+                  "NOTIFY CASHIER (PREPARED)",
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 1,
+                  ),
                 ),
+                style:
+                    ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFCEB8A6),
+                      disabledBackgroundColor: const Color(0xFFE2D4C8),
+                      disabledForegroundColor: Colors.white70,
+                      foregroundColor: Colors.white,
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ).copyWith(
+                      backgroundColor: WidgetStateProperty.resolveWith((
+                        states,
+                      ) {
+                        if (states.contains(WidgetState.disabled)) {
+                          return const Color(0xFFDAC7B8);
+                        }
+                        return const Color(0xFFF58220);
+                      }),
+                    ),
               ),
             ),
           ),
@@ -545,15 +935,14 @@ class _OrderChecklistPageState extends State<OrderChecklistPage> {
 }
 
 // ============================================================================
-// NEW: DEDUCTION BOTTOM SHEET MODAL
+// PICK CONFIRMATION SHEET
 // ============================================================================
-
-class DeductionBottomSheet extends StatefulWidget {
+class PickConfirmationSheet extends StatelessWidget {
   final InventoryItem item;
   final double targetQuantity;
-  final Function(double) onConfirm;
+  final VoidCallback onConfirm;
 
-  const DeductionBottomSheet({
+  const PickConfirmationSheet({
     super.key,
     required this.item,
     required this.targetQuantity,
@@ -561,54 +950,28 @@ class DeductionBottomSheet extends StatefulWidget {
   });
 
   @override
-  State<DeductionBottomSheet> createState() => _DeductionBottomSheetState();
-}
-
-class _DeductionBottomSheetState extends State<DeductionBottomSheet> {
-  late TextEditingController _qtyController;
-  late double _currentQty;
-
-  @override
-  void initState() {
-    super.initState();
-    _currentQty = widget.targetQuantity;
-    _qtyController = TextEditingController(text: _currentQty.toString());
-  }
-
-  @override
-  void dispose() {
-    _qtyController.dispose();
-    super.dispose();
-  }
-
-  void _updateQuantity(double newQty) {
-    if (newQty < 1) newQty = 1;
-    if (newQty > widget.item.quantity) newQty = widget.item.quantity; // Max available
-    setState(() {
-      _currentQty = newQty;
-      _qtyController.text = newQty.toString();
-    });
-  }
-
-  void _submitManualEntry() {
-    final val = double.tryParse(_qtyController.text);
-    if (val != null) {
-      _updateQuantity(val);
-    } else {
-      _qtyController.text = _currentQty.toString();
-    }
-  }
-
-  @override
   Widget build(BuildContext context) {
-    final double remainingStock = widget.item.quantity - _currentQty;
-    final String locationString = (widget.item.shelfLevel != null || widget.item.binNumber != null)
-        ? "${widget.item.shelfLevel ?? ''} ${widget.item.binNumber ?? ''}".trim()
-        : "Unassigned";
+    String locationString = "Unassigned";
+    if (item.shelfLevel != null || item.binNumber != null) {
+      final parts = <String>[];
+      if (item.shelfLevel != null && item.shelfLevel!.isNotEmpty) {
+        parts.add("Shelf ${item.shelfLevel}");
+      }
+      if (item.binNumber != null && item.binNumber!.isNotEmpty) {
+        parts.add("Bin ${item.binNumber}");
+      }
+      if (parts.isNotEmpty) locationString = parts.join(" • ");
+    }
+
+    final String displayQty =
+        targetQuantity.truncateToDouble() == targetQuantity
+        ? targetQuantity.toInt().toString()
+        : targetQuantity.toStringAsFixed(2);
 
     return Padding(
-      // Padding added for keyboard avoidance
-      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).viewInsets.bottom,
+      ),
       child: Container(
         padding: const EdgeInsets.all(24),
         decoration: const BoxDecoration(
@@ -618,7 +981,17 @@ class _DeductionBottomSheetState extends State<DeductionBottomSheet> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // 1. TOP SCANNED ITEM CARD
+            const Icon(Icons.check_circle, color: Colors.green, size: 64),
+            const SizedBox(height: 12),
+            const Text(
+              "Item Verified!",
+              style: TextStyle(
+                fontSize: 22,
+                fontWeight: FontWeight.bold,
+                color: Colors.green,
+              ),
+            ),
+            const SizedBox(height: 24),
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
@@ -627,67 +1000,40 @@ class _DeductionBottomSheetState extends State<DeductionBottomSheet> {
               ),
               child: Row(
                 children: [
-                  // Image with Badge
-                  Stack(
-                    children: [
-                      Container(
-                        width: 80,
-                        height: 80,
-                        decoration: BoxDecoration(
-                          color: Colors.grey.shade100,
-                          borderRadius: BorderRadius.circular(8),
-                          image: DecorationImage(
-                            image: NetworkImage(widget.item.imageUrl),
-                            fit: BoxFit.cover,
-                          ),
-                        ),
+                  Container(
+                    width: 70,
+                    height: 70,
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade100,
+                      borderRadius: BorderRadius.circular(8),
+                      image: DecorationImage(
+                        image: NetworkImage(item.imageUrl),
+                        fit: BoxFit.cover,
                       ),
-                      Positioned(
-                        top: 0,
-                        left: 0,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                          decoration: const BoxDecoration(
-                            color: Colors.greenAccent,
-                            borderRadius: BorderRadius.only(
-                              topLeft: Radius.circular(8),
-                              bottomRight: Radius.circular(8),
-                            ),
-                          ),
-                          child: const Text(
-                            "SCANNED",
-                            style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Colors.black87),
-                          ),
-                        ),
-                      ),
-                    ],
+                    ),
                   ),
                   const SizedBox(width: 16),
-                  // Details
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          "SKU-${widget.item.sku}",
-                          style: TextStyle(fontSize: 10, color: Colors.grey.shade600, fontWeight: FontWeight.bold),
+                          "SKU-${item.sku}",
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: Colors.grey.shade600,
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          widget.item.name,
-                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.black87),
+                          item.name,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16,
+                            color: Colors.black87,
+                          ),
                         ),
-                        const SizedBox(height: 8),
-                        Row(
-                          children: [
-                            const Icon(Icons.inventory_2, size: 14, color: Colors.green),
-                            const SizedBox(width: 4),
-                            Text(
-                              "${widget.item.quantity} units available",
-                              style: const TextStyle(fontSize: 12, color: Colors.black87, fontWeight: FontWeight.w500),
-                            ),
-                          ],
-                        )
                       ],
                     ),
                   ),
@@ -695,125 +1041,64 @@ class _DeductionBottomSheetState extends State<DeductionBottomSheet> {
               ),
             ),
             const SizedBox(height: 16),
-
-            // 2. MIDDLE QUANTITY CARD (Beige)
             Container(
-              padding: const EdgeInsets.all(20),
+              padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: const Color(0xFFFBEADB),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.orange.withOpacity(0.3)),
-              ),
-              child: Column(
-                children: [
-                  const Text(
-                    "HOW MANY UNITS TO REMOVE?",
-                    style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1.2, color: Color(0xFF3E322C)),
-                  ),
-                  const SizedBox(height: 16),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      // Minus Button
-                      InkWell(
-                        onTap: () => _updateQuantity(_currentQty - 1),
-                        child: Container(
-                          width: 48,
-                          height: 48,
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF3E322C),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: const Icon(Icons.remove, color: Colors.white),
-                        ),
-                      ),
-                      const SizedBox(width: 20),
-                      // Text Field
-                      SizedBox(
-                        width: 60,
-                        child: Focus(
-                          onFocusChange: (hasFocus) {
-                            if (!hasFocus) _submitManualEntry();
-                          },
-                          child: TextField(
-                            controller: _qtyController,
-                            textAlign: TextAlign.center,
-                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                            onSubmitted: (_) => _submitManualEntry(),
-                            style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.black87),
-                            decoration: const InputDecoration(
-                              isDense: true,
-                              enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.orange, width: 2)),
-                              focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.orange, width: 2)),
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 20),
-                      // Plus Button
-                      InkWell(
-                        onTap: () => _updateQuantity(_currentQty + 1),
-                        child: Container(
-                          width: 48,
-                          height: 48,
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF3E322C),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: const Icon(Icons.add, color: Colors.white),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  const Text(
-                    "Manual entry supported",
-                    style: TextStyle(fontSize: 10, fontStyle: FontStyle.italic, color: Colors.grey),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 16),
-
-            // 3. LIGHT BLUE INFO BOX
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.lightBlue.shade50,
+                color: Colors.green.shade50,
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.lightBlue.shade100),
+                border: Border.all(color: Colors.green.shade200),
               ),
               child: Row(
                 children: [
-                  Icon(Icons.info_outline, color: Colors.lightBlue.shade700, size: 20),
-                  const SizedBox(width: 12),
+                  Icon(
+                    Icons.shopping_basket,
+                    color: Colors.green.shade700,
+                    size: 28,
+                  ),
+                  const SizedBox(width: 16),
                   Expanded(
-                    child: Text(
-                      "After deduction, ${remainingStock.toStringAsFixed(2)} units will remain at shelf Location $locationString.",
-                      style: TextStyle(color: Colors.blueGrey.shade800, fontSize: 13),
+                    child: RichText(
+                      text: TextSpan(
+                        style: TextStyle(
+                          color: Colors.green.shade900,
+                          fontSize: 14,
+                          height: 1.4,
+                        ),
+                        children: [
+                          const TextSpan(text: "Please pick exactly "),
+                          TextSpan(
+                            text: "$displayQty ${item.unit}",
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
+                            ),
+                          ),
+                          TextSpan(text: "\nLocation: $locationString"),
+                        ],
+                      ),
                     ),
                   ),
                 ],
               ),
             ),
             const SizedBox(height: 24),
-
-            // 4. CONFIRM BUTTON
             SizedBox(
               width: double.infinity,
               height: 55,
               child: ElevatedButton.icon(
-                onPressed: () => widget.onConfirm(_currentQty),
+                onPressed: onConfirm,
                 icon: const Icon(Icons.check_circle_outline),
                 label: const Text(
-                  "Confirm Deduction",
+                  "Confirm Pick",
                   style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                 ),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFFF58220),
+                  backgroundColor: Colors.green,
                   foregroundColor: Colors.white,
                   elevation: 0,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
                 ),
               ),
             ),

@@ -26,6 +26,7 @@ class _AddItemPageState extends State<AddItemPage> {
   final _skuController = TextEditingController();
   final _priceController = TextEditingController();
   final _quantityController = TextEditingController();
+  final _maxQuantityController = TextEditingController(); // ADDED
   final _categoryController = TextEditingController();
   final _descController = TextEditingController();
 
@@ -49,6 +50,7 @@ class _AddItemPageState extends State<AddItemPage> {
     _skuController.dispose();
     _priceController.dispose();
     _quantityController.dispose();
+    _maxQuantityController.dispose(); // ADDED
     _categoryController.dispose();
     _descController.dispose();
     _manufacturerController.dispose();
@@ -220,6 +222,7 @@ class _AddItemPageState extends State<AddItemPage> {
         sku: _skuController.text.trim(),
         price: _priceController.text.trim(),
         quantity: _quantityController.text.trim(),
+        maxQuantity: _maxQuantityController.text.trim(), // ADDED THIS LINE
         category: _categoryController.text.trim(),
         description: _descController.text.trim(),
         manufacturer: _manufacturerController.text.trim(),
@@ -229,7 +232,7 @@ class _AddItemPageState extends State<AddItemPage> {
         binNumber: _binNumberController.text.trim(),
         mapLocationId: _selectedMapElement?.id,
         imageUrl: finalImageUrl ?? '',
-        unit: _selectedUnit, // Pass the selected unit to controller
+        unit: _selectedUnit,
       );
 
       await widget.controller.addItem(newItem);
@@ -367,6 +370,8 @@ class _AddItemPageState extends State<AddItemPage> {
 
                           const SizedBox(height: 24),
                           _buildSectionTitle("Pricing & Inventory"),
+
+                          // Rearranged so Category and Price share a row
                           Row(
                             children: [
                               Expanded(
@@ -380,25 +385,6 @@ class _AddItemPageState extends State<AddItemPage> {
                               const SizedBox(width: 12),
                               Expanded(
                                 child: _buildTextField(
-                                  _quantityController,
-                                  "Initial Stock",
-                                  LucideIcons.archive,
-                                  isNumber: true,
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 16),
-
-                          // Custom Unit Dropdown & Category
-                          Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Expanded(flex: 1, child: _buildUnitDropdown()),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                flex: 1,
-                                child: _buildTextField(
                                   _categoryController,
                                   "Category",
                                   LucideIcons.tag,
@@ -406,6 +392,34 @@ class _AddItemPageState extends State<AddItemPage> {
                               ),
                             ],
                           ),
+                          const SizedBox(height: 16),
+
+                          // Initial Stock and Max Capacity side-by-side
+                          Row(
+                            children: [
+                              Expanded(
+                                child: _buildTextField(
+                                  _quantityController,
+                                  "Initial Stock",
+                                  LucideIcons.archive,
+                                  isNumber: true,
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: _buildTextField(
+                                  _maxQuantityController,
+                                  "Ideal Max Capacity",
+                                  LucideIcons.target,
+                                  isNumber: true,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 16),
+
+                          // Unit Dropdown takes full width to show the helper text nicely
+                          _buildUnitDropdown(),
 
                           const SizedBox(height: 16),
                           _buildTextField(

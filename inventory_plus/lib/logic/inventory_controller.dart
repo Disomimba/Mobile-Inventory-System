@@ -80,8 +80,7 @@ class InventoryController {
           .from('locations')
           .update({'layout_data': jsonDecode(encodedData)})
           .eq('id', locId);
-    } catch (e) {
-    }
+    } catch (e) {}
   }
 
   Future<void> addItem(InventoryItem newItem) async {
@@ -108,7 +107,8 @@ class InventoryController {
             'product_size': newItem.productSize,
             'shelf_level': newItem.shelfLevel,
             'bin_number': newItem.binNumber,
-            'unit': newItem.unit, // PASS TO DB
+            'unit': newItem.unit,
+            'max_quantity': newItem.maxQuantity,
           })
           .select()
           .single();
@@ -123,7 +123,6 @@ class InventoryController {
         quantityChange: savedItem.quantity,
         newQuantity: savedItem.quantity,
       );
-
     } catch (e) {
       rethrow;
     }
@@ -152,8 +151,7 @@ class InventoryController {
       };
 
       await supabase.from('transaction_history').insert(insertData);
-    } catch (e) {
-    }
+    } catch (e) {}
   }
 
   // Uploads an image to Supabase Storage and returns the public URL
@@ -167,7 +165,7 @@ class InventoryController {
       final imageUrl = supabase.storage
           .from('product_images')
           .getPublicUrl(path);
-      return imageUrl;  
+      return imageUrl;
     } catch (e) {
       return null;
     }
@@ -229,11 +227,11 @@ class InventoryController {
             'bin_number': updatedItem.binNumber,
             'image_url': updatedItem.imageUrl,
             'map_element_id': updatedItem.locationId,
-            'unit': updatedItem.unit, // PASS TO DB
+            'unit': updatedItem.unit,
+            'max_quantity': updatedItem.maxQuantity,
           })
           .eq('id', updatedItem.id);
-    } catch (e) {
-    }
+    } catch (e) {}
   }
 
   Future<void> deleteItem(String id) async {
@@ -252,8 +250,7 @@ class InventoryController {
           newQuantity: 0,
         );
       }
-    } catch (e) {
-    }
+    } catch (e) {}
   }
 
   Future<void> assignItemToLocation(String itemId, String? rackId) async {
@@ -266,25 +263,10 @@ class InventoryController {
       final index = _items.indexWhere((item) => item.id == itemId);
       if (index != -1) {
         final current = _items[index];
-        _items[index] = InventoryItem(
-          id: current.id,
-          name: current.name,
-          sku: current.sku,
-          price: current.price,
-          quantity: current.quantity,
-          category: current.category,
-          description: current.description,
-          locationId: rackId,
-          manufacturer: current.manufacturer,
-          model: current.model,
-          productSize: current.productSize,
-          shelfLevel: current.shelfLevel,
-          binNumber: current.binNumber,
-          imageUrl: current.imageUrl,
-        );
+        // FIXED: Using copyWith to safely preserve maxQuantity, unit, and all other fields
+        _items[index] = current.copyWith(locationId: rackId);
       }
-    } catch (e) {
-    }
+    } catch (e) {}
   }
 
   Future<void> deleteMapElement(String elementId) async {
@@ -298,8 +280,7 @@ class InventoryController {
       for (var item in itemsToUnassign) {
         await assignItemToLocation(item.id, null);
       }
-    } catch (e) {
-    }
+    } catch (e) {}
   }
 
   Future<void> clearMapLayout() async {
@@ -313,8 +294,7 @@ class InventoryController {
       for (var item in itemsToUnassign) {
         await assignItemToLocation(item.id, null);
       }
-    } catch (e) {
-    }
+    } catch (e) {}
   }
 
   Future<void> updateItemLocationDetails(
@@ -342,8 +322,7 @@ class InventoryController {
           binNumber: layer,
         );
       }
-    } catch (e) {
-    }
+    } catch (e) {}
   }
 
   List<InventoryItem> get unassignedItems =>
@@ -392,6 +371,7 @@ class InventoryController {
     required String newSku,
     required String newPrice,
     required String newStock,
+    required String newMaxStock,
     required String newDesc,
     String? locationId,
     String? manufacturer,
@@ -400,13 +380,14 @@ class InventoryController {
     String? shelfLevel,
     String? binNumber,
     String? imageUrl,
-    String? unit, // ADDED
+    String? unit,
   }) {
     return originalItem.copyWith(
       name: newName,
       sku: newSku,
       price: double.tryParse(newPrice) ?? originalItem.price,
       quantity: double.tryParse(newStock) ?? originalItem.quantity,
+      maxQuantity: double.tryParse(newMaxStock) ?? originalItem.maxQuantity,
       description: newDesc,
       locationId: locationId,
       manufacturer: manufacturer,
@@ -415,7 +396,7 @@ class InventoryController {
       shelfLevel: shelfLevel,
       binNumber: binNumber,
       imageUrl: imageUrl,
-      unit: unit, // ADDED
+      unit: unit,
     );
   }
 
@@ -424,6 +405,7 @@ class InventoryController {
     required String sku,
     required String price,
     required String quantity,
+    required String maxQuantity,
     required String category,
     required String description,
     String? mapLocationId,
@@ -433,14 +415,18 @@ class InventoryController {
     String? shelfLevel,
     String? binNumber,
     String? imageUrl,
-    String unit = 'pcs', // ADDED
+    String unit = 'pcs',
   }) {
+    double parsedQty = double.tryParse(quantity) ?? 0.0;
+    double parsedMax = double.tryParse(maxQuantity) ?? parsedQty;
+
     return InventoryItem(
       id: '',
       name: name,
       sku: sku,
       price: double.tryParse(price) ?? 0.0,
       quantity: double.tryParse(quantity) ?? 0.0,
+      maxQuantity: parsedMax == 0 ? 100 : parsedMax,
       category: category,
       description: description,
       locationId: mapLocationId,
@@ -450,12 +436,14 @@ class InventoryController {
       shelfLevel: shelfLevel,
       binNumber: binNumber,
       imageUrl: imageUrl ?? '',
-      unit: unit, // ADDED
+      unit: unit,
     );
   }
 
   InventoryItem calculateCheckout(InventoryItem item, double quantity) {
-    return item.copyWith(quantity: (item.quantity - quantity).clamp(0.0, 999999.0));
+    return item.copyWith(
+      quantity: (item.quantity - quantity).clamp(0.0, 999999.0),
+    );
   }
 
   InventoryItem? findItemByCode(String code) {
@@ -501,7 +489,7 @@ class InventoryController {
     if (locId == null) return false;
     try {
       final hashedPassword = _hashPassword(password);
-      
+
       await supabase.from('profiles').insert({
         'name': name,
         'username': username,
@@ -602,8 +590,7 @@ class InventoryController {
           .from('transaction_history')
           .delete()
           .eq('location_id', locId);
-    } catch (e) {
-    }
+    } catch (e) {}
   }
 
   // ==========================================
@@ -661,7 +648,9 @@ class InventoryController {
         DateTime? stockoutDate;
         if (dailySalesVelocity > 0) {
           daysUntilStockout = item.quantity / dailySalesVelocity;
-          stockoutDate = DateTime.now().add(Duration(days: daysUntilStockout.floor()));
+          stockoutDate = DateTime.now().add(
+            Duration(days: daysUntilStockout.floor()),
+          );
         }
 
         int safetyStock = 0;
@@ -703,7 +692,9 @@ class InventoryController {
         if (a['needsReorder'] && !b['needsReorder']) return -1;
         if (!a['needsReorder'] && b['needsReorder']) return 1;
         if (a['daysUntilStockout'] != -1 && b['daysUntilStockout'] != -1) {
-          return (a['daysUntilStockout'] as double).compareTo(b['daysUntilStockout'] as double);
+          return (a['daysUntilStockout'] as double).compareTo(
+            b['daysUntilStockout'] as double,
+          );
         }
         return 0;
       });
@@ -747,8 +738,7 @@ class InventoryController {
           await updateItem(updatedItem);
         }
       }
-    } catch (e) {
-    }
+    } catch (e) {}
   }
 
   Stream<List<CustomerOrder>> streamOrders() {
@@ -773,8 +763,7 @@ class InventoryController {
         updateData['prepared_by'] = currentUserNumericId;
       }
       await supabase.from('orders').update(updateData).eq('id', orderId);
-    } catch (e) {
-    }
+    } catch (e) {}
   }
 
   Set<String>? _processingOrders;
@@ -806,15 +795,15 @@ class InventoryController {
     required String userId,
     required String name,
     required String email,
-    required String location, // This parameter is still named 'location' in your Dart code
+    required String location,
     required String phone,
   }) async {
     try {
       final updateData = {
-        'name': name, 
+        'name': name,
         'email': email.isEmpty ? null : email,
-        'address': location, // Map the 'location' parameter to the 'address' DB column
-        'phone': phone,      // Ensure your DB column is actually named 'phone'
+        'address': location,
+        'phone': phone,
       };
 
       await Supabase.instance.client
@@ -830,7 +819,10 @@ class InventoryController {
   // ==========================================
 
   /// Allows an admin to forcefully reset a staff member's password
-  Future<bool> adminResetUserPassword(String targetUserId, String newPassword) async {
+  Future<bool> adminResetUserPassword(
+    String targetUserId,
+    String newPassword,
+  ) async {
     try {
       final hashedNewPassword = _hashPassword(newPassword);
 
@@ -838,7 +830,7 @@ class InventoryController {
           .from('profiles')
           .update({'password': hashedNewPassword})
           .eq('id', targetUserId);
-          
+
       return true;
     } catch (e) {
       return false;

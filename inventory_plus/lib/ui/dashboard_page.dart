@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
@@ -62,27 +63,31 @@ class _DashboardPageState extends State<DashboardPage> {
 
       if (_forecastingFilter == 'Season') {
         forecastingContext =
-            "Focus purely on the upcoming Philippine seasonal and climate shifts (e.g., entering the rainy/typhoon season or summer heat) based on the current month.";
+            "Focus purely on upcoming Philippine seasonal and climate shifts (e.g., entering the rainy/typhoon season or summer heat). Forecast demand ONLY for hardware, construction, plumbing, and maintenance materials (e.g., roof sealants, G.I. sheets, water hose, cement).";
       } else {
         forecastingContext =
-            "Focus strictly on short-term hardware sales trends, local economic activities, and month-to-month demand patterns.";
+            "Focus strictly on short-term hardware sales trends, local construction activities, and month-to-month demand patterns for building materials and tools.";
       }
 
       if (_isBulletedFormat) {
         formatInstruction =
-            "Format the output as a professional, clean bulleted list using the '•' symbol. Recommend SPECIFIC ITEM NAMES in ALL CAPS for emphasis, followed by a brief 5-word reason. Example: '• ROOF SEALANT: Approaching rainy season.' DO NOT use markdown like asterisks (**).";
+            "Format the output as a professional, clean bulleted list using the '•' symbol. Recommend SPECIFIC HARDWARE ITEM NAMES in ALL CAPS for emphasis, followed by a brief 5-word reason. Example: '• ELASTOMERIC SEALANT: Approaching heavy rainy season.' DO NOT use markdown like asterisks (**).";
       } else {
         formatInstruction =
-            "Format the output as a professional, concise executive summary paragraph (maximum 3 sentences). DO NOT list specific item names. Instead, explain the upcoming trend and recommend broad PRODUCT CATEGORIES (e.g., 'waterproofing materials', 'structural reinforcements'). DO NOT use markdown like asterisks (**).";
+            "Format the output as a professional, concise executive summary paragraph (maximum 3 sentences). DO NOT list specific item names. Instead, explain the upcoming trend and recommend broad HARDWARE PRODUCT CATEGORIES (e.g., 'waterproofing materials', 'structural reinforcements'). DO NOT use markdown like asterisks (**).";
       }
 
       final prompt =
           """
-      You are an AI Demand Forecasting system strictly for a hardware store located in the Philippines. 
+      You are an AI Demand Forecasting system strictly for a small-to-medium hardware and construction supply store located in the Philippines. 
       The current month is $currentMonth.
       $forecastingContext
       $formatInstruction
-      Do NOT suggest electronics or gadgets. Do not include any conversational intro or outro text.
+      
+      CRITICAL RULES:
+      - ONLY suggest construction, plumbing, electrical, carpentry, and maintenance materials.
+      - DO NOT suggest personal care (skincare), clothing, umbrellas, food, consumer electronics, or household appliances.
+      - Do not include any conversational intro or outro text.
       """;
 
       final groqApiKey = dotenv.env['GROQ_API_KEY']?.trim() ?? '';
@@ -108,7 +113,7 @@ class _DashboardPageState extends State<DashboardPage> {
             {
               "role": "system",
               "content":
-                  "You are a professional, highly analytical inventory forecaster in the Philippines.",
+                  "You are a professional inventory forecaster for a traditional hardware and construction supply store in the Philippines.",
             },
             {"role": "user", "content": prompt},
           ],
@@ -153,21 +158,23 @@ class _DashboardPageState extends State<DashboardPage> {
       );
 
       final criticalItems = allItems
-          .where((i) => i.quantity > 0 && i.quantity <= 10)
-          .map((i) => "${i.name} (Qty: ${i.quantity})")
+          .where((i) => i.quantity > 0 && i.quantity <= (i.maxQuantity * 0.10))
+          .map(
+            (i) =>
+                "${i.name} (Current: ${i.quantity}, Max Capacity: ${i.maxQuantity})",
+          )
           .join(', ');
 
       final deadItems = allItems
-          .where((i) => i.quantity == 0)
-          .map((i) => i.name)
+          .where((i) => i.quantity <= 0)
+          .map((i) => "${i.name} (Max Capacity: ${i.maxQuantity})")
           .join(', ');
 
-      // UPDATED PROMPT: Merged logic with justification at the end
       final prompt =
           """
       I manage a hardware store. Here is my internal inventory data:
       Out-of-stock items: ${deadItems.isEmpty ? 'None' : deadItems}. 
-      Low Stock (1-10 qty) items: ${criticalItems.isEmpty ? 'None' : criticalItems}. 
+      Critical Stock (under 10% capacity) items: ${criticalItems.isEmpty ? 'None' : criticalItems}.
 
       Provide a strict INTERNAL restocking action plan.
       Follow these strict rules:
@@ -218,7 +225,6 @@ class _DashboardPageState extends State<DashboardPage> {
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         String rawContent = data['choices'][0]['message']['content'].trim();
-        // Forcefully strip markdown
         String cleanContent = rawContent.replaceAll(RegExp(r'\*+'), '');
 
         setState(() {
@@ -238,6 +244,109 @@ class _DashboardPageState extends State<DashboardPage> {
     }
   }
 
+  // ─── Modal Triggers ────────────────────────────────────────────────────────
+
+  void _showRestockModal(InventoryItem item) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => Padding(
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.of(context).viewInsets.bottom,
+        ),
+        child: _RestockModalContent(
+          item: item,
+          onConfirmRestock: (double addedQty) async {
+            // 1. Update the quantity locally on the UI (Step 1 fix makes this work)
+            setState(() {
+              item.quantity += addedQty;
+            });
+
+            // 2. Send the update to your controller to save to your database.
+            // You'll need to uncomment and adjust this to match your actual controller method.
+            // await widget.controller.updateItemQuantity(item.id, item.quantity);
+
+            if (mounted) {
+              Navigator.pop(context);
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(
+                    'Successfully added $addedQty ${item.unit} to ${item.name}',
+                  ),
+                  backgroundColor: Colors.green,
+                ),
+              );
+            }
+          },
+        ),
+      ),
+    );
+  }
+
+  void _showAllAlertsModal(List<InventoryItem> items) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => SizedBox(
+        height: MediaQuery.of(context).size.height * 0.7,
+        child: Column(
+          children: [
+            const Padding(
+              padding: EdgeInsets.all(16.0),
+              child: Text(
+                "All Critical Items",
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+            ),
+            const Divider(height: 1),
+            Expanded(
+              child: ListView.separated(
+                padding: const EdgeInsets.all(16),
+                itemCount: items.length,
+                separatorBuilder: (context, index) => const Divider(),
+                itemBuilder: (context, index) {
+                  final item = items[index];
+                  return ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: Text(
+                      item.name,
+                      style: const TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                    subtitle: Text(
+                      "Current: ${item.quantity} ${item.unit}",
+                      style: const TextStyle(color: Colors.red),
+                    ),
+                    trailing: ElevatedButton.icon(
+                      onPressed: () => _showRestockModal(item),
+                      icon: const Icon(Icons.add_shopping_cart, size: 16),
+                      label: const Text("Restock"),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.orange.shade50,
+                        foregroundColor: Colors.orange.shade900,
+                        elevation: 0,
+                      ),
+                    ),
+                    onTap: () => _showRestockModal(item),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ─── Build Method ──────────────────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
     final allItems = widget.controller.filterInventory(
@@ -247,13 +356,20 @@ class _DashboardPageState extends State<DashboardPage> {
     final totalItems = allItems.length;
 
     final deadStockItems = allItems
-        .where((item) => item.quantity == 0)
+        .where((item) => item.quantity <= 0)
         .toList();
     final criticalStockItems = allItems
-        .where((item) => item.quantity > 0 && item.quantity <= 10)
+        .where(
+          (item) =>
+              item.quantity > 0 && item.quantity <= (item.maxQuantity * 0.10),
+        )
         .toList();
     final lowStockItems = allItems
-        .where((item) => item.quantity > 10 && item.quantity <= 20)
+        .where(
+          (item) =>
+              item.quantity > (item.maxQuantity * 0.10) &&
+              item.quantity <= (item.maxQuantity * 0.20),
+        )
         .toList();
 
     return Scaffold(
@@ -321,27 +437,28 @@ class _DashboardPageState extends State<DashboardPage> {
             LayoutBuilder(
               builder: (context, constraints) {
                 final isDesktop = constraints.maxWidth > 800;
+                final halfWidth = (constraints.maxWidth / 2) - 12;
+
                 return Wrap(
                   spacing: 24,
                   runSpacing: 24,
                   children: [
+                    // LEFT COLUMN
                     SizedBox(
-                      width: isDesktop
-                          ? (constraints.maxWidth / 1.7) - 12
-                          : double.infinity,
-                      child: _buildForecastingChart(),
-                    ),
-                    SizedBox(
-                      width: isDesktop
-                          ? (constraints.maxWidth / 2.5) - 12
-                          : double.infinity,
+                      width: isDesktop ? halfWidth : double.infinity,
                       child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
                           _buildActionableAlerts(criticalStockItems),
                           const SizedBox(height: 24),
-                          _buildAIRecommendations(),
+                          _buildForecastingChart(),
                         ],
                       ),
+                    ),
+                    // RIGHT COLUMN
+                    SizedBox(
+                      width: isDesktop ? halfWidth : double.infinity,
+                      child: _buildAIRecommendations(),
                     ),
                   ],
                 );
@@ -353,6 +470,8 @@ class _DashboardPageState extends State<DashboardPage> {
       ),
     );
   }
+
+  // ─── UI Components ─────────────────────────────────────────────────────────
 
   Widget _buildStatCard(
     String title,
@@ -665,102 +784,54 @@ class _DashboardPageState extends State<DashboardPage> {
           else
             ...itemsToShow.map(
               (item) => Padding(
-                padding: const EdgeInsets.only(bottom: 12.0),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Expanded(
-                      child: Text(
-                        item.name,
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w600,
-                          fontSize: 13,
-                        ),
-                        overflow: TextOverflow.ellipsis,
+                padding: const EdgeInsets.only(bottom: 8.0),
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(8),
+                    onTap: () => _showRestockModal(item),
+                    child: Padding(
+                      padding: const EdgeInsets.all(8.0),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Expanded(
+                            child: Text(
+                              item.name,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w600,
+                                fontSize: 13,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 4,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.red.withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              "${item.quantity} ${item.unit}",
+                              style: const TextStyle(
+                                color: Colors.red,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 4,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.red.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Text(
-                        "${item.quantity} ${item.unit}",
-                        style: const TextStyle(
-                          color: Colors.red,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ),
-                  ],
+                  ),
                 ),
               ),
             ),
         ],
-      ),
-    );
-  }
-
-  void _showAllAlertsModal(List<InventoryItem> items) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) => SizedBox(
-        height: MediaQuery.of(context).size.height * 0.7,
-        child: Column(
-          children: [
-            const Padding(
-              padding: EdgeInsets.all(16.0),
-              child: Text(
-                "All Critical Items",
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-              ),
-            ),
-            const Divider(),
-            Expanded(
-              child: ListView.builder(
-                padding: const EdgeInsets.all(16),
-                itemCount: items.length,
-                itemBuilder: (context, index) {
-                  final item = items[index];
-                  return ListTile(
-                    title: Text(
-                      item.name,
-                      style: const TextStyle(fontWeight: FontWeight.w600),
-                    ),
-                    trailing: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 4,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.red.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Text(
-                        "${item.quantity} ${item.unit}",
-                        style: const TextStyle(
-                          color: Colors.red,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ),
-                  );
-                },
-              ),
-            ),
-          ],
-        ),
       ),
     );
   }
@@ -789,7 +860,6 @@ class _DashboardPageState extends State<DashboardPage> {
                 children: [
                   Icon(LucideIcons.sparkles, color: Colors.orange, size: 20),
                   SizedBox(width: 8),
-                  // HEADER RENAMED:
                   Text(
                     "AI Restocking Recommendation",
                     style: TextStyle(
@@ -838,6 +908,351 @@ class _DashboardPageState extends State<DashboardPage> {
           ),
         ],
       ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Restock Modal Content Widget
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _RestockModalContent extends StatefulWidget {
+  final InventoryItem item;
+  final Function(double) onConfirmRestock;
+
+  const _RestockModalContent({
+    required this.item,
+    required this.onConfirmRestock,
+  });
+
+  @override
+  State<_RestockModalContent> createState() => _RestockModalContentState();
+}
+
+class _RestockModalContentState extends State<_RestockModalContent> {
+  late double _amountToAdd;
+
+  @override
+  void initState() {
+    super.initState();
+    bool isSolid = _isSolidItem(widget.item.unit);
+    _amountToAdd = isSolid ? 1.0 : 0.25; // Default restock starting amount
+  }
+
+  bool _isSolidItem(String unit) {
+    final u = unit.toLowerCase();
+    return u == 'pcs' || u == 'box' || u == 'pack' || u == '';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.all(24.0),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                "Restock Item",
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              ),
+              IconButton(
+                icon: const Icon(Icons.close),
+                onPressed: () => Navigator.pop(context),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.grey.shade50,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.grey.shade200),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  widget.item.name,
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      "Current Stock: ${widget.item.quantity} ${widget.item.unit}",
+                      style: const TextStyle(
+                        color: Colors.red,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    Text(
+                      "Price: \₱${widget.item.price.toStringAsFixed(2)}",
+                      style: const TextStyle(
+                        color: Colors.grey,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 24),
+          const Text(
+            "Quantity to Add:",
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 12),
+          Center(
+            child: _DashboardQuantityStepper(
+              initialValue: _amountToAdd,
+              unit: widget.item.unit,
+              onChanged: (newVal) {
+                setState(() {
+                  _amountToAdd = newVal;
+                });
+              },
+            ),
+          ),
+          const SizedBox(height: 32),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: () => Navigator.pop(context),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: const Text("Cancel"),
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: ElevatedButton(
+                  onPressed: _amountToAdd > 0
+                      ? () => widget.onConfirmRestock(_amountToAdd)
+                      : null,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.green,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: const Text(
+                    "Confirm Restock",
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Dashboard Quantity Stepper (Supports both solid and fractional measurements)
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _DashboardQuantityStepper extends StatefulWidget {
+  final double initialValue;
+  final String unit;
+  final ValueChanged<double> onChanged;
+
+  const _DashboardQuantityStepper({
+    required this.initialValue,
+    required this.unit,
+    required this.onChanged,
+  });
+
+  @override
+  State<_DashboardQuantityStepper> createState() =>
+      _DashboardQuantityStepperState();
+}
+
+class _DashboardQuantityStepperState extends State<_DashboardQuantityStepper> {
+  late TextEditingController _controller;
+  bool _isFocused = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(
+      text: _formatDisplay(widget.initialValue),
+    );
+  }
+
+  @override
+  void didUpdateWidget(covariant _DashboardQuantityStepper oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.initialValue != widget.initialValue && !_isFocused) {
+      _controller.text = _formatDisplay(widget.initialValue);
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  bool _isSolidItem() {
+    final u = widget.unit.toLowerCase();
+    return u == 'pcs' || u == 'box' || u == 'pack' || u == '';
+  }
+
+  String _formatDisplay(double val) {
+    if (_isSolidItem()) return val.toInt().toString();
+    return val.truncateToDouble() == val
+        ? val.toInt().toString()
+        : val
+              .toString()
+              .replaceAll(RegExp(r'0*$'), '')
+              .replaceAll(RegExp(r'\.$'), '');
+  }
+
+  String _getFractionLabel(double val) {
+    if (val == 0) return "0";
+    int whole = val.truncate();
+    double decimal = val - whole;
+
+    String fraction = "";
+    if ((decimal - 0.25).abs() < 0.001)
+      fraction = "1/4";
+    else if ((decimal - 0.50).abs() < 0.001)
+      fraction = "1/2";
+    else if ((decimal - 0.75).abs() < 0.001)
+      fraction = "3/4";
+
+    if (fraction.isNotEmpty) {
+      return whole == 0 ? fraction : "$whole $fraction";
+    }
+
+    if (decimal == 0) return whole.toString();
+    final formatted = val
+        .toStringAsFixed(3)
+        .replaceAll(RegExp(r'0+$'), '')
+        .replaceAll(RegExp(r'\.$'), '');
+    return formatted;
+  }
+
+  void _submit() {
+    final val = double.tryParse(_controller.text);
+    if (val != null && val >= 0) {
+      widget.onChanged(_isSolidItem() ? val.truncateToDouble() : val);
+    } else {
+      _controller.text = _formatDisplay(widget.initialValue);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isSolid = _isSolidItem();
+    final step = isSolid ? 1.0 : 0.25;
+    final fractionLabel = !isSolid
+        ? _getFractionLabel(widget.initialValue)
+        : "";
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        IconButton(
+          icon: const Icon(
+            Icons.remove_circle_outline,
+            color: Colors.orange,
+            size: 32,
+          ),
+          onPressed: () {
+            if (widget.initialValue > step) {
+              widget.onChanged(widget.initialValue - step);
+            } else if (widget.initialValue > 0) {
+              widget.onChanged(0);
+            }
+          },
+        ),
+        SizedBox(
+          width: 80,
+          child: Focus(
+            onFocusChange: (hasFocus) {
+              setState(() => _isFocused = hasFocus);
+              if (!hasFocus) _submit();
+            },
+            child: TextField(
+              controller: _controller,
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              keyboardType: TextInputType.numberWithOptions(decimal: !isSolid),
+              inputFormatters: isSolid
+                  ? [FilteringTextInputFormatter.digitsOnly]
+                  : [FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*'))],
+              onChanged: (val) {
+                final parsed = double.tryParse(val);
+                if (parsed != null && parsed >= 0) {
+                  widget.onChanged(
+                    isSolid ? parsed.truncateToDouble() : parsed,
+                  );
+                }
+              },
+              onSubmitted: (_) => _submit(),
+              decoration: const InputDecoration(
+                isDense: true,
+                contentPadding: EdgeInsets.symmetric(vertical: 8),
+                border: UnderlineInputBorder(
+                  borderSide: BorderSide(color: Colors.orange),
+                ),
+                focusedBorder: UnderlineInputBorder(
+                  borderSide: BorderSide(color: Colors.orange, width: 2),
+                ),
+              ),
+            ),
+          ),
+        ),
+        IconButton(
+          icon: const Icon(
+            Icons.add_circle_outline,
+            color: Colors.orange,
+            size: 32,
+          ),
+          onPressed: () => widget.onChanged(widget.initialValue + step),
+        ),
+        if (!isSolid)
+          Container(
+            margin: const EdgeInsets.only(left: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+            decoration: BoxDecoration(
+              color: Colors.orange.shade50,
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(color: Colors.orange.shade200),
+            ),
+            child: Text(
+              fractionLabel.isNotEmpty
+                  ? "$fractionLabel ${widget.unit}"
+                  : widget.unit,
+              style: const TextStyle(
+                fontWeight: FontWeight.bold,
+                color: Colors.orange,
+                fontSize: 14,
+              ),
+            ),
+          ),
+      ],
     );
   }
 }

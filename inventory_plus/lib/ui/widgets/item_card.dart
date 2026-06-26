@@ -14,7 +14,7 @@ class ItemCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bool isLowStock = item.quantity < 20;
+    final bool isLowStock = item.quantity <= (item.maxQuantity * 0.20);
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 12.0),

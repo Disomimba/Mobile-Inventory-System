@@ -42,6 +42,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
   late TextEditingController _nameController;
   late TextEditingController _priceController;
   late TextEditingController _stockController;
+  late TextEditingController _maxStockController; // ADDED MAX STOCK CONTROLLER
   late TextEditingController _skuController;
   late TextEditingController _descController;
   late TextEditingController _manufacturerController;
@@ -80,6 +81,9 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
     _stockController = TextEditingController(
       text: _currentItem.quantity.toString(),
     );
+    _maxStockController = TextEditingController(
+      text: _currentItem.maxQuantity.toString(), // INITIALIZE MAX STOCK
+    );
     _skuController = TextEditingController(text: _currentItem.sku);
     _descController = TextEditingController(text: _currentItem.description);
 
@@ -113,6 +117,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
     _nameController.dispose();
     _priceController.dispose();
     _stockController.dispose();
+    _maxStockController.dispose(); // DISPOSE MAX STOCK
     _skuController.dispose();
     _descController.dispose();
     _manufacturerController.dispose();
@@ -244,6 +249,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
         newSku: _skuController.text,
         newPrice: _priceController.text,
         newStock: _stockController.text,
+        newMaxStock: _maxStockController.text, // ADDED MAX STOCK BINDING
         newDesc: _descController.text,
         locationId: _currentItem.locationId,
         manufacturer: _manufacturerController.text,
@@ -324,7 +330,9 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                             "Stock (Qty)",
                             _currentItem.quantity.toString(),
                             LucideIcons.package,
-                            _currentItem.quantity < 20
+                            // CHANGED: Dynamic 20% color check instead of < 20
+                            _currentItem.quantity <=
+                                    (_currentItem.maxQuantity * 0.20)
                                 ? Colors.red
                                 : Colors.blue,
                             _stockController,
@@ -368,7 +376,10 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
             child: SizedBox(
               width: 20,
               height: 20,
-              child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+              child: CircularProgressIndicator(
+                color: Colors.white,
+                strokeWidth: 2,
+              ),
             ),
           )
         else if (_isEditing)
@@ -390,14 +401,14 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
             children: [
               _buildImage(),
               Container(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [Colors.transparent, Colors.black.withOpacity(0.8)],
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [Colors.transparent, Colors.black.withOpacity(0.8)],
+                  ),
                 ),
               ),
-            ),
               if (_isEditing)
                 Center(
                   child: Container(
@@ -406,36 +417,40 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                       color: Colors.black54,
                       shape: BoxShape.circle,
                     ),
-                    child: const Icon(LucideIcons.camera, color: Colors.white, size: 32),
+                    child: const Icon(
+                      LucideIcons.camera,
+                      color: Colors.white,
+                      size: 32,
+                    ),
                   ),
                 ),
-            Positioned(
-              bottom: 16,
-              left: 16,
-              right: 16,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    _currentItem.category.toUpperCase(),
-                    style: const TextStyle(
-                      color: Colors.orange,
-                      fontSize: 10,
-                      fontWeight: FontWeight.bold,
+              Positioned(
+                bottom: 16,
+                left: 16,
+                right: 16,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _currentItem.category.toUpperCase(),
+                      style: const TextStyle(
+                        color: Colors.orange,
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
-                  ),
-                  Text(
-                    _currentItem.name,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold,
+                    Text(
+                      _currentItem.name,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 24,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
           ),
         ),
       ),
@@ -601,7 +616,24 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
             ],
           ),
           const SizedBox(height: 16),
-          _buildField("SKU", _skuController, _currentItem.sku),
+
+          // ADDED MAX CAPACITY NEXT TO SKU
+          Row(
+            children: [
+              Expanded(
+                child: _buildField("SKU", _skuController, _currentItem.sku),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _buildField(
+                  "Max Capacity",
+                  _maxStockController,
+                  _currentItem.maxQuantity.toString(),
+                ),
+              ),
+            ],
+          ),
+
           const SizedBox(height: 16),
           Row(
             children: [
@@ -666,7 +698,10 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                 TextButton(
                   onPressed: _showAllTransactionsModal,
                   style: TextButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 4,
+                    ),
                     minimumSize: Size.zero,
                     tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   ),
@@ -681,7 +716,11 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                         ),
                       ),
                       SizedBox(width: 4),
-                      Icon(LucideIcons.chevronRight, size: 14, color: Colors.orange),
+                      Icon(
+                        LucideIcons.chevronRight,
+                        size: 14,
+                        color: Colors.orange,
+                      ),
                     ],
                   ),
                 ),
@@ -814,7 +853,9 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                     ),
                     Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 6),
+                        horizontal: 12,
+                        vertical: 6,
+                      ),
                       decoration: BoxDecoration(
                         color: Colors.orange.withOpacity(0.1),
                         borderRadius: BorderRadius.circular(20),
@@ -837,7 +878,9 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                 child: ListView.separated(
                   controller: scrollController,
                   padding: const EdgeInsets.symmetric(
-                      horizontal: 20, vertical: 12),
+                    horizontal: 20,
+                    vertical: 12,
+                  ),
                   itemCount: _transactionHistory.length,
                   separatorBuilder: (_, __) =>
                       Divider(height: 1, color: Colors.grey.shade100),
@@ -889,7 +932,9 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
         return Dialog(
           insetPadding: const EdgeInsets.all(16),
           clipBehavior: Clip.antiAlias,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
           child: Column(
             children: [
               AppBar(
@@ -909,9 +954,14 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                   onSelectionAssigned: () {
                     Navigator.pop(context); // Close dialog
                     setState(() {
-                      _currentItem = widget.controller.allItems.firstWhere((item) => item.id == _currentItem.id);
+                      _currentItem = widget.controller.allItems.firstWhere(
+                        (item) => item.id == _currentItem.id,
+                      );
                     });
-                    _showSnackBar("Location updated successfully", Colors.green);
+                    _showSnackBar(
+                      "Location updated successfully",
+                      Colors.green,
+                    );
                   },
                 ),
               ),
@@ -985,7 +1035,8 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
         ),
         child: Row(
           children: [
-            if (widget.controller.currentUserRole?.toLowerCase() == 'admin') ...[
+            if (widget.controller.currentUserRole?.toLowerCase() ==
+                'admin') ...[
               Expanded(
                 child: OutlinedButton.icon(
                   onPressed: _showDeleteDialog,
@@ -998,9 +1049,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                   ),
                 ),
               ),
-              
             ],
-            
           ],
         ),
       ),
@@ -1060,7 +1109,9 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                     icon: const Icon(Icons.remove_circle_outline, size: 40),
                   ),
                   Text(
-                    checkoutQty.toStringAsFixed(checkoutQty.truncateToDouble() == checkoutQty ? 0 : 1),
+                    checkoutQty.toStringAsFixed(
+                      checkoutQty.truncateToDouble() == checkoutQty ? 0 : 1,
+                    ),
                     style: const TextStyle(
                       fontSize: 30,
                       fontWeight: FontWeight.bold,
@@ -1068,7 +1119,8 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                   ),
                   IconButton(
                     onPressed: () {
-                      if (checkoutQty < _currentItem.quantity) setModalState(() => checkoutQty++);
+                      if (checkoutQty < _currentItem.quantity)
+                        setModalState(() => checkoutQty++);
                     },
                     icon: const Icon(Icons.add_circle_outline, size: 40),
                   ),

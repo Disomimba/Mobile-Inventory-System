@@ -7,6 +7,13 @@ import '../data/inventory.dart';
 import '../logic/inventory_controller.dart';
 import 'visual_search_page.dart';
 
+// ─── Snap positions as fractions of total screen height ──────────────────────
+const double _kSnapFull = 0.75;
+
+// FIX 1: Increased from 140 to 165 to account for actual chrome height:
+// drag handle (~24px) + orange header (~56px) + footer (~80px) + buffer = ~165px
+const double _kChromeOnlyHeightPx = 165.0;
+
 class PosCartPage extends StatefulWidget {
   final InventoryController controller;
 
@@ -16,18 +23,107 @@ class PosCartPage extends StatefulWidget {
   State<PosCartPage> createState() => _PosCartPageState();
 }
 
-class _PosCartPageState extends State<PosCartPage> {
+class _PosCartPageState extends State<PosCartPage>
+    with SingleTickerProviderStateMixin {
   String _searchQuery = '';
   final Map<String, double> _cart = {};
-  bool _isGridView = true;
+  bool? _isGridView;
   bool _isProcessingCart = false;
 
+  // ── Draggable panel state ──────────────────────────────────────────────────
+  double _cartHeightFraction = 0.0;
+  late AnimationController _snapAnim;
+  late Animation<double> _snapAnimation;
+  double _dragStart = 0;
+  double _fractionAtDragStart = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _snapAnim = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 450),
+    );
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final mq = MediaQuery.of(context);
+      final totalHeight = mq.size.height - mq.padding.top;
+      if (totalHeight <= 0) return;
+      setState(() {
+        _cartHeightFraction = (_kChromeOnlyHeightPx / totalHeight).clamp(
+          0.0,
+          _kSnapFull,
+        );
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _snapAnim.dispose();
+    super.dispose();
+  }
+
+  void _snapTo(double target) {
+    final start = _cartHeightFraction;
+    // Use a spring simulation for natural deceleration — no magnetic snap feel.
+    // ElasticOut would overshoot; FastLinearToSlowEaseIn front-loads motion
+    // so the sheet arrives gently rather than snapping into place.
+    _snapAnimation =
+        Tween<double>(begin: start, end: target).animate(
+          CurvedAnimation(
+            parent: _snapAnim,
+            curve: const Cubic(
+              0.25,
+              0.46,
+              0.45,
+              0.94,
+            ), // ease-out-quad: smooth & natural
+          ),
+        )..addListener(() {
+          setState(() => _cartHeightFraction = _snapAnimation.value);
+        });
+    _snapAnim
+      ..reset()
+      ..forward();
+  }
+
+  void _onDragEnd(DragEndDetails details) {
+    final mq = MediaQuery.of(context);
+    final safeHeight = mq.size.height - mq.padding.top - mq.padding.bottom - 56;
+    final totalHeight = mq.size.height - mq.padding.top;
+    if (totalHeight <= 0) return;
+
+    final floorFraction = (_kChromeOnlyHeightPx / totalHeight).clamp(
+      0.0,
+      _kSnapFull,
+    );
+    final safeMax = (safeHeight / totalHeight).clamp(floorFraction, _kSnapFull);
+
+    final velocity = details.primaryVelocity ?? 0;
+    double target;
+
+    if (velocity < -800) {
+      target = safeMax;
+    } else if (velocity > 800) {
+      target = floorFraction;
+    } else {
+      target =
+          (_cartHeightFraction - floorFraction).abs() <
+              (_cartHeightFraction - safeMax).abs()
+          ? floorFraction
+          : safeMax;
+    }
+    _snapTo(target.clamp(floorFraction, safeMax));
+  }
+
+  // ── Cart logic ─────────────────────────────────────────────────────────────
   List<InventoryItem> get _filteredItems =>
       widget.controller.searchInventory(_searchQuery);
 
   bool _addToCart(InventoryItem item) {
+    if (_isProcessingCart) return false;
     final currentQty = _cart[item.id] ?? 0;
-
     if (currentQty >= item.quantity) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -39,14 +135,12 @@ class _PosCartPageState extends State<PosCartPage> {
       );
       return false;
     }
-
-    setState(() {
-      _cart[item.id] = currentQty + 1;
-    });
+    setState(() => _cart[item.id] = currentQty + 1);
     return true;
   }
 
   void _setCartQuantity(String itemId, double qty) {
+    if (_isProcessingCart) return;
     try {
       final item = widget.controller.allItems.firstWhere((i) => i.id == itemId);
       if (qty > item.quantity) {
@@ -60,9 +154,7 @@ class _PosCartPageState extends State<PosCartPage> {
         );
         qty = item.quantity;
       }
-    } catch (e) {
-      // Item might have been deleted from inventory
-    }
+    } catch (_) {}
 
     setState(() {
       if (qty <= 0) {
@@ -75,9 +167,7 @@ class _PosCartPageState extends State<PosCartPage> {
 
   Future<void> _processOrder() async {
     if (_cart.isEmpty || _isProcessingCart) return;
-
     setState(() => _isProcessingCart = true);
-
     try {
       final items = _cart.entries.map((entry) {
         final item = widget.controller.allItems.firstWhere(
@@ -99,14 +189,10 @@ class _PosCartPageState extends State<PosCartPage> {
             backgroundColor: Colors.green,
           ),
         );
-        setState(() {
-          _cart.clear();
-        });
+        setState(() => _cart.clear());
       }
     } finally {
-      if (mounted) {
-        setState(() => _isProcessingCart = false);
-      }
+      if (mounted) setState(() => _isProcessingCart = false);
     }
   }
 
@@ -118,9 +204,7 @@ class _PosCartPageState extends State<PosCartPage> {
           (i) => i.id == entry.key,
         );
         total += item.price * entry.value;
-      } catch (e) {
-        // Handle if an item was deleted
-      }
+      } catch (_) {}
     }
     return total;
   }
@@ -231,37 +315,35 @@ class _PosCartPageState extends State<PosCartPage> {
                               childrenPadding: const EdgeInsets.all(16),
                               children: [
                                 const Divider(),
-                                ...o.items
-                                    .map(
-                                      (item) => Padding(
-                                        padding: const EdgeInsets.symmetric(
-                                          vertical: 4.0,
-                                        ),
-                                        child: Row(
-                                          mainAxisAlignment:
-                                              MainAxisAlignment.spaceBetween,
-                                          children: [
-                                            Expanded(
-                                              child: Text(
-                                                item.productName,
-                                                style: const TextStyle(
-                                                  fontWeight: FontWeight.w500,
-                                                ),
-                                                maxLines: 1,
-                                                overflow: TextOverflow.ellipsis,
-                                              ),
+                                ...o.items.map(
+                                  (item) => Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 4.0,
+                                    ),
+                                    child: Row(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        Expanded(
+                                          child: Text(
+                                            item.productName,
+                                            style: const TextStyle(
+                                              fontWeight: FontWeight.w500,
                                             ),
-                                            Text(
-                                              'Qty: ${item.quantity}',
-                                              style: const TextStyle(
-                                                color: Colors.grey,
-                                              ),
-                                            ),
-                                          ],
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
                                         ),
-                                      ),
-                                    )
-                                    .toList(),
+                                        Text(
+                                          'Qty: ${item.quantity}',
+                                          style: const TextStyle(
+                                            color: Colors.grey,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
                                 const SizedBox(height: 16),
                                 if (isReady)
                                   ElevatedButton.icon(
@@ -312,7 +394,6 @@ class _PosCartPageState extends State<PosCartPage> {
                                           ],
                                         ),
                                       );
-
                                       if (confirm == true) {
                                         await widget.controller.completeOrder(
                                           o,
@@ -363,7 +444,7 @@ class _PosCartPageState extends State<PosCartPage> {
       return Image.network(
         imageUrl,
         fit: BoxFit.cover,
-        errorBuilder: (context, error, stackTrace) => Container(
+        errorBuilder: (_, __, ___) => Container(
           color: Colors.grey.shade200,
           child: const Icon(Icons.image_not_supported, color: Colors.grey),
         ),
@@ -372,7 +453,7 @@ class _PosCartPageState extends State<PosCartPage> {
       return Image.file(
         File(imageUrl),
         fit: BoxFit.cover,
-        errorBuilder: (context, error, stackTrace) => Container(
+        errorBuilder: (_, __, ___) => Container(
           color: Colors.grey.shade200,
           child: const Icon(Icons.image_not_supported, color: Colors.grey),
         ),
@@ -380,6 +461,7 @@ class _PosCartPageState extends State<PosCartPage> {
     }
   }
 
+  // ── Build ──────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -387,6 +469,8 @@ class _PosCartPageState extends State<PosCartPage> {
       body: LayoutBuilder(
         builder: (context, constraints) {
           final isDesktop = constraints.maxWidth >= 800;
+          _isGridView ??= isDesktop;
+
           if (isDesktop) {
             return Row(
               children: [
@@ -395,20 +479,66 @@ class _PosCartPageState extends State<PosCartPage> {
                 Expanded(flex: 1, child: _buildCartPanel()),
               ],
             );
-          } else {
-            return Column(
-              children: [
-                Expanded(flex: 3, child: _buildItemList()),
-                const Divider(height: 1, color: Colors.grey),
-                Expanded(flex: 2, child: _buildCartPanel()),
-              ],
-            );
           }
+
+          final bottomInset = MediaQuery.of(context).padding.bottom;
+          final totalHeight = constraints.maxHeight;
+          final maxCartHeight = (totalHeight - 56 - bottomInset).clamp(
+            0.0,
+            totalHeight * _kSnapFull,
+          );
+          final minCartHeight = _kChromeOnlyHeightPx.clamp(0.0, maxCartHeight);
+
+          final cartHeight = (totalHeight * _cartHeightFraction).clamp(
+            minCartHeight,
+            maxCartHeight,
+          );
+
+          return Stack(
+            children: [
+              Positioned.fill(
+                child: Padding(
+                  padding: EdgeInsets.only(bottom: cartHeight),
+                  child: _buildItemList(),
+                ),
+              ),
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                height: cartHeight,
+                child: Padding(
+                  padding: EdgeInsets.only(bottom: bottomInset),
+                  child: _DraggableCartSheet(
+                    onDragStart: (details) {
+                      _snapAnim.stop();
+                      _dragStart = details.globalPosition.dy;
+                      _fractionAtDragStart = cartHeight / totalHeight;
+                    },
+                    onDragUpdate: (details) {
+                      final delta = _dragStart - details.globalPosition.dy;
+                      final newFraction =
+                          _fractionAtDragStart + delta / totalHeight;
+                      setState(() {
+                        _cartHeightFraction = newFraction.clamp(
+                          minCartHeight / totalHeight,
+                          maxCartHeight / totalHeight,
+                        );
+                      });
+                    },
+                    onDragEnd: _onDragEnd,
+                    child: _buildCartPanel(),
+                  ),
+                ),
+              ),
+            ],
+          );
         },
       ),
     );
   }
 
+  // ── Item list ──────────────────────────────────────────────────────────────
   Widget _buildItemList() {
     return Column(
       children: [
@@ -439,12 +569,12 @@ class _PosCartPageState extends State<PosCartPage> {
                 ),
                 child: IconButton(
                   icon: Icon(
-                    _isGridView
+                    _isGridView!
                         ? Icons.view_list_rounded
                         : Icons.grid_view_rounded,
                     color: Colors.black87,
                   ),
-                  onPressed: () => setState(() => _isGridView = !_isGridView),
+                  onPressed: () => setState(() => _isGridView = !_isGridView!),
                 ),
               ),
               const SizedBox(width: 12),
@@ -462,254 +592,126 @@ class _PosCartPageState extends State<PosCartPage> {
           ),
         ),
         Expanded(
-          child: StreamBuilder(
-            stream: widget.controller.streamOrders(),
-            builder: (context, snapshot) {
-              return _isGridView
-                  ? LayoutBuilder(
-                      builder: (context, constraints) {
-                        int crossAxisCount = constraints.maxWidth > 600 ? 3 : 2;
-                        return GridView.builder(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 8,
-                          ),
-                          gridDelegate:
-                              SliverGridDelegateWithFixedCrossAxisCount(
-                                crossAxisCount: crossAxisCount,
-                                childAspectRatio: 0.70,
-                                crossAxisSpacing: 16,
-                                mainAxisSpacing: 16,
-                              ),
-                          itemCount: _filteredItems.length,
-                          itemBuilder: (context, index) {
-                            final item = _filteredItems[index];
-                            final cartQty = _cart[item.id] ?? 0;
-                            final availableStock = item.quantity - cartQty;
-                            final isLowStock = availableStock <= 10;
-
-                            return Card(
-                              clipBehavior: Clip.antiAlias,
-                              elevation: 2,
-                              color: Colors.white,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Expanded(
-                                    child: SizedBox(
-                                      width: double.infinity,
-                                      child: _buildImage(item.imageUrl),
-                                    ),
-                                  ),
-                                  Padding(
-                                    padding: const EdgeInsets.all(8.0),
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Row(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          children: [
-                                            Expanded(
-                                              child: Text(
-                                                item.name,
-                                                style: const TextStyle(
-                                                  fontWeight: FontWeight.bold,
-                                                  fontSize: 13,
-                                                ),
-                                                maxLines: 2,
-                                                overflow: TextOverflow.ellipsis,
-                                              ),
-                                            ),
-                                            const SizedBox(width: 4),
-                                            Container(
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                    horizontal: 6,
-                                                    vertical: 4,
-                                                  ),
-                                              decoration: BoxDecoration(
-                                                color: isLowStock
-                                                    ? Colors.red.shade100
-                                                    : Colors.green.shade100,
-                                                borderRadius:
-                                                    BorderRadius.circular(8),
-                                              ),
-                                              // UPDATED: Show unit here
-                                              child: Text(
-                                                "Stock: ${availableStock.toStringAsFixed(availableStock.truncateToDouble() == availableStock ? 0 : 2)}${item.unit}",
-                                                style: TextStyle(
-                                                  color: isLowStock
-                                                      ? Colors.red.shade900
-                                                      : Colors.green.shade900,
-                                                  fontSize: 10,
-                                                  fontWeight: FontWeight.bold,
-                                                ),
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                        const SizedBox(height: 8),
-                                        Row(
-                                          mainAxisAlignment:
-                                              MainAxisAlignment.spaceBetween,
-                                          children: [
-                                            Text(
-                                              "\₱${item.price.toStringAsFixed(2)}",
-                                              style: const TextStyle(
-                                                color: Colors.orange,
-                                                fontWeight: FontWeight.bold,
-                                                fontSize: 16,
-                                              ),
-                                            ),
-                                            InkWell(
-                                              onTap: availableStock > 0
-                                                  ? () => _addToCart(item)
-                                                  : null,
-                                              child: Container(
-                                                padding: const EdgeInsets.all(
-                                                  6,
-                                                ),
-                                                decoration: BoxDecoration(
-                                                  color: availableStock > 0
-                                                      ? Colors.orange
-                                                      : Colors.grey,
-                                                  borderRadius:
-                                                      BorderRadius.circular(8),
-                                                ),
-                                                child: const Icon(
-                                                  Icons.add,
-                                                  color: Colors.white,
-                                                  size: 20,
-                                                ),
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            );
-                          },
-                        );
-                      },
-                    )
-                  : ListView.builder(
+          child: _isGridView!
+              ? LayoutBuilder(
+                  builder: (context, constraints) {
+                    int crossAxisCount = constraints.maxWidth > 600 ? 3 : 2;
+                    return GridView.builder(
                       padding: const EdgeInsets.symmetric(
                         horizontal: 16,
                         vertical: 8,
+                      ),
+                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: crossAxisCount,
+                        childAspectRatio: 0.70,
+                        crossAxisSpacing: 16,
+                        mainAxisSpacing: 16,
                       ),
                       itemCount: _filteredItems.length,
                       itemBuilder: (context, index) {
                         final item = _filteredItems[index];
                         final cartQty = _cart[item.id] ?? 0;
                         final availableStock = item.quantity - cartQty;
-                        final isLowStock = availableStock <= 10;
-
+                        // Trigger warning if available stock falls to 20% or less of max capacity
+                        final isLowStock =
+                            availableStock <= (item.maxQuantity * 0.20);
                         return Card(
                           clipBehavior: Clip.antiAlias,
                           elevation: 2,
-                          margin: const EdgeInsets.only(bottom: 12),
                           color: Colors.white,
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12),
                           ),
-                          child: Row(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              SizedBox(
-                                width: 80,
-                                height: 80,
-                                child: _buildImage(item.imageUrl),
-                              ),
                               Expanded(
-                                child: Padding(
-                                  padding: const EdgeInsets.all(12.0),
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        item.name,
-                                        style: const TextStyle(
-                                          fontWeight: FontWeight.bold,
-                                          fontSize: 14,
-                                        ),
-                                        maxLines: 2,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                      const SizedBox(height: 4),
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 6,
-                                          vertical: 2,
-                                        ),
-                                        decoration: BoxDecoration(
-                                          color: isLowStock
-                                              ? Colors.red.shade100
-                                              : Colors.green.shade100,
-                                          borderRadius: BorderRadius.circular(
-                                            8,
-                                          ),
-                                        ),
-                                        // UPDATED: Show unit here
-                                        child: Text(
-                                          "Stock: ${availableStock.toStringAsFixed(availableStock.truncateToDouble() == availableStock ? 0 : 2)}${item.unit}",
-                                          style: TextStyle(
-                                            color: isLowStock
-                                                ? Colors.red.shade900
-                                                : Colors.green.shade900,
-                                            fontSize: 10,
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
+                                child: SizedBox(
+                                  width: double.infinity,
+                                  child: _buildImage(item.imageUrl),
                                 ),
                               ),
                               Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 16.0,
-                                ),
+                                padding: const EdgeInsets.all(8.0),
                                 child: Column(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  crossAxisAlignment: CrossAxisAlignment.end,
+                                  crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Text(
-                                      "\₱${item.price.toStringAsFixed(2)}",
-                                      style: const TextStyle(
-                                        color: Colors.orange,
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 16,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 8),
-                                    InkWell(
-                                      onTap: availableStock > 0
-                                          ? () => _addToCart(item)
-                                          : null,
-                                      child: Container(
-                                        padding: const EdgeInsets.all(6),
-                                        decoration: BoxDecoration(
-                                          color: availableStock > 0
-                                              ? Colors.orange
-                                              : Colors.grey,
-                                          borderRadius: BorderRadius.circular(
-                                            8,
+                                    Row(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Expanded(
+                                          child: Text(
+                                            item.name,
+                                            style: const TextStyle(
+                                              fontWeight: FontWeight.bold,
+                                              fontSize: 13,
+                                            ),
+                                            maxLines: 2,
+                                            overflow: TextOverflow.ellipsis,
                                           ),
                                         ),
-                                        child: const Icon(
-                                          Icons.add,
-                                          color: Colors.white,
-                                          size: 20,
+                                        const SizedBox(width: 4),
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 6,
+                                            vertical: 4,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: isLowStock
+                                                ? Colors.red.shade100
+                                                : Colors.green.shade100,
+                                            borderRadius: BorderRadius.circular(
+                                              8,
+                                            ),
+                                          ),
+                                          child: Text(
+                                            "Stock: ${availableStock.toStringAsFixed(availableStock.truncateToDouble() == availableStock ? 0 : 2)}${item.unit}",
+                                            style: TextStyle(
+                                              color: isLowStock
+                                                  ? Colors.red.shade900
+                                                  : Colors.green.shade900,
+                                              fontSize: 10,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
                                         ),
-                                      ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 8),
+                                    Row(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        Text(
+                                          "\₱${item.price.toStringAsFixed(2)}",
+                                          style: const TextStyle(
+                                            color: Colors.orange,
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 16,
+                                          ),
+                                        ),
+                                        InkWell(
+                                          onTap: availableStock > 0
+                                              ? () => _addToCart(item)
+                                              : null,
+                                          child: Container(
+                                            padding: const EdgeInsets.all(6),
+                                            decoration: BoxDecoration(
+                                              color: availableStock > 0
+                                                  ? Colors.orange
+                                                  : Colors.grey,
+                                              borderRadius:
+                                                  BorderRadius.circular(8),
+                                            ),
+                                            child: const Icon(
+                                              Icons.add,
+                                              color: Colors.white,
+                                              size: 20,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
                                     ),
                                   ],
                                 ),
@@ -719,262 +721,522 @@ class _PosCartPageState extends State<PosCartPage> {
                         );
                       },
                     );
-            },
-          ),
+                  },
+                )
+              : ListView.builder(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8,
+                  ),
+                  itemCount: _filteredItems.length,
+                  itemBuilder: (context, index) {
+                    final item = _filteredItems[index];
+                    final cartQty = _cart[item.id] ?? 0;
+                    final availableStock = item.quantity - cartQty;
+                    // Trigger warning if available stock falls to 20% or less of max capacity
+                    final isLowStock =
+                        availableStock <= (item.maxQuantity * 0.20);
+                    return Card(
+                      clipBehavior: Clip.antiAlias,
+                      elevation: 2,
+                      margin: const EdgeInsets.only(bottom: 12),
+                      color: Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Row(
+                        children: [
+                          SizedBox(
+                            width: 80,
+                            height: 80,
+                            child: _buildImage(item.imageUrl),
+                          ),
+                          Expanded(
+                            child: Padding(
+                              padding: const EdgeInsets.all(12.0),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    item.name,
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 14,
+                                    ),
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 6,
+                                      vertical: 2,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: isLowStock
+                                          ? Colors.red.shade100
+                                          : Colors.green.shade100,
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    child: Text(
+                                      "Stock: ${availableStock.toStringAsFixed(availableStock.truncateToDouble() == availableStock ? 0 : 2)}${item.unit}",
+                                      style: TextStyle(
+                                        color: isLowStock
+                                            ? Colors.red.shade900
+                                            : Colors.green.shade900,
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16.0,
+                            ),
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              crossAxisAlignment: CrossAxisAlignment.end,
+                              children: [
+                                Text(
+                                  "\₱${item.price.toStringAsFixed(2)}",
+                                  style: const TextStyle(
+                                    color: Colors.orange,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 16,
+                                  ),
+                                ),
+                                const SizedBox(height: 8),
+                                InkWell(
+                                  onTap: availableStock > 0
+                                      ? () => _addToCart(item)
+                                      : null,
+                                  child: Container(
+                                    padding: const EdgeInsets.all(6),
+                                    decoration: BoxDecoration(
+                                      color: availableStock > 0
+                                          ? Colors.orange
+                                          : Colors.grey,
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    child: const Icon(
+                                      Icons.add,
+                                      color: Colors.white,
+                                      size: 20,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
         ),
       ],
     );
   }
 
+  // ── Cart panel ─────────────────────────────────────────────────────────────
   Widget _buildCartPanel() {
-    return Container(
-      color: Colors.white,
-      child: Column(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(16),
-            color: Colors.orange,
-            width: double.infinity,
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Row(
-                  children: [
-                    Icon(Icons.shopping_cart, color: Colors.black87),
-                    SizedBox(width: 12),
-                    Text(
-                      'Current Order Cart',
-                      style: TextStyle(
-                        color: Colors.black87,
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ],
-                ),
-                StreamBuilder<List<CustomerOrder>>(
-                  stream: widget.controller.streamOrders(),
-                  builder: (context, snapshot) {
-                    final pendingOrders = snapshot.hasData
-                        ? snapshot.data!
-                              .where(
-                                (o) =>
-                                    o.status == 'prepared' ||
-                                    o.status == 'pending',
-                              )
-                              .toList()
-                        : <CustomerOrder>[];
-                    if (pendingOrders.isEmpty) return const SizedBox.shrink();
-
-                    return Stack(
-                      clipBehavior: Clip.none,
-                      children: [
-                        IconButton(
-                          padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(),
-                          icon: const Icon(
-                            Icons.receipt_long,
-                            color: Colors.black87,
-                            size: 28,
-                          ),
-                          onPressed: () => _showPendingOrdersModal(context),
+    return ClipRect(
+      child: Container(
+        color: Colors.white,
+        child: Column(
+          // FIX 2: mainAxisSize.min allows the column to not demand more
+          // space than its children need — combined with Flexible below,
+          // this prevents the overflow when the sheet is at minimum height.
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Orange header
+            Container(
+              padding: const EdgeInsets.all(16),
+              color: Colors.orange,
+              width: double.infinity,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.shopping_cart, color: Colors.black87),
+                      const SizedBox(width: 12),
+                      const Text(
+                        'Current Order Cart',
+                        style: TextStyle(
+                          color: Colors.black87,
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
                         ),
-                        Positioned(
-                          right: -4,
-                          top: -4,
-                          child: Container(
-                            padding: const EdgeInsets.all(4),
-                            decoration: const BoxDecoration(
-                              color: Colors.red,
-                              shape: BoxShape.circle,
-                            ),
-                            child: Text(
-                              '${pendingOrders.length}',
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 12,
-                                fontWeight: FontWeight.bold,
-                              ),
+                      ),
+                      if (_cart.isNotEmpty) ...[
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.black87,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Text(
+                            '${_cart.length}',
+                            style: const TextStyle(
+                              color: Colors.orange,
+                              fontSize: 13,
+                              fontWeight: FontWeight.bold,
                             ),
                           ),
                         ),
                       ],
-                    );
-                  },
-                ),
-              ],
-            ),
-          ),
-          Expanded(
-            child: _cart.isEmpty
-                ? const Center(
-                    child: Text(
-                      'Cart is empty',
-                      style: TextStyle(color: Colors.grey, fontSize: 16),
-                    ),
-                  )
-                : ListView.builder(
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                    itemCount: _cart.length,
-                    itemBuilder: (context, index) {
-                      final itemId = _cart.keys.elementAt(index);
-                      final qty = _cart[itemId]!;
-                      InventoryItem item;
-                      try {
-                        item = widget.controller.allItems.firstWhere(
-                          (i) => i.id == itemId,
-                        );
-                      } catch (e) {
-                        return const SizedBox.shrink();
-                      }
-
-                      return Card(
-                        margin: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 6,
-                        ),
-                        color: Colors.white,
-                        elevation: 1,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                          side: BorderSide(color: Colors.grey.shade200),
-                        ),
-                        child: Padding(
-                          padding: const EdgeInsets.all(12),
-                          child: Column(
-                            children: [
-                              Row(
-                                mainAxisAlignment:
-                                    MainAxisAlignment.spaceBetween,
-                                children: [
-                                  Expanded(
-                                    child: Text(
-                                      item.name,
-                                      style: const TextStyle(
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-                                  ),
-                                  Text(
-                                    "\₱${(item.price * qty).toStringAsFixed(2)}",
-                                    style: const TextStyle(
-                                      color: Colors.orange,
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 16,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 12),
-                              Row(
-                                mainAxisAlignment:
-                                    MainAxisAlignment.spaceBetween,
-                                children: [
-                                  // --- DYNAMIC QUANTITY STEPPER ---
-                                  _QuantityStepper(
-                                    initialValue: qty,
-                                    unit: item.unit,
-                                    onChanged: (newQty) =>
-                                        _setCartQuantity(itemId, newQty),
-                                  ),
-                                  IconButton(
-                                    icon: const Icon(
-                                      LucideIcons.trash2,
-                                      color: Colors.redAccent,
-                                    ),
-                                    onPressed: () =>
-                                        _setCartQuantity(itemId, 0),
-                                  ),
-                                ],
-                              ),
-                            ],
+                    ],
+                  ),
+                  StreamBuilder<List<CustomerOrder>>(
+                    stream: widget.controller.streamOrders(),
+                    builder: (context, snapshot) {
+                      final pendingOrders = snapshot.hasData
+                          ? snapshot.data!
+                                .where(
+                                  (o) =>
+                                      o.status == 'prepared' ||
+                                      o.status == 'pending',
+                                )
+                                .toList()
+                          : <CustomerOrder>[];
+                      if (pendingOrders.isEmpty) return const SizedBox.shrink();
+                      return Stack(
+                        clipBehavior: Clip.none,
+                        children: [
+                          IconButton(
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
+                            icon: const Icon(
+                              Icons.receipt_long,
+                              color: Colors.black87,
+                              size: 28,
+                            ),
+                            onPressed: () => _showPendingOrdersModal(context),
                           ),
-                        ),
+                          Positioned(
+                            right: -4,
+                            top: -4,
+                            child: Container(
+                              padding: const EdgeInsets.all(4),
+                              decoration: const BoxDecoration(
+                                color: Colors.red,
+                                shape: BoxShape.circle,
+                              ),
+                              child: Text(
+                                '${pendingOrders.length}',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
                       );
                     },
                   ),
-          ),
-          Container(
-            padding: const EdgeInsets.all(16.0),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.05),
-                  blurRadius: 10,
-                  offset: const Offset(0, -5),
-                ),
-              ],
+                ],
+              ),
             ),
-            child: Column(
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text(
-                      "TOTAL DUE",
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
-                        color: Colors.black,
+
+            // Smooth fade: the list area fades in as the panel opens and
+            // fades out as it closes — no abrupt pop-in at a fixed threshold.
+            // Opacity goes from 0→1 over the first 60px of available height.
+            Flexible(
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final availH = constraints.maxHeight;
+                  // Completely invisible and zero-effort when collapsed.
+                  if (availH <= 0) return const SizedBox.shrink();
+                  // Fade in over the first 60px of available space.
+                  final opacity = (availH / 60.0).clamp(0.0, 1.0);
+                  return AnimatedOpacity(
+                    opacity: opacity,
+                    duration: const Duration(milliseconds: 80),
+                    child: ClipRect(
+                      child: _cart.isEmpty
+                          ? const Center(
+                              child: Text(
+                                'Cart is empty',
+                                style: TextStyle(
+                                  color: Colors.grey,
+                                  fontSize: 16,
+                                ),
+                              ),
+                            )
+                          : ListView.builder(
+                              padding: const EdgeInsets.symmetric(vertical: 8),
+                              itemCount: _cart.length,
+                              itemBuilder: (context, index) {
+                                final itemId = _cart.keys.elementAt(index);
+                                final qty = _cart[itemId]!;
+                                InventoryItem item;
+                                try {
+                                  item = widget.controller.allItems.firstWhere(
+                                    (i) => i.id == itemId,
+                                  );
+                                } catch (_) {
+                                  return const SizedBox.shrink();
+                                }
+                                return Card(
+                                  margin: const EdgeInsets.symmetric(
+                                    horizontal: 16,
+                                    vertical: 6,
+                                  ),
+                                  color: Colors.white,
+                                  elevation: 1,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                    side: BorderSide(
+                                      color: Colors.grey.shade200,
+                                    ),
+                                  ),
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(12),
+                                    child: Column(
+                                      children: [
+                                        Row(
+                                          mainAxisAlignment:
+                                              MainAxisAlignment.spaceBetween,
+                                          children: [
+                                            Expanded(
+                                              child: Text(
+                                                item.name,
+                                                style: const TextStyle(
+                                                  fontWeight: FontWeight.w600,
+                                                ),
+                                              ),
+                                            ),
+                                            Text(
+                                              "\₱${(item.price * qty).toStringAsFixed(2)}",
+                                              style: const TextStyle(
+                                                color: Colors.orange,
+                                                fontWeight: FontWeight.bold,
+                                                fontSize: 16,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                        const SizedBox(height: 12),
+                                        Row(
+                                          mainAxisAlignment:
+                                              MainAxisAlignment.spaceBetween,
+                                          children: [
+                                            _QuantityStepper(
+                                              initialValue: qty,
+                                              unit: item.unit,
+                                              onChanged: (newQty) =>
+                                                  _setCartQuantity(
+                                                    itemId,
+                                                    newQty,
+                                                  ),
+                                            ),
+                                            IconButton(
+                                              icon: const Icon(
+                                                LucideIcons.trash2,
+                                                color: Colors.redAccent,
+                                              ),
+                                              onPressed: () =>
+                                                  _setCartQuantity(itemId, 0),
+                                            ),
+                                          ],
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+                    ), // ClipRect
+                  ); // AnimatedOpacity
+                },
+              ), // LayoutBuilder
+            ), // Flexible
+            // Footer
+            LayoutBuilder(
+              builder: (context, footerConstraints) {
+                final tight = footerConstraints.maxHeight < 90;
+
+                final vPad = tight ? 8.0 : 14.0;
+                final btnHeight = tight ? 38.0 : 48.0;
+                final totalFontSize = tight ? 11.0 : 13.0;
+                final amountFontSize = tight ? 16.0 : 20.0;
+                final btnFontSize = tight ? 13.0 : 15.0;
+
+                return Container(
+                  constraints: BoxConstraints(
+                    maxHeight: footerConstraints.maxHeight,
+                  ),
+                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: vPad),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.05),
+                        blurRadius: 10,
+                        offset: const Offset(0, -5),
                       ),
-                    ),
-                    Text(
-                      "\₱${_calculateTotal().toStringAsFixed(2)}",
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 24,
-                        color: Colors.black,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                ElevatedButton.icon(
-                  onPressed: _cart.isEmpty || _isProcessingCart
-                      ? null
-                      : _processOrder,
-                  icon: _isProcessingCart
-                      ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(
-                            color: Colors.white,
-                            strokeWidth: 2,
+                    ],
+                  ),
+                  child: SingleChildScrollView(
+                    physics: const NeverScrollableScrollPhysics(),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text.rich(
+                            TextSpan(
+                              children: [
+                                TextSpan(
+                                  text: "TOTAL DUE  ",
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: totalFontSize,
+                                    color: Colors.grey.shade600,
+                                    letterSpacing: 0.5,
+                                  ),
+                                ),
+                                TextSpan(
+                                  text:
+                                      "\₱${_calculateTotal().toStringAsFixed(2)}",
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: amountFontSize,
+                                    color: Colors.black,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                           ),
-                        )
-                      : const Icon(
-                          Icons.check_circle_outline,
-                          color: Colors.white,
                         ),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.green[800],
-                    disabledBackgroundColor: Colors.grey,
-                    minimumSize: const Size(double.infinity, 50),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
+                        const SizedBox(width: 12),
+                        ElevatedButton.icon(
+                          onPressed: _cart.isEmpty || _isProcessingCart
+                              ? null
+                              : _processOrder,
+                          icon: _isProcessingCart
+                              ? const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(
+                                    color: Colors.white,
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : Icon(
+                                  Icons.check_circle_outline,
+                                  color: Colors.white,
+                                  size: tight ? 16 : 20,
+                                ),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.green[700],
+                            disabledBackgroundColor: Colors.grey,
+                            minimumSize: Size(0, btnHeight),
+                            padding: EdgeInsets.symmetric(
+                              horizontal: tight ? 16 : 22,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(btnHeight),
+                            ),
+                          ),
+                          label: Text(
+                            _isProcessingCart
+                                ? 'Processing...'
+                                : 'Process Order',
+                            style: TextStyle(
+                              fontSize: btnFontSize,
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                  label: Text(
-                    _isProcessingCart ? 'Processing...' : 'Process Order',
-                    style: const TextStyle(
-                      fontSize: 18,
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-              ],
+                );
+              },
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
 }
 
-// --- DYNAMIC STEPPER ---
-// Removes the grey dropdown but keeps fractions dynamically updating next to the text!
+// ─────────────────────────────────────────────────────────────────────────────
+// Draggable sheet wrapper
+// ─────────────────────────────────────────────────────────────────────────────
+class _DraggableCartSheet extends StatelessWidget {
+  final GestureDragStartCallback onDragStart;
+  final GestureDragUpdateCallback onDragUpdate;
+  final GestureDragEndCallback onDragEnd;
+  final Widget child;
+
+  const _DraggableCartSheet({
+    required this.onDragStart,
+    required this.onDragUpdate,
+    required this.onDragEnd,
+    required this.child,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      elevation: 16,
+      borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+      shadowColor: Colors.black26,
+      child: ClipRRect(
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Drag handle
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onVerticalDragStart: onDragStart,
+              onVerticalDragUpdate: onDragUpdate,
+              onVerticalDragEnd: onDragEnd,
+              child: Container(
+                width: double.infinity,
+                color: const Color(0xFFF5F5F5),
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                child: Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade400,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            // Cart content
+            Expanded(child: child),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Quantity stepper
+// ─────────────────────────────────────────────────────────────────────────────
 class _QuantityStepper extends StatefulWidget {
   final double initialValue;
   final String unit;
@@ -1023,7 +1285,6 @@ class _QuantityStepperState extends State<_QuantityStepper> {
 
   String _formatDisplay(double val) {
     if (_isSolidItem()) return val.toInt().toString();
-    // Keeps clean decimals inside the text box so it's easy to edit
     return val.truncateToDouble() == val
         ? val.toInt().toString()
         : val
@@ -1032,12 +1293,12 @@ class _QuantityStepperState extends State<_QuantityStepper> {
               .replaceAll(RegExp(r'\.$'), '');
   }
 
-  // Smart fraction formatter for the label outside the box
   String _getFractionLabel(double val) {
     if (val == 0) return "0";
     int whole = val.truncate();
     double decimal = val - whole;
 
+    // Check for clean quarter-steps first — show nice fractions.
     String fraction = "";
     if ((decimal - 0.25).abs() < 0.001)
       fraction = "1/4";
@@ -1046,16 +1307,25 @@ class _QuantityStepperState extends State<_QuantityStepper> {
     else if ((decimal - 0.75).abs() < 0.001)
       fraction = "3/4";
 
-    if (fraction.isEmpty) {
-      return decimal == 0 ? whole.toString() : "";
+    if (fraction.isNotEmpty) {
+      // e.g. 1.5 → "1 1/2", 0.25 → "1/4"
+      return whole == 0 ? fraction : "$whole $fraction";
     }
 
-    if (whole == 0) return fraction;
-    return "$whole $fraction";
+    // Not a quarter-step (e.g. 1.05, 1.20) — show the number cleanly.
+    // Strip trailing zeros: 1.20 → "1.2", 1.00 → "1"
+    if (decimal == 0) return whole.toString();
+    final formatted = val
+        .toStringAsFixed(3)
+        .replaceAll(RegExp(r'0+$'), '')
+        .replaceAll(RegExp(r'\.$'), '');
+    return formatted;
   }
 
   void _submit() {
     final val = double.tryParse(_controller.text);
+    // When they submit (hit enter or tap away), if the value is exactly 0,
+    // we go ahead and update it (which will trigger removal in the parent widget)
     if (val != null && val >= 0) {
       widget.onChanged(_isSolidItem() ? val.truncateToDouble() : val);
     } else {
@@ -1066,7 +1336,7 @@ class _QuantityStepperState extends State<_QuantityStepper> {
   @override
   Widget build(BuildContext context) {
     final isSolid = _isSolidItem();
-    final step = isSolid ? 1.0 : 0.25; // 0.25 steps for kilos
+    final step = isSolid ? 1.0 : 0.25;
     final fractionLabel = !isSolid
         ? _getFractionLabel(widget.initialValue)
         : "";
@@ -1098,7 +1368,10 @@ class _QuantityStepperState extends State<_QuantityStepper> {
                   : [FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*'))],
               onChanged: (val) {
                 final parsed = double.tryParse(val);
-                if (parsed != null && parsed >= 0) {
+                // FIX: Only trigger the automatic update during typing if the value
+                // is STRICTLY GREATER than 0. This stops the text field from destroying
+                // itself the second you type a "0" for measurements like "0.5".
+                if (parsed != null && parsed > 0) {
                   widget.onChanged(
                     isSolid ? parsed.truncateToDouble() : parsed,
                   );
@@ -1122,7 +1395,6 @@ class _QuantityStepperState extends State<_QuantityStepper> {
           icon: const Icon(Icons.add_circle_outline, color: Colors.orange),
           onPressed: () => widget.onChanged(widget.initialValue + step),
         ),
-        // Renders the beautiful orange pill: e.g. "1 1/2 kl"
         if (!isSolid)
           Container(
             margin: const EdgeInsets.only(left: 4),
