@@ -539,7 +539,7 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
-  Widget _buildForecastingChart() {
+Widget _buildForecastingChart() {
     String insightTitle = _forecastingFilter == 'Season'
         ? "Seasonal High-Demand Predictions"
         : "Next Month Demand Predictions";
@@ -557,58 +557,41 @@ class _DashboardPageState extends State<DashboardPage> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Row(
-                children: [
-                  const Icon(
-                    LucideIcons.trendingUp,
-                    color: Colors.blue,
-                    size: 20,
-                  ),
-                  const SizedBox(width: 8),
-                  const Text(
-                    "AI Demand Forecasting",
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(width: 8),
-                  InkWell(
-                    onTap: () {
-                      showDialog(
-                        context: context,
-                        builder: (context) => AlertDialog(
-                          title: const Text("About AI Demand Forecasting"),
-                          content: const SingleChildScrollView(
-                            child: Text(
-                              "• Predicts Future Demand: Uses LLM reasoning based on seasonal and economic trends.\n\n"
-                              "• Optimizes Restocking: Estimates demand changes to determine optimal restocking schedules.\n\n"
-                              "• Note: This relies on external contextual data (seasons/economy) rather than your local transaction history.",
-                              style: TextStyle(height: 1.5),
-                            ),
-                          ),
-                          actions: [
-                            TextButton(
-                              onPressed: () => Navigator.pop(context),
-                              child: const Text("Close"),
-                            ),
-                          ],
-                        ),
-                      );
-                    },
-                    child: const Icon(
-                      Icons.info_outline,
-                      size: 18,
-                      color: Colors.grey,
+              // LEFT SIDE: Icon and Title (Flexible so it shrinks/truncates if needed)
+              Expanded(
+                child: Row(
+                  children: [
+                    const Icon(
+                      LucideIcons.trendingUp,
+                      color: Colors.blue,
+                      size: 20,
                     ),
-                  ),
-                ],
+                    const SizedBox(width: 8),
+                    const Expanded(
+                      child: Text(
+                        "AI Demand Forecasting",
+                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                        overflow: TextOverflow.ellipsis, // Truncates text if screen is too small
+                      ),
+                    ),
+                  ],
+                ),
               ),
+              const SizedBox(width: 8),
+              
+              // RIGHT SIDE: Compact/Shrunk Buttons
               Row(
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   Container(
+                    height: 36, // Shrunk height
+                    width: 36,  // Shrunk width
                     decoration: BoxDecoration(
                       color: Colors.blue.shade50,
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: IconButton(
+                      padding: EdgeInsets.zero, // Removes default padding to fit smaller box
                       icon: Icon(
                         _isBulletedFormat
                             ? LucideIcons.alignHorizontalJustifyStart400
@@ -627,7 +610,8 @@ class _DashboardPageState extends State<DashboardPage> {
                   ),
                   const SizedBox(width: 8),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    height: 36, // Matches the icon button height
+                    padding: const EdgeInsets.symmetric(horizontal: 8), // Reduced padding
                     decoration: BoxDecoration(
                       border: Border.all(color: Colors.grey.shade300),
                       borderRadius: BorderRadius.circular(8),
@@ -635,6 +619,7 @@ class _DashboardPageState extends State<DashboardPage> {
                     child: DropdownButtonHideUnderline(
                       child: DropdownButton<String>(
                         value: _forecastingFilter,
+                        isDense: true, // Makes the dropdown inherently more compact
                         items: <String>['Season', 'Month'].map((String value) {
                           return DropdownMenuItem<String>(
                             value: value,
@@ -665,7 +650,7 @@ class _DashboardPageState extends State<DashboardPage> {
               ),
             ],
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 12),
           const Text(
             "Uses contextual market data to forecast future demand and optimize restocking.",
             style: TextStyle(fontSize: 12, color: Colors.grey),
@@ -729,7 +714,6 @@ class _DashboardPageState extends State<DashboardPage> {
       ),
     );
   }
-
   Widget _buildActionableAlerts(List<InventoryItem> criticalItems) {
     final showViewAll = criticalItems.length > 5;
     final itemsToShow = criticalItems.take(5).toList();
@@ -855,19 +839,24 @@ class _DashboardPageState extends State<DashboardPage> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Row(
+              Expanded(
+                child: Row(
                 children: [
-                  Icon(LucideIcons.sparkles, color: Colors.orange, size: 20),
-                  SizedBox(width: 8),
-                  Text(
+                  const Icon(LucideIcons.sparkles, color: Colors.orange, size: 20),
+                  const SizedBox(width: 8),
+                  const Flexible(
+                    child: Text(
                     "AI Restocking Recommendation",
                     style: TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
                       color: Colors.white,
                     ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
                   ),
                 ],
+              ),
               ),
               IconButton(
                 icon: const Icon(

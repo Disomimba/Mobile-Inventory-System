@@ -155,6 +155,7 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
   Widget _buildFilterBar() {
     final filters = ['All', 'Pending', 'Prepared', 'Completed'];
     return Container(
+      width: double.infinity,
       color: Colors.white,
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       child: SingleChildScrollView(

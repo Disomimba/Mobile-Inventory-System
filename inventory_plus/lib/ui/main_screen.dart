@@ -169,72 +169,75 @@ class _MainScreenState extends State<MainScreen> {
           return Scaffold(
             backgroundColor: _mainBg,
             body: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch, // <--- ADD THIS LINE
               children: [
-                // Fixed Width Sidebar
                 Container(
                   width: 240,
                   color: _darkSidebarBg,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Padding(
-                        padding: EdgeInsets.symmetric(
-                          horizontal: 30.0,
-                          vertical: 40.0,
-                        ),
-                        child: Row(
-                          children: [
-                            Icon(
-                              Icons.inventory_2_rounded,
-                              color: _primaryOrange,
-                              size: 28,
-                            ),
-                            SizedBox(width: 16),
-                            Text(
-                              'Inventory Plus',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 18,
+                  // We add SingleChildScrollView here so the sidebar can scroll on short screens
+                  child: SingleChildScrollView( 
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Padding(
+                          padding: EdgeInsets.symmetric(
+                            horizontal: 30.0,
+                            vertical: 40.0,
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(
+                                Icons.inventory_2_rounded,
+                                color: _primaryOrange,
+                                size: 28,
                               ),
-                            ),
-                          ],
+                              SizedBox(width: 16),
+                              Text(
+                                'Inventory Plus',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 18,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
-                      ),
-                      if (isAdmin)
+                        if (isAdmin)
+                          _buildSidebarItem(
+                            dashboardIndex,
+                            Icons.dashboard_outlined,
+                            'Dashboard',
+                            activeIcon: Icons.dashboard,
+                          ),
+                        if (isCashier || isAdmin)
+                          _buildSidebarItem(
+                            posIndex,
+                            Icons.point_of_sale_outlined,
+                            'POS System',
+                            activeIcon: Icons.point_of_sale,
+                          ),
+                        if (isHelper || isAdmin)
+                          _buildSidebarItem(
+                            orderQueueIndex,
+                            Icons.receipt_long_outlined,
+                            'Order Queue',
+                            activeIcon: Icons.receipt_long,
+                          ),
                         _buildSidebarItem(
-                          dashboardIndex,
-                          Icons.dashboard_outlined,
-                          'Dashboard',
-                          activeIcon: Icons.dashboard,
+                          inventoryIndex,
+                          Icons.inventory_2_outlined,
+                          'Inventory',
+                          activeIcon: Icons.inventory_2,
                         ),
-                      if (isCashier || isAdmin)
                         _buildSidebarItem(
-                          posIndex,
-                          Icons.point_of_sale_outlined,
-                          'POS System',
-                          activeIcon: Icons.point_of_sale,
+                          settingsIndex,
+                          Icons.settings_outlined,
+                          'Settings',
+                          activeIcon: Icons.settings,
                         ),
-                      if (isHelper || isAdmin)
-                        _buildSidebarItem(
-                          orderQueueIndex,
-                          Icons.receipt_long_outlined,
-                          'Order Queue',
-                          activeIcon: Icons.receipt_long,
-                        ),
-                      _buildSidebarItem(
-                        inventoryIndex,
-                        Icons.inventory_2_outlined,
-                        'Inventory',
-                        activeIcon: Icons.inventory_2,
-                      ),
-                      _buildSidebarItem(
-                        settingsIndex,
-                        Icons.settings_outlined,
-                        'Settings',
-                        activeIcon: Icons.settings,
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
                 // Main Content Area
@@ -271,7 +274,7 @@ class _MainScreenState extends State<MainScreen> {
               ),
             ),
             child: NavigationBar(
-              backgroundColor: const Color(0xFF1E1E1E), // Dark brown/black theme
+              backgroundColor: _darkSidebarBg, // Dark brown/black theme
               selectedIndex: _currentIndex!,
               onDestinationSelected: (index) {
                 setState(() {

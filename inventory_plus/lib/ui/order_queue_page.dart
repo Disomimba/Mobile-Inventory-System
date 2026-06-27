@@ -580,7 +580,10 @@ class _OrderChecklistPageState extends State<OrderChecklistPage> {
           children: [
             Icon(Icons.help_outline, color: Colors.orange),
             SizedBox(width: 10),
-            Text("How to Prepare an Order"),
+            // FIX: Wrap Text in Expanded to prevent right overflow
+            Expanded(
+              child: Text("How to Prepare an Order"),
+            ),
           ],
         ),
         content: const Column(
@@ -589,7 +592,7 @@ class _OrderChecklistPageState extends State<OrderChecklistPage> {
           children: [
             Text("1. Tap any item in the list to open the QR scanner."),
             SizedBox(height: 8),
-            Text("2. Scan the QR code on the physical product."),
+            Text("2. Scan the QR code on the Shelf."),
             SizedBox(height: 8),
             Text("3. Confirm the pick to check it off the list."),
             SizedBox(height: 16),
@@ -687,19 +690,17 @@ class _OrderChecklistPageState extends State<OrderChecklistPage> {
                             vertical: 8,
                           ),
                           decoration: BoxDecoration(
-                            color: const Color(
-                              0xFFFBEADB,
-                            ), // Restored original peach
+                            color: _allChecked
+                                ? Colors.green.shade100
+                                : const Color(0xFFFBEADB),
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: Text(
                             "$_checkedCount/$_totalCount",
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 18,
                               fontWeight: FontWeight.bold,
-                              color: Color(
-                                0xFF9E651D,
-                              ), // Restored original text color
+                              color: _allChecked ? Colors.green.shade900 : const Color(0xFF9E651D),
                             ),
                           ),
                         ),
@@ -747,6 +748,11 @@ class _OrderChecklistPageState extends State<OrderChecklistPage> {
               itemBuilder: (context, index) {
                 final item = widget.order.items[index];
                 final bool isChecked = _checkedIndices.contains(index);
+
+                // FIX: Determine the correct color based on the overall progress.
+                // If all items are checked, everything turns green. Otherwise, checked
+                // items are orange.
+                final Color activeColor = _allChecked ? Colors.green : const Color(0xFFF58220);
 
                 InventoryItem? dbItem;
                 try {
@@ -812,15 +818,10 @@ class _OrderChecklistPageState extends State<OrderChecklistPage> {
                           width: 24,
                           height: 24,
                           decoration: BoxDecoration(
-                            color: isChecked
-                                ? const Color(
-                                    0xFFF58220,
-                                  ) // Original orange checkmark color
-                                : Colors.white,
+                            color: isChecked ? activeColor : Colors.white,
                             border: Border.all(
-                              color: isChecked
-                                  ? const Color(0xFFF58220)
-                                  : Colors.grey.shade400,
+                              color:
+                                  isChecked ? activeColor : Colors.grey.shade400,
                               width: 2,
                             ),
                             borderRadius: BorderRadius.circular(4),
@@ -860,11 +861,7 @@ class _OrderChecklistPageState extends State<OrderChecklistPage> {
                                       vertical: 2,
                                     ),
                                     decoration: BoxDecoration(
-                                      color: isChecked
-                                          ? const Color(0xFF81C784)
-                                          : const Color(
-                                              0xFFFBEADB,
-                                            ), // Restored peach
+                                      color: isChecked ? activeColor : const Color(0xFFFBEADB),
                                       borderRadius: BorderRadius.circular(4),
                                     ),
                                     child: Text(
@@ -872,11 +869,7 @@ class _OrderChecklistPageState extends State<OrderChecklistPage> {
                                       style: TextStyle(
                                         fontSize: 10,
                                         fontWeight: FontWeight.bold,
-                                        color: isChecked
-                                            ? Colors.white
-                                            : const Color(
-                                                0xFF9E651D,
-                                              ), // Restored text color
+                                        color: isChecked ? Colors.white : const Color(0xFF9E651D),
                                       ),
                                     ),
                                   ),
@@ -915,12 +908,7 @@ class _OrderChecklistPageState extends State<OrderChecklistPage> {
           ),
           Container(
             padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: const Color(0xFFF8E9DE), // Restored original peach panel
-              border: Border(
-                top: BorderSide(color: Colors.orange.withOpacity(0.2)),
-              ),
-            ),
+            color: _allChecked ? Colors.green.shade50 : const Color(0xFFF8E9DE),
             child: SizedBox(
               width: double.infinity,
               height: 55,

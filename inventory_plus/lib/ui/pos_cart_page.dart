@@ -10,9 +10,10 @@ import 'visual_search_page.dart';
 // ─── Snap positions as fractions of total screen height ──────────────────────
 const double _kSnapFull = 0.75;
 
-// FIX 1: Increased from 140 to 165 to account for actual chrome height:
-// drag handle (~24px) + orange header (~56px) + footer (~80px) + buffer = ~165px
-const double _kChromeOnlyHeightPx = 165.0;
+// drag handle (~24px) + orange header (~56px) + footer (~80px) + bottom safe area buffer = ~185px
+// const double _kChromeOnlyHeightPx = 185.0;
+// The exact pixel height of the handle (24) + header (56) + footer (72) = 152px
+const double _kBaseChromeHeight = 172.0;
 
 class PosCartPage extends StatefulWidget {
   final InventoryController controller;
@@ -50,10 +51,9 @@ class _PosCartPageState extends State<PosCartPage>
       final totalHeight = mq.size.height - mq.padding.top;
       if (totalHeight <= 0) return;
       setState(() {
-        _cartHeightFraction = (_kChromeOnlyHeightPx / totalHeight).clamp(
-          0.0,
-          _kSnapFull,
-        );
+        // --- NEW CALCULATION HERE ---
+        final minHeight = _kBaseChromeHeight + mq.padding.bottom;
+        _cartHeightFraction = (minHeight / totalHeight).clamp(0.0, _kSnapFull);
       });
     });
   }
@@ -94,10 +94,8 @@ class _PosCartPageState extends State<PosCartPage>
     final totalHeight = mq.size.height - mq.padding.top;
     if (totalHeight <= 0) return;
 
-    final floorFraction = (_kChromeOnlyHeightPx / totalHeight).clamp(
-      0.0,
-      _kSnapFull,
-    );
+final minHeight = _kBaseChromeHeight + mq.padding.bottom;
+    final floorFraction = (minHeight / totalHeight).clamp(0.0, _kSnapFull);
     final safeMax = (safeHeight / totalHeight).clamp(floorFraction, _kSnapFull);
 
     final velocity = details.primaryVelocity ?? 0;
@@ -489,8 +487,9 @@ class _PosCartPageState extends State<PosCartPage>
             0.0,
             totalHeight * _kSnapFull,
           );
-          final minCartHeight = _kChromeOnlyHeightPx.clamp(0.0, maxCartHeight);
-
+          
+          // --- NEW CALCULATION HERE ---
+          final minCartHeight = (_kBaseChromeHeight + bottomInset).clamp(0.0, maxCartHeight);
           final cartHeight = (totalHeight * _cartHeightFraction).clamp(
             minCartHeight,
             maxCartHeight,
@@ -862,7 +861,7 @@ class _PosCartPageState extends State<PosCartPage>
           // FIX 2: mainAxisSize.min allows the column to not demand more
           // space than its children need — combined with Flexible below,
           // this prevents the overflow when the sheet is at minimum height.
-          mainAxisSize: MainAxisSize.min,
+          mainAxisSize: MainAxisSize.max,
           children: [
             // Orange header
             Container(
@@ -963,7 +962,7 @@ class _PosCartPageState extends State<PosCartPage>
             // Smooth fade: the list area fades in as the panel opens and
             // fades out as it closes — no abrupt pop-in at a fixed threshold.
             // Opacity goes from 0→1 over the first 60px of available height.
-            Flexible(
+            Expanded(
               child: LayoutBuilder(
                 builder: (context, constraints) {
                   final availH = constraints.maxHeight;
@@ -1073,112 +1072,89 @@ class _PosCartPageState extends State<PosCartPage>
                 },
               ), // LayoutBuilder
             ), // Flexible
-            // Footer
-            LayoutBuilder(
-              builder: (context, footerConstraints) {
-                final tight = footerConstraints.maxHeight < 90;
-
-                final vPad = tight ? 8.0 : 14.0;
-                final btnHeight = tight ? 38.0 : 48.0;
-                final totalFontSize = tight ? 11.0 : 13.0;
-                final amountFontSize = tight ? 16.0 : 20.0;
-                final btnFontSize = tight ? 13.0 : 15.0;
-
-                return Container(
-                  constraints: BoxConstraints(
-                    maxHeight: footerConstraints.maxHeight,
+            // Footer — fixed height avoids the overflow stripe
+            Container(
+              padding: const EdgeInsets.only(left: 16, right: 16, top: 12, bottom: 32),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.05),
+                    blurRadius: 10,
+                    offset: const Offset(0, -5),
                   ),
-                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: vPad),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.05),
-                        blurRadius: 10,
-                        offset: const Offset(0, -5),
-                      ),
-                    ],
-                  ),
-                  child: SingleChildScrollView(
-                    physics: const NeverScrollableScrollPhysics(),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Text.rich(
-                            TextSpan(
-                              children: [
-                                TextSpan(
-                                  text: "TOTAL DUE  ",
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.w600,
-                                    fontSize: totalFontSize,
-                                    color: Colors.grey.shade600,
-                                    letterSpacing: 0.5,
-                                  ),
-                                ),
-                                TextSpan(
-                                  text:
-                                      "₱${_calculateTotal().toStringAsFixed(2)}",
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: amountFontSize,
-                                    color: Colors.black,
-                                  ),
-                                ),
-                              ],
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        ElevatedButton.icon(
-                          onPressed: _cart.isEmpty || _isProcessingCart
-                              ? null
-                              : _processOrder,
-                          icon: _isProcessingCart
-                              ? const SizedBox(
-                                  width: 16,
-                                  height: 16,
-                                  child: CircularProgressIndicator(
-                                    color: Colors.white,
-                                    strokeWidth: 2,
-                                  ),
-                                )
-                              : Icon(
-                                  Icons.check_circle_outline,
-                                  color: Colors.white,
-                                  size: tight ? 16 : 20,
-                                ),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.green[700],
-                            disabledBackgroundColor: Colors.grey,
-                            minimumSize: Size(0, btnHeight),
-                            padding: EdgeInsets.symmetric(
-                              horizontal: tight ? 16 : 22,
-                            ),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(btnHeight),
-                            ),
-                          ),
-                          label: Text(
-                            _isProcessingCart
-                                ? 'Processing...'
-                                : 'Process Order',
+                ],
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text.rich(
+                      TextSpan(
+                        children: [
+                          TextSpan(
+                            text: "TOTAL DUE  ",
                             style: TextStyle(
-                              fontSize: btnFontSize,
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold,
+                              fontWeight: FontWeight.w600,
+                              fontSize: 13,
+                              color: Colors.grey.shade600,
+                              letterSpacing: 0.5,
                             ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
                           ),
-                        ),
-                      ],
+                          TextSpan(
+                            text: "₱${_calculateTotal().toStringAsFixed(2)}",
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 20,
+                              color: Colors.black,
+                            ),
+                          ),
+                        ],
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
-                );
-              },
+                  const SizedBox(width: 12),
+                  ElevatedButton.icon(
+                    onPressed: _cart.isEmpty || _isProcessingCart
+                        ? null
+                        : _processOrder,
+                    icon: _isProcessingCart
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(
+                              color: Colors.white,
+                              strokeWidth: 2,
+                            ),
+                          )
+                        : const Icon(
+                            Icons.check_circle_outline,
+                            color: Colors.white,
+                            size: 20,
+                          ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.green[700],
+                      disabledBackgroundColor: Colors.grey,
+                      minimumSize: const Size(0, 48),
+                      padding: const EdgeInsets.symmetric(horizontal: 22),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(48),
+                      ),
+                    ),
+                    label: Text(
+                      _isProcessingCart ? 'Processing...' : 'Process Order',
+                      style: const TextStyle(
+                        fontSize: 15,
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ],
         ),

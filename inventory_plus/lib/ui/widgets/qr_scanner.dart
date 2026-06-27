@@ -19,8 +19,6 @@ class _QRScannerState extends State<QRScanner> with SingleTickerProviderStateMix
   late AnimationController _controller;
   late Animation<double> _animation;
   bool _hasScanned = false; 
-  bool _isTorchOn = false;
-  final MobileScannerController _cameraController = MobileScannerController();
 
   @override
   void initState() {
@@ -50,7 +48,6 @@ class _QRScannerState extends State<QRScanner> with SingleTickerProviderStateMix
   @override
   void dispose() {
     _controller.dispose();
-    _cameraController.dispose();
     super.dispose();
   }
 
@@ -58,128 +55,32 @@ class _QRScannerState extends State<QRScanner> with SingleTickerProviderStateMix
   Widget build(BuildContext context) {
     return SizedBox.expand(
       child: Stack(
-        alignment: Alignment.center,
         children: [
-          MobileScanner(
-  controller: _cameraController,
-  fit: BoxFit.cover,
-  onDetect: (capture) {
-    if (_hasScanned || !widget.isScanning) return;
- 
-    final Size widgetSize = MediaQuery.of(context).size;
-    if (widgetSize.isEmpty) return;
- 
-    // The size of the raw image from the camera
-    final Size imageSize = capture.size;
- 
-    // The on-screen size of the scan window
-    const double scanBoxSize = 250;
-    final Rect scanWindow = Rect.fromCenter(
-      center: Offset(widgetSize.width / 2, widgetSize.height / 2),
-      width: scanBoxSize,
-      height: scanBoxSize,
-    );
- 
-    for (final barcode in capture.barcodes) {
-  // Use corners instead of boundingBox
-  final corners = barcode.corners;
-  
-  if (corners.isNotEmpty) {
-    // Calculate the bounding box from the corners
-    final double minX = corners.map((c) => c.dx).reduce((a, b) => a < b ? a : b);
-    final double minY = corners.map((c) => c.dy).reduce((a, b) => a < b ? a : b);
-    final double maxX = corners.map((c) => c.dx).reduce((a, b) => a > b ? a : b);
-    final double maxY = corners.map((c) => c.dy).reduce((a, b) => a > b ? a : b);
-    
-    final Rect barcodeBox = Rect.fromLTRB(minX, minY, maxX, maxY);
+          if (widget.isScanning)
+            MobileScanner(
+              fit: BoxFit.cover,
+              onDetect: (capture) {
+                if (_hasScanned) return;
+                
+                final List<Barcode> barcodes = capture.barcodes;
+                for (final barcode in barcodes) {
+                  final String? code = barcode.rawValue;
+                  if (code != null) {
+                    _hasScanned = true; 
+                    widget.onScan(code);
+                    break; 
+                  }
+                }
+              },
+            )
+          else
+            Container(color: Colors.black),
 
-    // Transform to widget coordinates
-    final Rect transformedBoundingBox = _transformBoundingBox(
-      barcodeBox,
-      imageSize,
-      widgetSize,
-    );
-
-    // Check if the barcode center is within the scan window
-    if (scanWindow.contains(transformedBoundingBox.center)) {
-      _hasScanned = true;
-      if (barcode.rawValue != null) widget.onScan(barcode.rawValue!);
-      break;
-    }
-  } else if (barcode.rawValue != null) {
-    // Fallback if corners are unavailable
-    _hasScanned = true;
-    widget.onScan(barcode.rawValue!);
-    break;
-  }
-}
-  },
-),
           _buildScannerOverlay(),
 
           _buildDecorativeElements(),
-
-          // NEW: Flashlight Toggle Button
-          // FIXED: Flashlight Toggle Button
-Positioned(
-  bottom: 30,
-  right: 30,
-  child: FloatingActionButton(
-    heroTag: 'flashlight_button',
-    onPressed: () {
-      _cameraController.toggleTorch();
-      setState(() => _isTorchOn = !_isTorchOn);
-    },
-    backgroundColor: _isTorchOn ? Colors.orange : Colors.grey[800],
-    child: Stack(
-      alignment: Alignment.center,
-      children: [
-        if (_isTorchOn)
-          Container(
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.orange.withOpacity(0.7),
-                  blurRadius: 20,
-                  spreadRadius: 5,
-                ),
-              ],
-            ),
-          ),
-        Icon(
-          _isTorchOn ? Icons.flashlight_on : Icons.flashlight_off,
-          color: Colors.white,
-        ),
-      ],
-    ),
-  ),
-),
         ],
       ),
-    );
-  }
-
-  // Helper to convert barcode bounding box from image coordinates to widget coordinates
-  Rect _transformBoundingBox(Rect box, Size imageSize, Size widgetSize) {
-    // This function handles the conversion from the camera's image coordinate system
-    // to the Flutter widget's coordinate system, accounting for `BoxFit.cover`.
-
-    final double scaleX = widgetSize.width / imageSize.width;
-    final double scaleY = widgetSize.height / imageSize.height;
-    final double scale = scaleX > scaleY ? scaleX : scaleY;
-
-    final double newWidth = imageSize.width * scale;
-    final double newHeight = imageSize.height * scale;
-
-    final double offsetX = (widgetSize.width - newWidth) / 2;
-    final double offsetY = (widgetSize.height - newHeight) / 2;
-
-    return Rect.fromLTRB(
-      box.left * scale + offsetX,
-      box.top * scale + offsetY,
-      box.right * scale + offsetX,
-      box.bottom * scale + offsetY,
     );
   }
 
