@@ -8,7 +8,7 @@ import '../logic/inventory_controller.dart';
 import 'map_editor_page.dart';
 import 'transaction_history_page.dart';
 import 'staff_management_page.dart';
-import 'profile_info_page.dart'; 
+import 'profile_info_page.dart';
 
 class SettingsPage extends StatefulWidget {
   final InventoryController controller;
@@ -47,15 +47,14 @@ class _SettingsPageState extends State<SettingsPage> {
             borderRadius: BorderRadius.circular(16),
           ),
           clipBehavior: Clip.antiAlias,
-          child: SizedBox(
-            width: 800,
-            height: 750,
-            child: page,
-          ),
+          child: SizedBox(width: 800, height: 750, child: page),
         ),
       );
     } else {
-      return await Navigator.push(context, MaterialPageRoute(builder: (context) => page));
+      return await Navigator.push(
+        context,
+        MaterialPageRoute(builder: (context) => page),
+      );
     }
   }
 
@@ -67,9 +66,9 @@ class _SettingsPageState extends State<SettingsPage> {
         children: [
           _buildProfileHeader(context),
           const SizedBox(height: 10),
-          
+
           _buildSectionHeader("WAREHOUSE CONFIGURATION"),
-          
+
           _buildSettingTile(
             icon: LucideIcons.map,
             color: Colors.blue,
@@ -271,7 +270,9 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Future<void> _generateAndPrintInventoryReport(
-      BuildContext context, String period) async {
+    BuildContext context,
+    String period,
+  ) async {
     final items = widget.controller.allItems;
 
     if (items.isEmpty) {
@@ -295,14 +296,15 @@ class _SettingsPageState extends State<SettingsPage> {
       DateTime now = DateTime.now();
       DateTime cutoffDate;
       if (period == 'Daily') {
-        cutoffDate = DateTime(now.year, now.month, now.day); 
+        cutoffDate = DateTime(now.year, now.month, now.day);
       } else if (period == 'Weekly') {
         cutoffDate = now.subtract(const Duration(days: 7));
       } else {
-        cutoffDate = now.subtract(const Duration(days: 30)); 
+        cutoffDate = now.subtract(const Duration(days: 30));
       }
 
-      final allTransactions = await widget.controller.fetchAllTransactionHistory();
+      final allTransactions = await widget.controller
+          .fetchAllTransactionHistory();
       final periodTransactions = allTransactions.where((tx) {
         final txDate = DateTime.parse(tx['created_at']).toLocal();
         return txDate.isAfter(cutoffDate);
@@ -312,41 +314,63 @@ class _SettingsPageState extends State<SettingsPage> {
       Map<String, int> receivedDetails = {};
 
       for (var tx in periodTransactions) {
-        final qty = tx['quantity_change'] as int;
-        final productId = tx['product_id'] as String; 
+        // FIXED TYPE ERROR HERE: safely cast numeric value as num, then to int.
+        final qty = (tx['quantity_change'] as num).toInt();
+        final productId = tx['product_id'] as String;
 
         if (tx['transaction_type'] == 'checkout') {
-          issuedDetails[productId] = (issuedDetails[productId] ?? 0) + qty.abs();
-        } else if (tx['transaction_type'] == 'stock_in' || tx['transaction_type'] == 'add') {
+          issuedDetails[productId] =
+              (issuedDetails[productId] ?? 0) + qty.abs();
+        } else if (tx['transaction_type'] == 'stock_in' ||
+            tx['transaction_type'] == 'add') {
           receivedDetails[productId] = (receivedDetails[productId] ?? 0) + qty;
         }
       }
 
       double grandTotalValue = 0;
       double grandTotalItems = 0.0;
-      
+
       final tableRows = <pw.TableRow>[];
 
       tableRows.add(
         pw.TableRow(
           decoration: const pw.BoxDecoration(color: PdfColors.grey300),
-          children: [
-            'Item Code', 'Item Name', 'Beginning Qty', 'Received', 
-            'Issued', 'Ending Qty', 'Unit Cost', 'Total Value'
-          ].map((text) => pw.Padding(
-                padding: const pw.EdgeInsets.all(6),
-                child: pw.Text(text, style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 10)),
-              )).toList(),
+          children:
+              [
+                    'Item Code',
+                    'Item Name',
+                    'Beginning Qty',
+                    'Received',
+                    'Issued',
+                    'Ending Qty',
+                    'Unit Cost',
+                    'Total Value',
+                  ]
+                  .map(
+                    (text) => pw.Padding(
+                      padding: const pw.EdgeInsets.all(6),
+                      child: pw.Text(
+                        text,
+                        style: pw.TextStyle(
+                          fontWeight: pw.FontWeight.bold,
+                          fontSize: 10,
+                        ),
+                      ),
+                    ),
+                  )
+                  .toList(),
         ),
       );
 
       for (var item in items) {
         final issued = issuedDetails[item.id] ?? 0;
         final received = receivedDetails[item.id] ?? 0;
-        final endingQty = item.quantity;
-        
-        final beginningQty = endingQty - received + issued; 
-        
+
+        // Ensure endingQty is treated correctly when calculating
+        final num endingQty = item.quantity;
+
+        final beginningQty = endingQty - received + issued;
+
         final totalValue = endingQty * item.price;
 
         grandTotalValue += totalValue;
@@ -354,19 +378,27 @@ class _SettingsPageState extends State<SettingsPage> {
 
         tableRows.add(
           pw.TableRow(
-            children: [
-              item.sku,
-              item.name,
-              beginningQty.toString(),
-              received.toString(),
-              issued.toString(),
-              endingQty.toString(),
-              '\$${item.price.toStringAsFixed(2)}',
-              '\$${totalValue.toStringAsFixed(2)}'
-            ].map((text) => pw.Padding(
-                  padding: const pw.EdgeInsets.all(6),
-                  child: pw.Text(text, style: const pw.TextStyle(fontSize: 10)),
-                )).toList(),
+            children:
+                [
+                      item.sku,
+                      item.name,
+                      beginningQty.toString(),
+                      received.toString(),
+                      issued.toString(),
+                      endingQty.toString(),
+                      '\P${item.price.toStringAsFixed(2)}',
+                      '\P${totalValue.toStringAsFixed(2)}',
+                    ]
+                    .map(
+                      (text) => pw.Padding(
+                        padding: const pw.EdgeInsets.all(6),
+                        child: pw.Text(
+                          text,
+                          style: const pw.TextStyle(fontSize: 10),
+                        ),
+                      ),
+                    )
+                    .toList(),
           ),
         );
       }
@@ -375,7 +407,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
       doc.addPage(
         pw.MultiPage(
-          pageFormat: PdfPageFormat.a4.landscape, 
+          pageFormat: PdfPageFormat.a4.landscape,
           margin: const pw.EdgeInsets.all(32),
           build: (pw.Context context) {
             return [
@@ -387,17 +419,32 @@ class _SettingsPageState extends State<SettingsPage> {
                     pw.Column(
                       crossAxisAlignment: pw.CrossAxisAlignment.start,
                       children: [
-                        pw.Text('Inventory Summary Report', style: pw.TextStyle(fontSize: 24, fontWeight: pw.FontWeight.bold)),
+                        pw.Text(
+                          'Inventory Summary Report',
+                          style: pw.TextStyle(
+                            fontSize: 24,
+                            fontWeight: pw.FontWeight.bold,
+                          ),
+                        ),
                         pw.SizedBox(height: 4),
-                        pw.Text('Report Type: $period', style: const pw.TextStyle(fontSize: 14, color: PdfColors.grey700)),
-                      ]
+                        pw.Text(
+                          'Report Type: $period',
+                          style: const pw.TextStyle(
+                            fontSize: 14,
+                            color: PdfColors.grey700,
+                          ),
+                        ),
+                      ],
                     ),
                     pw.Column(
                       crossAxisAlignment: pw.CrossAxisAlignment.end,
                       children: [
-                        pw.Text('Date Generated: ${now.toString().split(' ')[0]}', style: const pw.TextStyle(fontSize: 10)),
-                      ]
-                    )
+                        pw.Text(
+                          'Date Generated: ${now.toString().split(' ')[0]}',
+                          style: const pw.TextStyle(fontSize: 10),
+                        ),
+                      ],
+                    ),
                   ],
                 ),
               ),
@@ -406,33 +453,42 @@ class _SettingsPageState extends State<SettingsPage> {
               pw.Table(
                 border: pw.TableBorder.all(color: PdfColors.grey400),
                 columnWidths: {
-                  0: const pw.FlexColumnWidth(2), 
-                  1: const pw.FlexColumnWidth(4), 
-                  2: const pw.FlexColumnWidth(1.5), 
-                  3: const pw.FlexColumnWidth(1.5), 
-                  4: const pw.FlexColumnWidth(1.5), 
-                  5: const pw.FlexColumnWidth(1.5), 
-                  6: const pw.FlexColumnWidth(1.5), 
-                  7: const pw.FlexColumnWidth(2), 
+                  0: const pw.FlexColumnWidth(2),
+                  1: const pw.FlexColumnWidth(4),
+                  2: const pw.FlexColumnWidth(1.5),
+                  3: const pw.FlexColumnWidth(1.5),
+                  4: const pw.FlexColumnWidth(1.5),
+                  5: const pw.FlexColumnWidth(1.5),
+                  6: const pw.FlexColumnWidth(1.5),
+                  7: const pw.FlexColumnWidth(2),
                 },
                 children: tableRows,
               ),
               pw.SizedBox(height: 20),
               pw.Divider(),
               pw.SizedBox(height: 10),
-              
+
               pw.Row(
                 mainAxisAlignment: pw.MainAxisAlignment.end,
                 children: [
                   pw.Column(
                     crossAxisAlignment: pw.CrossAxisAlignment.end,
                     children: [
-                      pw.Text('Total Items in Stock (Ending): ${grandTotalItems.toStringAsFixed(2)}',
-                          style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 12)),
+                      pw.Text(
+                        'Total Items in Stock (Ending): ${grandTotalItems.toStringAsFixed(2)}',
+                        style: pw.TextStyle(
+                          fontWeight: pw.FontWeight.bold,
+                          fontSize: 12,
+                        ),
+                      ),
                       pw.SizedBox(height: 4),
                       pw.Text(
-                          'Total Inventory Value: \$${grandTotalValue.toStringAsFixed(2)}',
-                          style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 14)),
+                        'Total Inventory Value: \P${grandTotalValue.toStringAsFixed(2)}',
+                        style: pw.TextStyle(
+                          fontWeight: pw.FontWeight.bold,
+                          fontSize: 14,
+                        ),
+                      ),
                     ],
                   ),
                 ],
@@ -448,7 +504,8 @@ class _SettingsPageState extends State<SettingsPage> {
 
       await Printing.sharePdf(
         bytes: bytes,
-        filename: 'Inventory_Report_${period}_${DateTime.now().millisecondsSinceEpoch}.pdf',
+        filename:
+            'Inventory_Report_${period}_${DateTime.now().millisecondsSinceEpoch}.pdf',
       );
     } catch (e) {
       if (context.mounted) {
@@ -500,8 +557,8 @@ class _SettingsPageState extends State<SettingsPage> {
                 runSpacing: 20,
                 children: chunk.map((item) {
                   return pw.Container(
-                    width: 240, 
-                    height: 240, 
+                    width: 240,
+                    height: 240,
                     padding: const pw.EdgeInsets.all(12),
                     decoration: pw.BoxDecoration(
                       border: pw.Border.all(color: PdfColors.grey, width: 2),
@@ -531,13 +588,13 @@ class _SettingsPageState extends State<SettingsPage> {
                         pw.Expanded(
                           child: pw.BarcodeWidget(
                             barcode: pw.Barcode.qrCode(),
-                            data: item.sku, 
+                            data: item.sku,
                             drawText: false,
                           ),
                         ),
                         pw.SizedBox(height: 8),
                         pw.Text(
-                          "Price: \$${item.price.toStringAsFixed(2)}",
+                          "Price: \P${item.price.toStringAsFixed(2)}",
                           style: pw.TextStyle(
                             fontSize: 14,
                             fontWeight: pw.FontWeight.bold,
@@ -563,7 +620,7 @@ class _SettingsPageState extends State<SettingsPage> {
       );
     } catch (e) {
       if (context.mounted) {
-        Navigator.pop(context); 
+        Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text("Error generating PDF: $e"),
@@ -573,7 +630,7 @@ class _SettingsPageState extends State<SettingsPage> {
       }
     }
   }
-  
+
   Widget _buildProfileHeader(BuildContext context) {
     return Material(
       color: Colors.white,
@@ -583,7 +640,7 @@ class _SettingsPageState extends State<SettingsPage> {
             context,
             ProfileInfoPage(
               controller: widget.controller,
-              currentName: _currentUserName, 
+              currentName: _currentUserName,
               currentEmail: widget.controller.loggedInUserEmail,
               userId: widget.userId,
               role: widget.userRole,
@@ -603,7 +660,11 @@ class _SettingsPageState extends State<SettingsPage> {
               CircleAvatar(
                 radius: 30,
                 backgroundColor: Colors.orange.withOpacity(0.1),
-                child: const Icon(LucideIcons.user, color: Colors.orange, size: 30),
+                child: const Icon(
+                  LucideIcons.user,
+                  color: Colors.orange,
+                  size: 30,
+                ),
               ),
               const SizedBox(width: 15),
               Expanded(
@@ -611,7 +672,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      _currentUserName, 
+                      _currentUserName,
                       style: const TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.bold,
@@ -630,4 +691,4 @@ class _SettingsPageState extends State<SettingsPage> {
       ),
     );
   }
-} 
+}
