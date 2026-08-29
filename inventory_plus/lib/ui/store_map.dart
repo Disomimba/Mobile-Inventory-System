@@ -40,6 +40,7 @@ class _StoreMapState extends State<StoreMap>
   final TransformationController _transformationController =
       TransformationController();
   bool _isInitialScaleSet = false;
+  MapElement? _selectedPopupElement;
   late final GlobalKey _mapKey = GlobalKey();
 
   @override
@@ -264,12 +265,49 @@ class _StoreMapState extends State<StoreMap>
                     );
                   }
                 },
+                  // builder: (context, candidateData, rejectedData) {
+                  // return GestureDetector(
+                  //   onTap: () {
+                  //     if (widget.mode == MapMode.manage) {
+                  //       setState(() {
+                  //         _activeElementId = null;
+                  //       });
+                  //     }
+                  //   },
+                  //   child: Container(
+                  //     key: _mapKey,
+                  //     width: mapWidth,
+                  //     height: mapHeight,
+                  //     decoration: BoxDecoration(
+                  //       color: const Color(0xFF1E293B),
+                  //       border: Border.all(color: Colors.blueGrey, width: 2),
+                  //     ),
+                  //     child: Stack(
+                  //       clipBehavior: Clip.hardEdge,
+                  //       children: [
+                  //         CustomPaint(
+                  //           painter: GridPainter(),
+                  //           size: Size(mapWidth, mapHeight),
+                  //         ),
+                  //         ...sortedLayout.map(
+                  //           (el) => _buildPhysicalElement(el),
+                  //         ),
+                  //       ],
+                  //     ),
+                  //   ),
+                  // );
+                  
+                // },
                 builder: (context, candidateData, rejectedData) {
                   return GestureDetector(
                     onTap: () {
                       if (widget.mode == MapMode.manage) {
                         setState(() {
                           _activeElementId = null;
+                        });
+                      } else if (widget.mode == MapMode.view) {
+                        setState(() {
+                          _selectedPopupElement = null; // Close popup when tapping empty space
                         });
                       }
                     },
@@ -282,7 +320,7 @@ class _StoreMapState extends State<StoreMap>
                         border: Border.all(color: Colors.blueGrey, width: 2),
                       ),
                       child: Stack(
-                        clipBehavior: Clip.hardEdge,
+                        clipBehavior: Clip.none, // Changed to none so popup can overflow edge safely
                         children: [
                           CustomPaint(
                             painter: GridPainter(),
@@ -291,6 +329,9 @@ class _StoreMapState extends State<StoreMap>
                           ...sortedLayout.map(
                             (el) => _buildPhysicalElement(el),
                           ),
+                          // Add the popup to the top of the stack!
+                          if (_selectedPopupElement != null) 
+                            _buildFloatingPopup(mapWidth),
                         ],
                       ),
                     ),
@@ -474,6 +515,20 @@ class _StoreMapState extends State<StoreMap>
                   }
                   if (widget.onElementSelected != null) {
                     widget.onElementSelected!(el);
+                  }
+                }
+                else if (widget.mode == MapMode.view) {
+                  if (el.type != ElementType.door && 
+                      el.type != ElementType.pathway && 
+                      el.type != ElementType.cashier) {
+                    setState(() {
+                      // Toggle off if clicking the same one, otherwise show new
+                      if (_selectedPopupElement?.id == el.id) {
+                        _selectedPopupElement = null;
+                      } else {
+                        _selectedPopupElement = el;
+                      }
+                    });
                   }
                 }
               },
@@ -666,7 +721,107 @@ class _StoreMapState extends State<StoreMap>
       ),
     );
   }
+Widget _buildFloatingPopup(double mapWidth) {
+    final el = _selectedPopupElement!;
+    final assignedItems = widget.controller.allItems
+        .where((item) => item.locationId == el.id)
+        .toList();
 
+    // Position it slightly to the right of the element
+    double px = el.position.dx + el.size.width + 15;
+    double py = el.position.dy - 10;
+
+    // If it's too close to the right edge, flip it to the left side
+    if (px + 200 > mapWidth) {
+      px = el.position.dx - 215;
+    }
+
+    return Positioned(
+      left: px,
+      top: py,
+      child: Material(
+        color: Colors.transparent,
+        child: Container(
+          width: 200,
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.3),
+                blurRadius: 12,
+                offset: const Offset(0, 6),
+              )
+            ],
+            border: Border.all(color: Colors.orange, width: 2),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.orange.withOpacity(0.15),
+                  borderRadius: const BorderRadius.vertical(top: Radius.circular(10)),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        el.label,
+                        style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.orange, fontSize: 13),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    GestureDetector(
+                      onTap: () => setState(() => _selectedPopupElement = null),
+                      child: const Icon(LucideIcons.x, size: 14, color: Colors.black54),
+                    )
+                  ],
+                ),
+              ),
+              Container(
+                constraints: const BoxConstraints(maxHeight: 180),
+                child: assignedItems.isEmpty
+                    ? const Padding(
+                        padding: EdgeInsets.all(12.0),
+                        child: Text("Empty", style: TextStyle(color: Colors.grey, fontSize: 11)),
+                      )
+                    : ListView.separated(
+                        shrinkWrap: true,
+                        padding: EdgeInsets.zero,
+                        itemCount: assignedItems.length,
+                        separatorBuilder: (_, __) => const Divider(height: 1),
+                        itemBuilder: (context, index) {
+                          final item = assignedItems[index];
+                          return Padding(
+                            padding: const EdgeInsets.all(10.0),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(item.name, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 11)),
+                                const SizedBox(height: 4),
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Text("SKU: ${item.sku}", style: const TextStyle(fontSize: 10, color: Colors.grey)),
+                                    Text("Qty: ${item.quantity}", style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.orange)),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
   Widget _buildFooter() {
     return Container(
       padding: const EdgeInsets.all(16),
@@ -714,6 +869,77 @@ class _StoreMapState extends State<StoreMap>
           ],
         ),
       ),
+    );
+  }
+
+
+  void _showElementDetails(MapElement el, List<InventoryItem> items) {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return Dialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          child: Container(
+            padding: const EdgeInsets.all(16),
+            constraints: const BoxConstraints(maxHeight: 500, maxWidth: 400),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      el.label,
+                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close),
+                      onPressed: () => Navigator.pop(context),
+                    )
+                  ],
+                ),
+                const Divider(),
+                if (items.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.all(16.0),
+                    child: Text("This location is currently empty.", style: TextStyle(color: Colors.grey)),
+                  )
+                else
+                  Expanded(
+                    child: ListView.separated(
+                      shrinkWrap: true,
+                      itemCount: items.length,
+                      separatorBuilder: (_, __) => const Divider(height: 1),
+                      itemBuilder: (context, index) {
+                        final item = items[index];
+                        return ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: Text(item.name, style: const TextStyle(fontWeight: FontWeight.w600)),
+                          subtitle: Text("SKU: ${item.sku} • Lvl: ${item.shelfLevel ?? 'N/A'}"),
+                          trailing: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              Text(
+                                "Qty: ${item.quantity} ${item.unit}", 
+                                style: const TextStyle(color: Colors.orange, fontWeight: FontWeight.bold)
+                              ),
+                              Text(
+                                "₱${item.price.toStringAsFixed(2)}", 
+                                style: const TextStyle(fontSize: 12, color: Colors.grey)
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 }
