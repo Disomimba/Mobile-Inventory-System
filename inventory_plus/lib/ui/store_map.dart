@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../data/inventory.dart';
 import '../logic/inventory_controller.dart';
+import 'models_3d.dart';
 
 enum MapMode { view, manage, selection, pick }
 
@@ -311,6 +312,12 @@ class _StoreMapState extends State<StoreMap>
                         });
                       }
                     },
+                    child: Transform(
+                      alignment: FractionalOffset.center,
+                      transform: Matrix4.identity()
+                        ..setEntry(3, 2, 0.001) // Adds depth perspective
+                        ..rotateX(-0.6)          // Tilts the floor backward
+                        ..rotateZ(0.6),        // Spins the floor isometrically
                     child: Container(
                       key: _mapKey,
                       width: mapWidth,
@@ -334,6 +341,7 @@ class _StoreMapState extends State<StoreMap>
                             _buildFloatingPopup(mapWidth),
                         ],
                       ),
+                    ),
                     ),
                   );
                 },
@@ -407,40 +415,147 @@ class _StoreMapState extends State<StoreMap>
     }
 
     Color baseColor = _getElementColor(el.type, isHighlighted);
+    // Calculate 3D dimensions based on the map element's pixel size (making them stretchable!)
+    // Calculate 3D dimensions based on the map element's pixel size
+    // Calculate 3D dimensions based on the map element's pixel size
+    final double modelWidth = el.size.width / 40.0;
+    final double modelDepth = el.size.height / 40.0;
+
+    const double baseCameraRotX = 0.7; 
+    final double true3DRotationY = el.rotation; 
+
+    CustomPainter? modelPainter;
+    switch (el.type) {
+      case ElementType.rack:
+        modelPainter = RackPainter(
+          rack: Rack3D(width: modelWidth, depth: modelDepth, height: 8.0),
+          rotationX: baseCameraRotX,
+          rotationY: true3DRotationY,
+        );
+        break;
+      case ElementType.shelf:
+        modelPainter = ShelfPainter(
+          shelf: Shelf3D(width: modelWidth, depth: modelDepth, height: 7.0),
+          rotationX: baseCameraRotX,
+          rotationY: true3DRotationY,
+        );
+        break;
+      case ElementType.cashier:
+        modelPainter = CashierPainter(
+          cashier: Cashier3D(width: modelWidth, depth: modelDepth, height: 3.5),
+          rotationX: baseCameraRotX,
+          rotationY: true3DRotationY,
+        );
+        break;
+      case ElementType.door:
+        modelPainter = DoorPainter(
+          door: Door3D(width: modelWidth, depth: modelDepth, height: 6.0),
+          rotationX: baseCameraRotX,
+          rotationY: true3DRotationY,
+        );
+        break;
+      case ElementType.pathway:
+      default:
+        modelPainter = null;
+    }
 
     Widget shelf = Container(
       width: el.size.width,
       height: el.size.height,
       decoration: BoxDecoration(
-        color: baseColor.withOpacity(0.7),
-        borderRadius: BorderRadius.circular(4),
-        border: Border.all(
-          color: isActive ? Colors.yellowAccent : baseColor,
-          width: isActive ? 3 : 1,
-        ),
-        boxShadow: const [
-          BoxShadow(color: Colors.black26, offset: Offset(2, 2), blurRadius: 3),
+        color: modelPainter == null ? baseColor.withOpacity(0.3) : Colors.transparent,
+        border: isActive 
+            ? Border.all(color: Colors.yellowAccent, width: 3) 
+            : (isHighlighted ? Border.all(color: Colors.orange, width: 2) : null),
+      ),
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          // Render the 3D Model
+          if (modelPainter != null)
+            Positioned.fill(
+              child: Transform.rotate(
+                angle: -el.rotation, 
+                // --- 3. SHRINK THE SCALE ---
+                // Lowered from 0.8 to 0.22 so it fits exactly inside the drag borders!
+                child: Transform.scale(
+                  scale: 0.22, 
+                  child: CustomPaint(
+                    painter: modelPainter,
+                    size: Size(el.size.width, el.size.height),
+                  ),
+                ),
+              ),
+            ),
+            
+          // Render the Label
+          // Render the Label (Billboarded to face the camera cleanly)
+          Center(
+            child: Transform(
+              alignment: Alignment.center,
+              transform: Matrix4.identity()
+                ..rotateZ(-el.rotation) 
+                ..rotateX(0.7),         
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.85),
+                  borderRadius: BorderRadius.circular(4),
+                  border: Border.all(color: Colors.white24, width: 1),
+                  boxShadow: const [
+                    BoxShadow(color: Colors.black45, offset: Offset(0, 4), blurRadius: 4),
+                  ],
+                ),
+                child: Text(
+                  displayLabel,
+                  textAlign: assignedItems.isNotEmpty ? TextAlign.left : TextAlign.center,
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.white,
+                  ),
+                  maxLines: 10,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ),
+          ),
         ],
       ),
-      child: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(4.0),
-          child: Text(
-            displayLabel,
-            textAlign: assignedItems.isNotEmpty
-                ? TextAlign.left
-                : TextAlign.center,
-            style: TextStyle(
-              fontSize: 10,
-              fontWeight: isHighlighted ? FontWeight.bold : FontWeight.normal,
-              color: Colors.white,
-            ),
-            maxLines: 10,
-            overflow: TextOverflow.ellipsis,
-          ),
-        ),
-      ),
     );
+    // Widget shelf = Container(
+    //   width: el.size.width,
+    //   height: el.size.height,
+    //   decoration: BoxDecoration(
+    //     color: baseColor.withOpacity(0.7),
+    //     borderRadius: BorderRadius.circular(4),
+    //     border: Border.all(
+    //       color: isActive ? Colors.yellowAccent : baseColor,
+    //       width: isActive ? 3 : 1,
+    //     ),
+    //     boxShadow: const [
+    //       BoxShadow(color: Colors.black26, offset: Offset(2, 2), blurRadius: 3),
+    //     ],
+    //   ),
+    //   child: Center(
+    //     child: Padding(
+    //       padding: const EdgeInsets.all(4.0),
+    //       child: Text(
+    //         displayLabel,
+    //         textAlign: assignedItems.isNotEmpty
+    //             ? TextAlign.left
+    //             : TextAlign.center,
+    //         style: TextStyle(
+    //           fontSize: 10,
+    //           fontWeight: isHighlighted ? FontWeight.bold : FontWeight.normal,
+    //           color: Colors.white,
+    //         ),
+    //         maxLines: 10,
+    //         overflow: TextOverflow.ellipsis,
+    //       ),
+    //     ),
+    //   ),
+    // );
 
     return Positioned(
       key: ValueKey(el.id),
@@ -948,10 +1063,10 @@ class GridPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
-      ..color = Colors.blueGrey.withOpacity(0.3)
-      ..strokeWidth = 1;
+      ..color = Colors.white // Crisp white grid lines
+      ..strokeWidth = 1.5;
 
-    const double step = 50;
+    const double step = 40; // Tighter grid for better scale
 
     for (double i = 0; i <= size.width; i += step) {
       canvas.drawLine(Offset(i, 0), Offset(i, size.height), paint);
@@ -960,7 +1075,63 @@ class GridPainter extends CustomPainter {
       canvas.drawLine(Offset(0, i), Offset(size.width, i), paint);
     }
   }
-
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+class CADBlockPainter extends CustomPainter {
+  final Color baseColor;
+  final double zHeight; // The 3D height of the object
+
+  CADBlockPainter({required this.baseColor, this.zHeight = 25.0});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    // 1. Color Palette (Light top, medium front, dark side)
+    final topColor = baseColor;
+    final frontColor = Color.lerp(baseColor, Colors.black, 0.2)!;
+    final rightColor = Color.lerp(baseColor, Colors.black, 0.4)!;
+    final outlineColor = Colors.black87;
+
+    // 2. Extrusion Angle (Up and slightly Right)
+    final double ex = zHeight * 0.4;
+    final double ey = -zHeight;
+
+    // 3. Define the footprint (shrunk slightly so the 3D roof fits inside the Flutter box)
+    final double w = size.width - ex;
+    final double h = size.height - ey.abs();
+    
+    // Bottom footprint coordinates
+    final pBL = Offset(0, size.height); // Bottom-Left
+    final pBR = Offset(w, size.height); // Bottom-Right
+    final pTR = Offset(w, size.height - h); // Top-Right
+    final pTL = Offset(0, size.height - h); // Top-Left
+
+    // Roof coordinates (extruded up and right)
+    final rBL = pBL + Offset(ex, ey);
+    final rBR = pBR + Offset(ex, ey);
+    final rTR = pTR + Offset(ex, ey);
+    final rTL = pTL + Offset(ex, ey);
+
+    final fillPaint = Paint()..style = PaintingStyle.fill;
+    final strokePaint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.0
+      ..color = outlineColor;
+
+    void drawFace(List<Offset> points, Color color) {
+      final path = Path()..addPolygon(points, true);
+      fillPaint.color = color;
+      canvas.drawPath(path, fillPaint);
+      canvas.drawPath(path, strokePaint);
+    }
+
+    // Draw the 3 faces to create the clean 3D block
+    drawFace([pBR, pTR, rTR, rBR], rightColor); // Side Face
+    drawFace([pBL, pBR, rBR, rBL], frontColor); // Front Face
+    drawFace([rBL, rBR, rTR, rTL], topColor);   // Top/Roof Face
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
 }
