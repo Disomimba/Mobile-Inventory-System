@@ -69,10 +69,10 @@ class _StoreMapState extends State<StoreMap>
     final double cy = pos.dy + size.height / 2;
     final double w2 = size.width / 2;
     final double h2 = size.height / 2;
-    
+
     final double cosR = math.cos(rotation);
     final double sinR = math.sin(rotation);
-    
+
     return [
       Offset(cx - w2 * cosR + h2 * sinR, cy - w2 * sinR - h2 * cosR), // TL
       Offset(cx + w2 * cosR + h2 * sinR, cy + w2 * sinR - h2 * cosR), // TR
@@ -90,7 +90,7 @@ class _StoreMapState extends State<StoreMap>
 
     for (var other in widget.controller.storeLayout) {
       if (other.id == activeEl.id) continue;
-      
+
       final cornersB = _getCorners(other.position, other.size, other.rotation);
       final axesB = [
         Offset(math.cos(other.rotation), math.sin(other.rotation)),
@@ -253,52 +253,26 @@ class _StoreMapState extends State<StoreMap>
                     label: details.data.name.toUpperCase(),
                   );
 
-                  if (!_hasCollision(newEl, localOffset, newEl.size, newEl.rotation)) {
+                  if (!_hasCollision(
+                    newEl,
+                    localOffset,
+                    newEl.size,
+                    newEl.rotation,
+                  )) {
                     setState(() {
                       widget.controller.storeLayout.add(newEl);
                     });
                   } else {
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(
-                        content: Text("Cannot place element here. It overlaps with another."),
+                        content: Text(
+                          "Cannot place element here. It overlaps with another.",
+                        ),
                         backgroundColor: Colors.redAccent,
                       ),
                     );
                   }
                 },
-                  // builder: (context, candidateData, rejectedData) {
-                  // return GestureDetector(
-                  //   onTap: () {
-                  //     if (widget.mode == MapMode.manage) {
-                  //       setState(() {
-                  //         _activeElementId = null;
-                  //       });
-                  //     }
-                  //   },
-                  //   child: Container(
-                  //     key: _mapKey,
-                  //     width: mapWidth,
-                  //     height: mapHeight,
-                  //     decoration: BoxDecoration(
-                  //       color: const Color(0xFF1E293B),
-                  //       border: Border.all(color: Colors.blueGrey, width: 2),
-                  //     ),
-                  //     child: Stack(
-                  //       clipBehavior: Clip.hardEdge,
-                  //       children: [
-                  //         CustomPaint(
-                  //           painter: GridPainter(),
-                  //           size: Size(mapWidth, mapHeight),
-                  //         ),
-                  //         ...sortedLayout.map(
-                  //           (el) => _buildPhysicalElement(el),
-                  //         ),
-                  //       ],
-                  //     ),
-                  //   ),
-                  // );
-                  
-                // },
                 builder: (context, candidateData, rejectedData) {
                   return GestureDetector(
                     onTap: () {
@@ -308,40 +282,39 @@ class _StoreMapState extends State<StoreMap>
                         });
                       } else if (widget.mode == MapMode.view) {
                         setState(() {
-                          _selectedPopupElement = null; // Close popup when tapping empty space
+                          _selectedPopupElement =
+                              null; // Close popup when tapping empty space
                         });
                       }
                     },
                     child: Transform(
                       alignment: FractionalOffset.center,
                       transform: Matrix4.identity()
-                        ..setEntry(3, 2, 0.001) // Adds depth perspective
-                        ..rotateX(-0.6)          // Tilts the floor backward
-                        ..rotateZ(0.6),        // Spins the floor isometrically
-                    child: Container(
-                      key: _mapKey,
-                      width: mapWidth,
-                      height: mapHeight,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF1E293B),
-                        border: Border.all(color: Colors.blueGrey, width: 2),
+                        ..rotateX(-0.95) // The true-isometric angle
+                        ..rotateZ(0.785), // 45 degrees for a true isometric spin
+                      child: Container(
+                        key: _mapKey,
+                        width: mapWidth,
+                        height: mapHeight,
+                        decoration: BoxDecoration(
+                          color: const Color.fromARGB(255, 124, 126, 129),
+                          border: Border.all(color: Colors.blueGrey, width: 2),
+                        ),
+                        child: Stack(
+                          clipBehavior: Clip.none, // Changed so popup can overflow edge safely
+                          children: [
+                            CustomPaint(
+                              painter: GridPainter(),
+                              size: Size(mapWidth, mapHeight),
+                            ),
+                            ...sortedLayout.map(
+                              (el) => _buildPhysicalElement(el),
+                            ),
+                            if (_selectedPopupElement != null)
+                              _buildFloatingPopup(mapWidth),
+                          ],
+                        ),
                       ),
-                      child: Stack(
-                        clipBehavior: Clip.none, // Changed to none so popup can overflow edge safely
-                        children: [
-                          CustomPaint(
-                            painter: GridPainter(),
-                            size: Size(mapWidth, mapHeight),
-                          ),
-                          ...sortedLayout.map(
-                            (el) => _buildPhysicalElement(el),
-                          ),
-                          // Add the popup to the top of the stack!
-                          if (_selectedPopupElement != null) 
-                            _buildFloatingPopup(mapWidth),
-                        ],
-                      ),
-                    ),
                     ),
                   );
                 },
@@ -371,8 +344,6 @@ class _StoreMapState extends State<StoreMap>
   }
 
   Color _getElementColor(ElementType type, bool isHighlighted) {
-    // Removed the "if (isHighlighted) return Colors.orange;" 
-    // Now it keeps its proper category color!
     switch (type) {
       case ElementType.door:
         return Colors.green;
@@ -382,8 +353,10 @@ class _StoreMapState extends State<StoreMap>
         return Colors.brown;
       case ElementType.cashier:
         return Colors.purple;
-      case ElementType.pathway:
-        return Colors.blueGrey;
+      case ElementType.wall:
+        return Colors.orange;
+      default:
+        return Colors.grey;
     }
   }
 
@@ -392,94 +365,122 @@ class _StoreMapState extends State<StoreMap>
     final bool isActive =
         el.id == _activeElementId && widget.mode == MapMode.manage;
 
-    String displayLabel = el.label;
+    final sameTypeElements = widget.controller.storeLayout
+        .where((e) => e.type == el.type)
+        .toList();
+    final elementIndex = sameTypeElements.indexOf(el) + 1;
+
+    final typeString =
+        el.type.name[0].toUpperCase() + el.type.name.substring(1);
+    String displayLabel = '$typeString $elementIndex';
 
     final assignedItems = widget.controller.allItems
         .where((item) => item.locationId == el.id)
         .toList();
 
-    if (assignedItems.isNotEmpty) {
-      // Sort items by shelfLevel to display hierarchically
-      assignedItems.sort(
-        (a, b) => (a.shelfLevel ?? '').compareTo(b.shelfLevel ?? ''),
-      );
-      displayLabel = assignedItems
-          .map((item) {
-            final level =
-                (item.shelfLevel != null && item.shelfLevel!.trim().isNotEmpty)
-                ? " (Lvl ${item.shelfLevel})"
-                : "";
-            return "- ${item.name}$level";
-          })
-          .join("\n");
-    }
-
     Color baseColor = _getElementColor(el.type, isHighlighted);
-    // Calculate 3D dimensions based on the map element's pixel size (making them stretchable!)
-    // Calculate 3D dimensions based on the map element's pixel size
-    // Calculate 3D dimensions based on the map element's pixel size
     final double modelWidth = el.size.width / 40.0;
     final double modelDepth = el.size.height / 40.0;
 
-    const double baseCameraRotX = 0.7; 
-    final double true3DRotationY = el.rotation; 
+    const double mapRotX = 0.95; 
+    final double mapRotZ = math.pi / 4;
+    
+    final double true3DRotationY = el.rotation + mapRotZ;
 
     CustomPainter? modelPainter;
+    double baseY = 0.0; 
+    double modelHeight = 0.0; 
+    double footprintScale = 40.0;
+    double? footprintCameraDistance;
+
     switch (el.type) {
       case ElementType.rack:
         modelPainter = RackPainter(
           rack: Rack3D(width: modelWidth, depth: modelDepth, height: 8.0),
-          rotationX: baseCameraRotX,
+          rotationX: mapRotX,
           rotationY: true3DRotationY,
         );
+        baseY = -4.0;
+        modelHeight = 8.0;
+        footprintScale = 40.0;
+        footprintCameraDistance = null;
         break;
       case ElementType.shelf:
         modelPainter = ShelfPainter(
           shelf: Shelf3D(width: modelWidth, depth: modelDepth, height: 7.0),
-          rotationX: baseCameraRotX,
+          rotationX: mapRotX,
           rotationY: true3DRotationY,
         );
+        baseY = -3.5;
+        modelHeight = 7.0;
+        footprintScale = 40.0;
+        footprintCameraDistance = null;
         break;
       case ElementType.cashier:
         modelPainter = CashierPainter(
           cashier: Cashier3D(width: modelWidth, depth: modelDepth, height: 3.5),
-          rotationX: baseCameraRotX,
+          rotationX: mapRotX,
           rotationY: true3DRotationY,
         );
+        baseY = -2.75;
+        modelHeight = 3.5;
+        footprintScale = 130.0;
+        footprintCameraDistance = null; 
         break;
       case ElementType.door:
         modelPainter = DoorPainter(
           door: Door3D(width: modelWidth, depth: modelDepth, height: 6.0),
-          rotationX: baseCameraRotX,
+          rotationX: mapRotX,
           rotationY: true3DRotationY,
         );
+        baseY = 0.0; 
+        modelHeight = 6.0;
+        footprintScale = 180.0;
+        footprintCameraDistance = null; 
         break;
-      case ElementType.pathway:
+        case ElementType.wall: // <-- Add this block
+        modelPainter = WallPainter(
+          wall: Wall3D(width: modelWidth, depth: modelDepth, height: 6.0),
+          rotationX: mapRotX,
+          rotationY: true3DRotationY,
+        );
+        baseY = -3.0; // Half of height 6.0
+        modelHeight = 6.0;
+        footprintScale = 40.0;
+        footprintCameraDistance = null;
+        break;
       default:
         modelPainter = null;
     }
+
+    final bool useFootprintOutline = false;
 
     Widget shelf = Container(
       width: el.size.width,
       height: el.size.height,
       decoration: BoxDecoration(
-        color: modelPainter == null ? baseColor.withOpacity(0.3) : Colors.transparent,
-        border: isActive 
-            ? Border.all(color: Colors.yellowAccent, width: 3) 
-            : (isHighlighted ? Border.all(color: Colors.orange, width: 2) : null),
+        color: modelPainter == null
+            ? baseColor.withOpacity(0.3)
+            : Colors.transparent,
+        border: !useFootprintOutline && isActive
+            ? Border.all(color: Colors.yellowAccent, width: 3)
+            : (isHighlighted
+                  ? Border.all(color: Colors.orange, width: 2)
+                  : null),
       ),
       child: Stack(
         clipBehavior: Clip.none,
         children: [
-          // Render the 3D Model
           if (modelPainter != null)
             Positioned.fill(
-              child: Transform.rotate(
-                angle: -el.rotation, 
-                // --- 3. SHRINK THE SCALE ---
-                // Lowered from 0.8 to 0.22 so it fits exactly inside the drag borders!
-                child: Transform.scale(
-                  scale: 0.22, 
+              child: Transform(
+                alignment: Alignment.center,
+                transform: Matrix4.identity()
+                  ..rotateZ(-el.rotation)
+                  ..rotateZ(-math.pi / 4)
+                  ..rotateX(0.20),
+                child: Transform.translate(
+                  offset: Offset(-baseY * 12 - 35, baseY * 12 - 40),
                   child: CustomPaint(
                     painter: modelPainter,
                     size: Size(el.size.width, el.size.height),
@@ -487,75 +488,42 @@ class _StoreMapState extends State<StoreMap>
                 ),
               ),
             ),
-            
-          // Render the Label
-          // Render the Label (Billboarded to face the camera cleanly)
-          Center(
-            child: Transform(
-              alignment: Alignment.center,
-              transform: Matrix4.identity()
-                ..rotateZ(-el.rotation) 
-                ..rotateX(0.7),         
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-                decoration: BoxDecoration(
-                  color: Colors.black.withOpacity(0.85),
-                  borderRadius: BorderRadius.circular(4),
-                  border: Border.all(color: Colors.white24, width: 1),
-                  boxShadow: const [
-                    BoxShadow(color: Colors.black45, offset: Offset(0, 4), blurRadius: 4),
-                  ],
-                ),
-                child: Text(
-                  displayLabel,
-                  textAlign: assignedItems.isNotEmpty ? TextAlign.left : TextAlign.center,
-                  style: const TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.white,
+          if (useFootprintOutline && isActive)
+            Positioned.fill(
+              child: IgnorePointer(
+                child: Transform(
+                  alignment: Alignment.center,
+                  transform: Matrix4.identity()
+                    ..rotateZ(-el.rotation) 
+                    ..rotateZ(-math.pi / 4)
+                    ..rotateX(0.95), 
+                  child: Transform.translate(
+                    offset: Offset(0, (-el.size.height * 0.5) + (baseY * 12)),
+                    child: Transform.scale(
+                      scale: 0.30,
+                      child: CustomPaint(
+                        painter: FootprintOutlinePainter(
+                          width: modelWidth,
+                          depth: modelDepth,
+                          rotationX: mapRotX,
+                          rotationY: true3DRotationY,
+                          groundY: baseY,
+                          height: modelHeight,
+                          scale: footprintScale,
+                          cameraDistance: footprintCameraDistance,
+                          color: Colors.yellowAccent,
+                          strokeWidth: 3,
+                        ),
+                        size: Size(el.size.width, el.size.height),
+                      ),
+                    ),
                   ),
-                  maxLines: 10,
-                  overflow: TextOverflow.ellipsis,
                 ),
               ),
             ),
-          ),
         ],
       ),
     );
-    // Widget shelf = Container(
-    //   width: el.size.width,
-    //   height: el.size.height,
-    //   decoration: BoxDecoration(
-    //     color: baseColor.withOpacity(0.7),
-    //     borderRadius: BorderRadius.circular(4),
-    //     border: Border.all(
-    //       color: isActive ? Colors.yellowAccent : baseColor,
-    //       width: isActive ? 3 : 1,
-    //     ),
-    //     boxShadow: const [
-    //       BoxShadow(color: Colors.black26, offset: Offset(2, 2), blurRadius: 3),
-    //     ],
-    //   ),
-    //   child: Center(
-    //     child: Padding(
-    //       padding: const EdgeInsets.all(4.0),
-    //       child: Text(
-    //         displayLabel,
-    //         textAlign: assignedItems.isNotEmpty
-    //             ? TextAlign.left
-    //             : TextAlign.center,
-    //         style: TextStyle(
-    //           fontSize: 10,
-    //           fontWeight: isHighlighted ? FontWeight.bold : FontWeight.normal,
-    //           color: Colors.white,
-    //         ),
-    //         maxLines: 10,
-    //         overflow: TextOverflow.ellipsis,
-    //       ),
-    //     ),
-    //   ),
-    // );
 
     return Positioned(
       key: ValueKey(el.id),
@@ -568,285 +536,296 @@ class _StoreMapState extends State<StoreMap>
         child: Stack(
           clipBehavior: Clip.none,
           children: [
-          Positioned(
-            left: 20,
-            top: 20,
-            child: GestureDetector(
-              onTap: () async {
-                if (widget.mode == MapMode.manage) {
-                  setState(() {
-                    _activeElementId = el.id;
-                  });
-                } else if (widget.mode == MapMode.selection &&
-                    widget.selectedItemId != null) {
-                  if (el.type == ElementType.door ||
-                      el.type == ElementType.pathway ||
-                      el.type == ElementType.cashier) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(
-                          "Cannot assign items to ${el.type.name}s.",
-                        ),
-                        backgroundColor: Colors.redAccent,
-                      ),
-                    );
-                    return;
-                  }
-                  await widget.controller.assignItemToLocation(
-                    widget.selectedItemId!,
-                    el.id,
-                  );
-
-                  if (mounted) {
-                    if (widget.onSelectionAssigned != null) {
-                      widget.onSelectionAssigned!();
-                    }
-                    setState(
-                      () {},
-                    ); // Force the map element to instantly redraw its text
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text(
-                          "Item assigned to location!",
-                          style: TextStyle(color: Colors.white),
-                        ),
-                        backgroundColor: Colors.green,
-                      ),
-                    );
-                  }
-                } else if (widget.mode == MapMode.pick) {
-                  if (el.type == ElementType.door ||
-                      el.type == ElementType.pathway ||
-                      el.type == ElementType.cashier) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(
-                          "Cannot assign items to ${el.type.name}s.",
-                        ),
-                        backgroundColor: Colors.redAccent,
-                      ),
-                    );
-                    return;
-                  }
-                  if (widget.onElementSelected != null) {
-                    widget.onElementSelected!(el);
-                  }
-                }
-                else if (widget.mode == MapMode.view) {
-                  if (el.type != ElementType.door && 
-                      el.type != ElementType.pathway && 
-                      el.type != ElementType.cashier) {
+            Positioned(
+              left: 20,
+              top: 20,
+              child: GestureDetector(
+                onTap: () async {
+                  if (widget.mode == MapMode.manage) {
                     setState(() {
-                      // Toggle off if clicking the same one, otherwise show new
-                      if (_selectedPopupElement?.id == el.id) {
-                        _selectedPopupElement = null;
-                      } else {
-                        _selectedPopupElement = el;
-                      }
+                      _activeElementId = el.id;
                     });
-                  }
-                }
-              },
-              onPanUpdate: widget.mode == MapMode.manage
-                  ? (details) {
+                  } else if (widget.mode == MapMode.selection &&
+                      widget.selectedItemId != null) {
+                    if (el.type == ElementType.door || 
+                        el.type == ElementType.cashier || el.type == ElementType.wall) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(
+                            "Cannot assign items to ${el.type.name}s.",
+                          ),
+                          backgroundColor: Colors.redAccent,
+                        ),
+                      );
+                      return;
+                    }
+                    await widget.controller.assignItemToLocation(
+                      widget.selectedItemId!,
+                      el.id,
+                    );
+
+                    if (mounted) {
+                      if (widget.onSelectionAssigned != null) {
+                        widget.onSelectionAssigned!();
+                      }
+                      setState(() {});
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                            "Item assigned to location!",
+                            style: TextStyle(color: Colors.white),
+                          ),
+                          backgroundColor: Colors.green,
+                        ),
+                      );
+                    }
+                  } else if (widget.mode == MapMode.pick) {
+                    if (el.type == ElementType.door ||
+                        el.type == ElementType.cashier) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(
+                            "Cannot assign items to ${el.type.name}s.",
+                          ),
+                          backgroundColor: Colors.redAccent,
+                        ),
+                      );
+                      return;
+                    }
+                    if (widget.onElementSelected != null) {
+                      widget.onElementSelected!(el);
+                    }
+                  } else if (widget.mode == MapMode.view) {
+                    if (el.type != ElementType.door &&
+                        el.type != ElementType.cashier && el.type != ElementType.wall) {
                       setState(() {
-                        _activeElementId = el.id;
-                        final double cosR = math.cos(el.rotation);
-                        final double sinR = math.sin(el.rotation);
-                        final double mapDx = details.delta.dx * cosR - details.delta.dy * sinR;
-                        final double mapDy = details.delta.dx * sinR + details.delta.dy * cosR;
-                        final Offset newPos = el.position + Offset(mapDx, mapDy);
-                        if (!_hasCollision(el, newPos, el.size, el.rotation)) {
-                          el.position = newPos;
+                        if (_selectedPopupElement?.id == el.id) {
+                          _selectedPopupElement = null;
+                        } else {
+                          _selectedPopupElement = el;
                         }
                       });
                     }
-                  : null,
-              onPanEnd: widget.mode == MapMode.manage
-                  ? (details) {
-                      // Auto-save removed; wait for manual save
-                    }
-                  : null,
-              onLongPress: null,
-              child: shelf,
-            ),
-          ),
-
-          if (isHighlighted)
-            Positioned.fill(
-              child: Align(
-                alignment: Alignment.center,
-                child: AnimatedBuilder(
-                  animation: _bounceAnimation,
-                  builder: (context, child) {
-                    return Transform.rotate(
-                      angle: -el.rotation,
-                      child: Transform.translate(
-                        offset: Offset(
-                          0,
-                          _bounceAnimation.value - 20.0,
-                        ), // Hover above 2D object
-                        child: const Icon(
-                          LucideIcons.mapPin,
-                          color: Colors.orange,
-                          size: 28,
-                        ),
-                      ),
-                    );
-                  },
-                ),
-              ),
-            ),
-
-          if (isActive)
-            Positioned(
-              left: 5,
-              top: 5,
-              child: GestureDetector(
-                onTap: () {
-                  widget.controller.deleteMapElement(el.id);
-                  setState(() {
-                    _activeElementId = null;
-                  });
-                },
-                child: Container(
-                  padding: const EdgeInsets.all(6),
-                  decoration: const BoxDecoration(
-                    color: Colors.redAccent,
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(color: Colors.black26, blurRadius: 4),
-                    ],
-                  ),
-                  child: const Icon(
-                    LucideIcons.x,
-                    size: 14,
-                    color: Colors.white,
-                  ),
-                ),
-              ),
-            ),
-
-          if (widget.mode == MapMode.manage && isActive)
-            Positioned(
-              right: 5,
-              top: 5,
-              child: GestureDetector(
-                onPanUpdate: (details) {
-                  if (_mapKey.currentContext != null) {
-                    final RenderBox mapBox = _mapKey.currentContext!.findRenderObject() as RenderBox;
-                    final Offset localPosition = mapBox.globalToLocal(details.globalPosition);
-                    final Offset center = Offset(el.position.dx + el.size.width / 2, el.position.dy + el.size.height / 2);
-                    
-                    final double angle = math.atan2(localPosition.dy - center.dy, localPosition.dx - center.dx);
-                    final double handleAngle = math.atan2(-el.size.height / 2 - 15, el.size.width / 2 + 15);
-                    
-                    final double newRot = angle - handleAngle;
-
-                    setState(() {
-                      if (!_hasCollision(el, el.position, el.size, newRot)) {
-                        el.rotation = newRot;
-                      }
-                    });
                   }
                 },
-                child: Container(
-                  padding: const EdgeInsets.all(6),
-                  decoration: const BoxDecoration(
-                    color: Colors.blue,
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(color: Colors.black26, blurRadius: 4),
-                    ],
-                  ),
-                  child: const Icon(
-                    LucideIcons.rotateCw,
-                    size: 14,
-                    color: Colors.white,
-                  ),
-                ),
+                onPanUpdate: widget.mode == MapMode.manage
+                    ? (details) {
+                        setState(() {
+                          _activeElementId = el.id;
+                          final double cosR = math.cos(el.rotation);
+                          final double sinR = math.sin(el.rotation);
+                          final double mapDx =
+                              details.delta.dx * cosR - details.delta.dy * sinR;
+                          final double mapDy =
+                              details.delta.dx * sinR + details.delta.dy * cosR;
+                          final Offset newPos =
+                              el.position + Offset(mapDx, mapDy);
+                          if (!_hasCollision(
+                            el,
+                            newPos,
+                            el.size,
+                            el.rotation,
+                          )) {
+                            el.position = newPos;
+                          }
+                        });
+                      }
+                    : null,
+                onPanEnd: widget.mode == MapMode.manage
+                    ? (details) {}
+                    : null,
+                onLongPress: null,
+                child: shelf,
               ),
             ),
 
-          if (widget.mode == MapMode.manage && isActive)
-            Positioned(
-              left: 5,
-              bottom: 5,
-              child: GestureDetector(
-                onPanUpdate: (details) {
-                  setState(() {
-                    final double cosR = math.cos(el.rotation);
-                    final double sinR = math.sin(el.rotation);
-                    
-                    // details.delta is already in the rotated element's local coordinate space
-                    final double localDx = details.delta.dx;
-                    final double localDy = details.delta.dy;
-
-                    double newWidth = el.size.width - localDx; // drag left increases width
-                    double newHeight = el.size.height + localDy; // drag down increases height
-
-                    if (newWidth < 40) newWidth = 40;
-                    if (newHeight < 40) newHeight = 40;
-
-                    // Anchor calculation: Lock the Top-Right corner in place locally since resizing is via Bottom-Left
-                    final Offset oldCenter = Offset(el.position.dx + el.size.width / 2, el.position.dy + el.size.height / 2);
-                    final Offset oldAnchorLocal = Offset(el.size.width / 2, -el.size.height / 2);
-                    final Offset oldAnchorGlobal = oldCenter + Offset(
-                      oldAnchorLocal.dx * cosR - oldAnchorLocal.dy * sinR,
-                      oldAnchorLocal.dx * sinR + oldAnchorLocal.dy * cosR,
-                    );
-
-                    final Offset newAnchorLocal = Offset(newWidth / 2, -newHeight / 2);
-                    final Offset newAnchorRotated = Offset(
-                      newAnchorLocal.dx * cosR - newAnchorLocal.dy * sinR,
-                      newAnchorLocal.dx * sinR + newAnchorLocal.dy * cosR,
-                    );
-                    
-                    final Offset newCenter = oldAnchorGlobal - newAnchorRotated;
-                    final Offset newPosition = newCenter - Offset(newWidth / 2, newHeight / 2);
-
-                    if (!_hasCollision(el, newPosition, Size(newWidth, newHeight), el.rotation)) {
-                      el.size = Size(newWidth, newHeight);
-                      el.position = newPosition;
-                    }
-                  });
-                },
-                onPanEnd: (details) {
-                  // Auto-save removed; wait for manual save
-                },
-                child: Container(
-                  padding: const EdgeInsets.all(6),
-                  decoration: const BoxDecoration(
-                    color: Colors.white,
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(color: Colors.black26, blurRadius: 4),
-                    ],
-                  ),
-                  child: const Icon(
-                    Icons.open_in_full,
-                    size: 12,
-                    color: Colors.black,
+            if (isHighlighted)
+              Positioned.fill(
+                child: Align(
+                  alignment: Alignment.center,
+                  child: AnimatedBuilder(
+                    animation: _bounceAnimation,
+                    builder: (context, child) {
+                      return Transform.rotate(
+                        angle: -el.rotation,
+                        child: Transform.translate(
+                          offset: Offset(
+                            0,
+                            _bounceAnimation.value - 20.0,
+                          ), 
+                          child: const Icon(
+                            LucideIcons.mapPin,
+                            color: Colors.orange,
+                            size: 28,
+                          ),
+                        ),
+                      );
+                    },
                   ),
                 ),
               ),
-            ),
-        ],
-      ),
+
+            if (isActive)
+              Positioned(
+                left: 5,
+                top: 5,
+                child: GestureDetector(
+                  onTap: () {
+                    widget.controller.deleteMapElement(el.id);
+                    setState(() {
+                      _activeElementId = null;
+                    });
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.all(6),
+                    decoration: const BoxDecoration(
+                      color: Colors.redAccent,
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(color: Colors.black26, blurRadius: 4),
+                      ],
+                    ),
+                    child: const Icon(
+                      LucideIcons.x,
+                      size: 14,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              ),
+
+            if (widget.mode == MapMode.manage && isActive)
+              Positioned(
+                left: 5,
+                bottom: 5,
+                child: GestureDetector(
+                  onPanUpdate: (details) {
+                    setState(() {
+                      final double cosR = math.cos(el.rotation);
+                      final double sinR = math.sin(el.rotation);
+
+                      final double localDx = details.delta.dx;
+                      final double localDy = details.delta.dy;
+
+                      double newWidth = el.size.width - localDx; 
+                      double newHeight = el.size.height + localDy; 
+
+                      if (newWidth < 40) newWidth = 40;
+                      if (newHeight < 40) newHeight = 40;
+
+                      final Offset oldCenter = Offset(
+                        el.position.dx + el.size.width / 2,
+                        el.position.dy + el.size.height / 2,
+                      );
+                      final Offset oldAnchorLocal = Offset(
+                        el.size.width / 2,
+                        -el.size.height / 2,
+                      );
+                      final Offset oldAnchorGlobal =
+                          oldCenter +
+                          Offset(
+                            oldAnchorLocal.dx * cosR - oldAnchorLocal.dy * sinR,
+                            oldAnchorLocal.dx * sinR + oldAnchorLocal.dy * cosR,
+                          );
+
+                      final Offset newAnchorLocal = Offset(
+                        newWidth / 2,
+                        -newHeight / 2,
+                      );
+                      final Offset newAnchorRotated = Offset(
+                        newAnchorLocal.dx * cosR - newAnchorLocal.dy * sinR,
+                        newAnchorLocal.dx * sinR + newAnchorLocal.dy * cosR,
+                      );
+
+                      final Offset newCenter =
+                          oldAnchorGlobal - newAnchorRotated;
+                      final Offset newPosition =
+                          newCenter - Offset(newWidth / 2, newHeight / 2);
+
+                      if (!_hasCollision(
+                        el,
+                        newPosition,
+                        Size(newWidth, newHeight),
+                        el.rotation,
+                      )) {
+                        el.size = Size(newWidth, newHeight);
+                        el.position = newPosition;
+                      }
+                    });
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.all(6),
+                    decoration: const BoxDecoration(
+                      color: Colors.white,
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(color: Colors.black26, blurRadius: 4),
+                      ],
+                    ),
+                    child: const Icon(
+                      Icons.open_in_full,
+                      size: 12,
+                      color: Colors.black,
+                    ),
+                  ),
+                ),
+              ),
+            if (widget.mode == MapMode.manage && isActive)
+              Positioned(
+                right: 5,
+                top: 5,
+                child: GestureDetector(
+                  onTap: () {
+                    setState(() {
+                      final double newRot = el.rotation + (math.pi / 2);
+
+                      if (!_hasCollision(el, el.position, el.size, newRot)) {
+                        el.rotation = newRot;
+                      } else {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              "Cannot rotate here. It overlaps with another element.",
+                            ),
+                            backgroundColor: Colors.redAccent,
+                            duration: Duration(seconds: 1),
+                          ),
+                        );
+                      }
+                    });
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.all(6),
+                    decoration: const BoxDecoration(
+                      color: Colors.blue,
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(color: Colors.black26, blurRadius: 4),
+                      ],
+                    ),
+                    child: const Icon(
+                      LucideIcons.rotateCw,
+                      size: 14,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
-Widget _buildFloatingPopup(double mapWidth) {
+
+  Widget _buildFloatingPopup(double mapWidth) {
     final el = _selectedPopupElement!;
     final assignedItems = widget.controller.allItems
         .where((item) => item.locationId == el.id)
         .toList();
 
-    // Position it slightly to the right of the element
     double px = el.position.dx + el.size.width + 15;
     double py = el.position.dy - 10;
 
-    // If it's too close to the right edge, flip it to the left side
     if (px + 200 > mapWidth) {
       px = el.position.dx - 215;
     }
@@ -866,7 +845,7 @@ Widget _buildFloatingPopup(double mapWidth) {
                 color: Colors.black.withOpacity(0.3),
                 blurRadius: 12,
                 offset: const Offset(0, 6),
-              )
+              ),
             ],
             border: Border.all(color: Colors.orange, width: 2),
           ),
@@ -875,10 +854,15 @@ Widget _buildFloatingPopup(double mapWidth) {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
                 decoration: BoxDecoration(
                   color: Colors.orange.withOpacity(0.15),
-                  borderRadius: const BorderRadius.vertical(top: Radius.circular(10)),
+                  borderRadius: const BorderRadius.vertical(
+                    top: Radius.circular(10),
+                  ),
                 ),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -886,14 +870,22 @@ Widget _buildFloatingPopup(double mapWidth) {
                     Expanded(
                       child: Text(
                         el.label,
-                        style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.orange, fontSize: 13),
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.orange,
+                          fontSize: 13,
+                        ),
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
                     GestureDetector(
                       onTap: () => setState(() => _selectedPopupElement = null),
-                      child: const Icon(LucideIcons.x, size: 14, color: Colors.black54),
-                    )
+                      child: const Icon(
+                        LucideIcons.x,
+                        size: 14,
+                        color: Colors.black54,
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -902,7 +894,10 @@ Widget _buildFloatingPopup(double mapWidth) {
                 child: assignedItems.isEmpty
                     ? const Padding(
                         padding: EdgeInsets.all(12.0),
-                        child: Text("Empty", style: TextStyle(color: Colors.grey, fontSize: 11)),
+                        child: Text(
+                          "Empty",
+                          style: TextStyle(color: Colors.grey, fontSize: 11),
+                        ),
                       )
                     : ListView.separated(
                         shrinkWrap: true,
@@ -916,13 +911,33 @@ Widget _buildFloatingPopup(double mapWidth) {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(item.name, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 11)),
+                                Text(
+                                  item.name,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 11,
+                                  ),
+                                ),
                                 const SizedBox(height: 4),
                                 Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceBetween,
                                   children: [
-                                    Text("SKU: ${item.sku}", style: const TextStyle(fontSize: 10, color: Colors.grey)),
-                                    Text("Qty: ${item.quantity}", style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.orange)),
+                                    Text(
+                                      "SKU: ${item.sku}",
+                                      style: const TextStyle(
+                                        fontSize: 10,
+                                        color: Colors.grey,
+                                      ),
+                                    ),
+                                    Text(
+                                      "Qty: ${item.quantity}",
+                                      style: const TextStyle(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.orange,
+                                      ),
+                                    ),
                                   ],
                                 ),
                               ],
@@ -937,10 +952,11 @@ Widget _buildFloatingPopup(double mapWidth) {
       ),
     );
   }
+
   Widget _buildFooter() {
     return Container(
       padding: const EdgeInsets.all(16),
-      color: const Color(0xFF1E293B),
+      color: const Color(0xFFE5E7EB),
       child: Row(
         children: [
           _buildDetailItem("Aisle", widget.location?.aisle ?? "N/A"),
@@ -987,13 +1003,14 @@ Widget _buildFloatingPopup(double mapWidth) {
     );
   }
 
-
   void _showElementDetails(MapElement el, List<InventoryItem> items) {
     showDialog(
       context: context,
       builder: (context) {
         return Dialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
           child: Container(
             padding: const EdgeInsets.all(16),
             constraints: const BoxConstraints(maxHeight: 500, maxWidth: 400),
@@ -1006,19 +1023,25 @@ Widget _buildFloatingPopup(double mapWidth) {
                   children: [
                     Text(
                       el.label,
-                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                     IconButton(
                       icon: const Icon(Icons.close),
                       onPressed: () => Navigator.pop(context),
-                    )
+                    ),
                   ],
                 ),
                 const Divider(),
                 if (items.isEmpty)
                   const Padding(
                     padding: EdgeInsets.all(16.0),
-                    child: Text("This location is currently empty.", style: TextStyle(color: Colors.grey)),
+                    child: Text(
+                      "This location is currently empty.",
+                      style: TextStyle(color: Colors.grey),
+                    ),
                   )
                 else
                   Expanded(
@@ -1030,19 +1053,30 @@ Widget _buildFloatingPopup(double mapWidth) {
                         final item = items[index];
                         return ListTile(
                           contentPadding: EdgeInsets.zero,
-                          title: Text(item.name, style: const TextStyle(fontWeight: FontWeight.w600)),
-                          subtitle: Text("SKU: ${item.sku} • Lvl: ${item.shelfLevel ?? 'N/A'}"),
+                          title: Text(
+                            item.name,
+                            style: const TextStyle(fontWeight: FontWeight.w600),
+                          ),
+                          subtitle: Text(
+                            "SKU: ${item.sku} • Lvl: ${item.shelfLevel ?? 'N/A'}",
+                          ),
                           trailing: Column(
                             mainAxisAlignment: MainAxisAlignment.center,
                             crossAxisAlignment: CrossAxisAlignment.end,
                             children: [
                               Text(
-                                "Qty: ${item.quantity} ${item.unit}", 
-                                style: const TextStyle(color: Colors.orange, fontWeight: FontWeight.bold)
+                                "Qty: ${item.quantity} ${item.unit}",
+                                style: const TextStyle(
+                                  color: Colors.orange,
+                                  fontWeight: FontWeight.bold,
+                                ),
                               ),
                               Text(
-                                "₱${item.price.toStringAsFixed(2)}", 
-                                style: const TextStyle(fontSize: 12, color: Colors.grey)
+                                "₱${item.price.toStringAsFixed(2)}",
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.grey,
+                                ),
                               ),
                             ],
                           ),
@@ -1063,10 +1097,10 @@ class GridPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
-      ..color = Colors.white // Crisp white grid lines
+      ..color = Colors.white 
       ..strokeWidth = 1.5;
 
-    const double step = 40; // Tighter grid for better scale
+    const double step = 40; 
 
     for (double i = 0; i <= size.width; i += step) {
       canvas.drawLine(Offset(i, 0), Offset(i, size.height), paint);
@@ -1075,39 +1109,35 @@ class GridPainter extends CustomPainter {
       canvas.drawLine(Offset(0, i), Offset(size.width, i), paint);
     }
   }
+
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
 class CADBlockPainter extends CustomPainter {
   final Color baseColor;
-  final double zHeight; // The 3D height of the object
+  final double zHeight; 
 
   CADBlockPainter({required this.baseColor, this.zHeight = 25.0});
 
   @override
   void paint(Canvas canvas, Size size) {
-    // 1. Color Palette (Light top, medium front, dark side)
     final topColor = baseColor;
     final frontColor = Color.lerp(baseColor, Colors.black, 0.2)!;
     final rightColor = Color.lerp(baseColor, Colors.black, 0.4)!;
     final outlineColor = Colors.black87;
 
-    // 2. Extrusion Angle (Up and slightly Right)
     final double ex = zHeight * 0.4;
     final double ey = -zHeight;
 
-    // 3. Define the footprint (shrunk slightly so the 3D roof fits inside the Flutter box)
     final double w = size.width - ex;
     final double h = size.height - ey.abs();
-    
-    // Bottom footprint coordinates
-    final pBL = Offset(0, size.height); // Bottom-Left
-    final pBR = Offset(w, size.height); // Bottom-Right
-    final pTR = Offset(w, size.height - h); // Top-Right
-    final pTL = Offset(0, size.height - h); // Top-Left
 
-    // Roof coordinates (extruded up and right)
+    final pBL = Offset(0, size.height); 
+    final pBR = Offset(w, size.height); 
+    final pTR = Offset(w, size.height - h); 
+    final pTL = Offset(0, size.height - h); 
+
     final rBL = pBL + Offset(ex, ey);
     final rBR = pBR + Offset(ex, ey);
     final rTR = pTR + Offset(ex, ey);
@@ -1126,10 +1156,9 @@ class CADBlockPainter extends CustomPainter {
       canvas.drawPath(path, strokePaint);
     }
 
-    // Draw the 3 faces to create the clean 3D block
-    drawFace([pBR, pTR, rTR, rBR], rightColor); // Side Face
-    drawFace([pBL, pBR, rBR, rBL], frontColor); // Front Face
-    drawFace([rBL, rBR, rTR, rTL], topColor);   // Top/Roof Face
+    drawFace([pBR, pTR, rTR, rBR], rightColor); 
+    drawFace([pBL, pBR, rBR, rBL], frontColor); 
+    drawFace([rBL, rBR, rTR, rTL], topColor); 
   }
 
   @override

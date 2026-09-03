@@ -247,7 +247,7 @@ class _MapEditorPageState extends State<MapEditorPage> {
               const SizedBox(width: 4),
               Expanded(child: _buildDraggableTool(ElementType.cashier, "Cashier", Colors.purple)),
               const SizedBox(width: 4),
-              Expanded(child: _buildDraggableTool(ElementType.pathway, "Path", Colors.grey)),
+              Expanded(child: _buildDraggableTool(ElementType.wall, "Path", Colors.grey)),
             ],
           ),
         ],
@@ -262,7 +262,7 @@ class _MapEditorPageState extends State<MapEditorPage> {
         case ElementType.rack: return LucideIcons.layers;
         case ElementType.shelf: return LucideIcons.container;
         case ElementType.cashier: return LucideIcons.banknote;
-        case ElementType.pathway: return LucideIcons.footprints;
+        case ElementType.wall: return LucideIcons.wallet;
       }
     }
 

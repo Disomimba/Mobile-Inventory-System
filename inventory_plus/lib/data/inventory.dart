@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-enum ElementType { door, rack, shelf, cashier, pathway }
+enum ElementType { door, rack, shelf, cashier, wall }
 
 class MapElement {
   final String id;
