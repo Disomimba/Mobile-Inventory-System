@@ -42,7 +42,13 @@ class _StoreMapState extends State<StoreMap>
       TransformationController();
   bool _isInitialScaleSet = false;
   MapElement? _selectedPopupElement;
+
   late final GlobalKey _mapKey = GlobalKey();
+
+  Offset? _dragPreviewPos;
+  Size? _dragPreviewSize;
+  bool _dragPreviewValid = true;
+  Offset? _rawDragPosition;
 
   @override
   void initState() {
@@ -62,6 +68,42 @@ class _StoreMapState extends State<StoreMap>
     _animController.dispose();
     _transformationController.dispose();
     super.dispose();
+  }
+
+  Size _getDefaultSize(ElementType type) {
+    if (type == ElementType.wall || type.name == 'pathway') {
+      return const Size(15, 15); // Start as a 15x15 pillar
+    } else if (type == ElementType.door) {
+      // Changed to 15 depth so it perfectly matches the wall thickness!
+      return const Size(80, 15); 
+    } else if (type == ElementType.cashier) {
+      return const Size(168, 64); // Wider counter
+    } else if (type == ElementType.shelf) {
+      return const Size(104, 48); // Standard shelf footprint
+    } else if (type == ElementType.rack) {
+      return const Size(120, 60); // Standard rack footprint
+    }
+    return const Size(80, 80); // Fallback
+  }
+
+  Offset _snapToGrid(Offset position, Size size, ElementType type) {
+    const double step = 40.0;
+
+    if (type == ElementType.wall) {
+      // WALL: Center snaps to the grid lines (0, 40, 80...)
+      final Offset center = position + Offset(size.width / 2, size.height / 2);
+      final double snappedCenterX = (center.dx / step).round() * step;
+      final double snappedCenterY = (center.dy / step).round() * step;
+      return Offset(
+        snappedCenterX - size.width / 2,
+        snappedCenterY - size.height / 2,
+      );
+    } else {
+      // OBJECTS: Top-Left corner snaps to the grid lines.
+      final double snappedX = (position.dx / step).round() * step;
+      final double snappedY = (position.dy / step).round() * step;
+      return Offset(snappedX, snappedY);
+    }
   }
 
   List<Offset> _getCorners(Offset pos, Size size, double rotation) {
@@ -91,6 +133,15 @@ class _StoreMapState extends State<StoreMap>
     for (var other in widget.controller.storeLayout) {
       if (other.id == activeEl.id) continue;
 
+      // ==========================================
+      // NEW: ALLOW DOORS TO ATTACH/OVERLAP WALLS
+      // ==========================================
+      if ((activeEl.type == ElementType.door && other.type == ElementType.wall) ||
+          (activeEl.type == ElementType.wall && other.type == ElementType.door)) {
+        continue; // Skip collision check for doors vs walls
+      }
+      // ==========================================
+
       final cornersB = _getCorners(other.position, other.size, other.rotation);
       final axesB = [
         Offset(math.cos(other.rotation), math.sin(other.rotation)),
@@ -116,7 +167,7 @@ class _StoreMapState extends State<StoreMap>
         }
 
         if (maxA <= minB || maxB <= minA) {
-          overlap = false; // Gap found, they do not overlap on this axis
+          overlap = false; 
           break;
         }
       }
@@ -186,6 +237,118 @@ class _StoreMapState extends State<StoreMap>
     );
   }
 
+  // ==========================================
+  // COC STYLE BOTTOM ACTION BAR
+  // ==========================================
+  Widget _buildBottomActionBar() {
+    final activeEl = widget.controller.storeLayout.firstWhere(
+      (el) => el.id == _activeElementId,
+      orElse: () => MapElement(id: '', type: ElementType.wall, position: Offset.zero, label: ''),
+    );
+
+    if (activeEl.id.isEmpty) return const SizedBox.shrink();
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1E293B),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.blueGrey, width: 2),
+        boxShadow: const [
+          BoxShadow(color: Colors.black54, blurRadius: 10, offset: Offset(0, 5)),
+        ],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _buildActionMenuButton(
+            icon: LucideIcons.rotateCw,
+            label: "Rotate",
+            color: Colors.blue,
+            onTap: () {
+              setState(() {
+                final double newRot = activeEl.rotation + (math.pi / 2);
+                if (!_hasCollision(activeEl, activeEl.position, activeEl.size, newRot)) {
+                  activeEl.rotation = newRot;
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text("Cannot rotate. Overlaps with another element."),
+                      backgroundColor: Colors.redAccent,
+                      duration: Duration(seconds: 1),
+                    ),
+                  );
+                }
+              });
+            },
+          ),
+          
+          const SizedBox(width: 12),
+          Container(width: 1, height: 40, color: Colors.grey.shade700),
+          const SizedBox(width: 12),
+
+          if (activeEl.type == ElementType.wall) ...[
+            _buildActionMenuButton(
+              icon: Icons.linear_scale,
+              label: "Select Row",
+              color: Colors.orange,
+              onTap: () {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text("Tip: Just drag the center of the wall to move the entire row!"),
+                    duration: Duration(seconds: 3),
+                  ),
+                );
+              },
+            ),
+
+            const SizedBox(width: 12),
+            Container(width: 1, height: 40, color: Colors.grey.shade700),
+            const SizedBox(width: 12),
+          ],
+
+          _buildActionMenuButton(
+            icon: LucideIcons.trash,
+            label: "Remove",
+            color: Colors.redAccent,
+            onTap: () {
+              widget.controller.deleteMapElement(activeEl.id);
+              setState(() {
+                _activeElementId = null;
+              });
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildActionMenuButton({
+    required IconData icon,
+    required String label,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: color, size: 24),
+          const SizedBox(height: 4),
+          Text(
+            label,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 10,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildLiveMapDisplay() {
     double mapWidth = 1000;
     double mapHeight = 1000;
@@ -199,7 +362,6 @@ class _StoreMapState extends State<StoreMap>
       }
     }
 
-    // Depth sort: Elements furthest away (smaller X + Y in this rotated view) must paint first
     var sortedLayout = List<MapElement>.from(widget.controller.storeLayout);
     sortedLayout.sort((a, b) {
       if (a.id == _activeElementId) return 1;
@@ -217,9 +379,7 @@ class _StoreMapState extends State<StoreMap>
             if (mounted) {
               double scaleX = constraints.maxWidth / mapWidth;
               double scaleY = constraints.maxHeight / mapHeight;
-              double scale =
-                  math.min(scaleX, scaleY) *
-                  0.9; // 90% of screen to add padding
+              double scale = math.min(scaleX, scaleY) * 0.9;
               scale = scale.clamp(0.1, 2.5);
 
               double dx = (constraints.maxWidth - (mapWidth * scale)) / 2;
@@ -241,37 +401,66 @@ class _StoreMapState extends State<StoreMap>
           child: Builder(
             builder: (BuildContext dropContext) {
               return DragTarget<ElementType>(
-                onAcceptWithDetails: (details) {
-                  final RenderBox box =
-                      dropContext.findRenderObject() as RenderBox;
+                onMove: (details) {
+                  final RenderBox box = dropContext.findRenderObject() as RenderBox;
                   final Offset localOffset = box.globalToLocal(details.offset);
+
+                  final Size previewSize = _getDefaultSize(details.data);
+                  final snappedPos = _snapToGrid(localOffset, previewSize, details.data);
+
+                  final tempEl = MapElement(
+                    id: 'temp',
+                    type: details.data,
+                    position: snappedPos,
+                    label: '',
+                  );
+                  tempEl.size = previewSize;
+
+                  setState(() {
+                    _dragPreviewPos = snappedPos;
+                    _dragPreviewSize = previewSize;
+                    _dragPreviewValid = !_hasCollision(tempEl, snappedPos, previewSize, 0.0);
+                  });
+                },
+                onLeave: (_) {
+                  setState(() {
+                    _dragPreviewPos = null;
+                    _dragPreviewSize = null;
+                  });
+                },
+                onAcceptWithDetails: (details) {
+                  final RenderBox box = dropContext.findRenderObject() as RenderBox;
+                  final Offset localOffset = box.globalToLocal(details.offset);
+
+                  final Size finalSize = _getDefaultSize(details.data);
+                  final Offset finalPos = _snapToGrid(localOffset, finalSize, details.data);
 
                   final newEl = MapElement(
                     id: DateTime.now().millisecondsSinceEpoch.toString(),
                     type: details.data,
-                    position: localOffset,
+                    position: finalPos,
                     label: details.data.name.toUpperCase(),
                   );
 
-                  if (!_hasCollision(
-                    newEl,
-                    localOffset,
-                    newEl.size,
-                    newEl.rotation,
-                  )) {
+                  newEl.size = finalSize;
+
+                  if (!_hasCollision(newEl, finalPos, finalSize, 0.0)) {
                     setState(() {
                       widget.controller.storeLayout.add(newEl);
                     });
                   } else {
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(
-                        content: Text(
-                          "Cannot place element here. It overlaps with another.",
-                        ),
+                        content: Text("Cannot place element here. It overlaps with another."),
                         backgroundColor: Colors.redAccent,
                       ),
                     );
                   }
+
+                  setState(() {
+                    _dragPreviewPos = null;
+                    _dragPreviewSize = null;
+                  });
                 },
                 builder: (context, candidateData, rejectedData) {
                   return GestureDetector(
@@ -282,16 +471,15 @@ class _StoreMapState extends State<StoreMap>
                         });
                       } else if (widget.mode == MapMode.view) {
                         setState(() {
-                          _selectedPopupElement =
-                              null; // Close popup when tapping empty space
+                          _selectedPopupElement = null; 
                         });
                       }
                     },
                     child: Transform(
                       alignment: FractionalOffset.center,
                       transform: Matrix4.identity()
-                        ..rotateX(-0.95) // The true-isometric angle
-                        ..rotateZ(0.785), // 45 degrees for a true isometric spin
+                        ..rotateX(-0.95)
+                        ..rotateZ(0.785),
                       child: Container(
                         key: _mapKey,
                         width: mapWidth,
@@ -301,12 +489,32 @@ class _StoreMapState extends State<StoreMap>
                           border: Border.all(color: Colors.blueGrey, width: 2),
                         ),
                         child: Stack(
-                          clipBehavior: Clip.none, // Changed so popup can overflow edge safely
+                          clipBehavior: Clip.none,
                           children: [
                             CustomPaint(
                               painter: GridPainter(),
                               size: Size(mapWidth, mapHeight),
                             ),
+                            if (_dragPreviewPos != null && _dragPreviewSize != null)
+                              Positioned(
+                                left: _dragPreviewPos!.dx,
+                                top: _dragPreviewPos!.dy,
+                                width: _dragPreviewSize!.width,
+                                height: _dragPreviewSize!.height,
+                                child: IgnorePointer(
+                                  child: Container(
+                                    decoration: BoxDecoration(
+                                      color: _dragPreviewValid
+                                          ? Colors.greenAccent.withOpacity(0.4)
+                                          : Colors.redAccent.withOpacity(0.5),
+                                      border: Border.all(
+                                        color: _dragPreviewValid ? Colors.green : Colors.red,
+                                        width: 2,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
                             ...sortedLayout.map(
                               (el) => _buildPhysicalElement(el),
                             ),
@@ -325,19 +533,35 @@ class _StoreMapState extends State<StoreMap>
       },
     );
 
+    Widget mapDisplay = Stack(
+      children: [
+        map, 
+        
+        if (widget.mode == MapMode.manage && _activeElementId != null)
+          Positioned(
+            bottom: 20,
+            left: 0,
+            right: 0,
+            child: Center(
+              child: _buildBottomActionBar(),
+            ),
+          ),
+      ],
+    );
+
     if (widget.mode == MapMode.view) {
       return Container(
         height: 400,
         width: double.infinity,
         color: const Color(0xFF0F172A),
-        child: map,
+        child: mapDisplay,
       );
     } else {
       return Expanded(
         child: Container(
           width: double.infinity,
           color: const Color(0xFF0F172A),
-          child: map,
+          child: mapDisplay,
         ),
       );
     }
@@ -364,34 +588,29 @@ class _StoreMapState extends State<StoreMap>
     final bool isHighlighted = el.id == widget.highlightId;
     final bool isActive =
         el.id == _activeElementId && widget.mode == MapMode.manage;
-
-    final sameTypeElements = widget.controller.storeLayout
-        .where((e) => e.type == el.type)
-        .toList();
-    final elementIndex = sameTypeElements.indexOf(el) + 1;
-
-    final typeString =
-        el.type.name[0].toUpperCase() + el.type.name.substring(1);
-    String displayLabel = '$typeString $elementIndex';
-
-    final assignedItems = widget.controller.allItems
-        .where((item) => item.locationId == el.id)
-        .toList();
-
+        
+    final bool isWall = el.type == ElementType.wall;
+    final bool isHorizontal = isWall ? el.size.width > 20 : false; 
+    final bool isVertical = isWall ? el.size.height > 20 : false;
+    final double minSize = isWall ? 15.0 : 40.0;
+    
     Color baseColor = _getElementColor(el.type, isHighlighted);
     final double modelWidth = el.size.width / 40.0;
     final double modelDepth = el.size.height / 40.0;
 
-    const double mapRotX = 0.95; 
+    const double mapRotX = 0.95;
     final double mapRotZ = math.pi / 4;
-    
+
     final double true3DRotationY = el.rotation + mapRotZ;
 
     CustomPainter? modelPainter;
-    double baseY = 0.0; 
-    double modelHeight = 0.0; 
+    double baseY = 0.0;
+    double modelHeight = 0.0;
     double footprintScale = 40.0;
     double? footprintCameraDistance;
+
+    double nudgeX = 0.0;
+    double nudgeY = 0.0;
 
     switch (el.type) {
       case ElementType.rack:
@@ -400,21 +619,26 @@ class _StoreMapState extends State<StoreMap>
           rotationX: mapRotX,
           rotationY: true3DRotationY,
         );
-        baseY = -4.0;
+        baseY = -5.0;
         modelHeight = 8.0;
         footprintScale = 40.0;
         footprintCameraDistance = null;
+        nudgeX = -26.0; 
+        nudgeY = -3.0;
         break;
       case ElementType.shelf:
         modelPainter = ShelfPainter(
           shelf: Shelf3D(width: modelWidth, depth: modelDepth, height: 7.0),
           rotationX: mapRotX,
           rotationY: true3DRotationY,
+
         );
         baseY = -3.5;
         modelHeight = 7.0;
         footprintScale = 40.0;
         footprintCameraDistance = null;
+        nudgeX = -10.0; 
+        nudgeY = -9.0;
         break;
       case ElementType.cashier:
         modelPainter = CashierPainter(
@@ -425,7 +649,9 @@ class _StoreMapState extends State<StoreMap>
         baseY = -2.75;
         modelHeight = 3.5;
         footprintScale = 130.0;
-        footprintCameraDistance = null; 
+        footprintCameraDistance = null;
+        nudgeX = 0; 
+        nudgeY = 0;
         break;
       case ElementType.door:
         modelPainter = DoorPainter(
@@ -433,21 +659,27 @@ class _StoreMapState extends State<StoreMap>
           rotationX: mapRotX,
           rotationY: true3DRotationY,
         );
-        baseY = 0.0; 
+        baseY = -3.0;
         modelHeight = 6.0;
-        footprintScale = 180.0;
-        footprintCameraDistance = null; 
+        footprintScale = 40.0; 
+        footprintCameraDistance = null;
+
+        nudgeX = 0; 
+        nudgeY = 0;
         break;
-        case ElementType.wall: // <-- Add this block
+      case ElementType.wall:
         modelPainter = WallPainter(
           wall: Wall3D(width: modelWidth, depth: modelDepth, height: 6.0),
           rotationX: mapRotX,
           rotationY: true3DRotationY,
         );
-        baseY = -3.0; // Half of height 6.0
+        baseY = -3.0; 
         modelHeight = 6.0;
         footprintScale = 40.0;
         footprintCameraDistance = null;
+
+        nudgeX = 0; 
+        nudgeY = 0;
         break;
       default:
         modelPainter = null;
@@ -479,8 +711,8 @@ class _StoreMapState extends State<StoreMap>
                   ..rotateZ(-el.rotation)
                   ..rotateZ(-math.pi / 4)
                   ..rotateX(0.20),
-                child: Transform.translate(
-                  offset: Offset(-baseY * 12 - 35, baseY * 12 - 40),
+                  child: Transform.translate(
+                  offset: Offset((-baseY * 12 - 33) + nudgeX, (baseY * 12 - 35) + nudgeY),
                   child: CustomPaint(
                     painter: modelPainter,
                     size: Size(el.size.width, el.size.height),
@@ -494,9 +726,9 @@ class _StoreMapState extends State<StoreMap>
                 child: Transform(
                   alignment: Alignment.center,
                   transform: Matrix4.identity()
-                    ..rotateZ(-el.rotation) 
+                    ..rotateZ(-el.rotation)
                     ..rotateZ(-math.pi / 4)
-                    ..rotateX(0.95), 
+                    ..rotateX(0.95),
                   child: Transform.translate(
                     offset: Offset(0, (-el.size.height * 0.5) + (baseY * 12)),
                     child: Transform.scale(
@@ -547,8 +779,9 @@ class _StoreMapState extends State<StoreMap>
                     });
                   } else if (widget.mode == MapMode.selection &&
                       widget.selectedItemId != null) {
-                    if (el.type == ElementType.door || 
-                        el.type == ElementType.cashier || el.type == ElementType.wall) {
+                    if (el.type == ElementType.door ||
+                        el.type == ElementType.cashier ||
+                        el.type == ElementType.wall) {
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(
                           content: Text(
@@ -581,7 +814,8 @@ class _StoreMapState extends State<StoreMap>
                     }
                   } else if (widget.mode == MapMode.pick) {
                     if (el.type == ElementType.door ||
-                        el.type == ElementType.cashier) {
+                        el.type == ElementType.cashier ||
+                        el.type == ElementType.wall) {
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(
                           content: Text(
@@ -597,7 +831,8 @@ class _StoreMapState extends State<StoreMap>
                     }
                   } else if (widget.mode == MapMode.view) {
                     if (el.type != ElementType.door &&
-                        el.type != ElementType.cashier && el.type != ElementType.wall) {
+                        el.type != ElementType.cashier &&
+                        el.type != ElementType.wall) {
                       setState(() {
                         if (_selectedPopupElement?.id == el.id) {
                           _selectedPopupElement = null;
@@ -608,33 +843,55 @@ class _StoreMapState extends State<StoreMap>
                     }
                   }
                 },
+                onPanStart: widget.mode == MapMode.manage
+                    ? (details) {
+                        _rawDragPosition = el.position;
+                      }
+                    : null,
                 onPanUpdate: widget.mode == MapMode.manage
                     ? (details) {
                         setState(() {
                           _activeElementId = el.id;
                           final double cosR = math.cos(el.rotation);
                           final double sinR = math.sin(el.rotation);
+
                           final double mapDx =
                               details.delta.dx * cosR - details.delta.dy * sinR;
                           final double mapDy =
                               details.delta.dx * sinR + details.delta.dy * cosR;
-                          final Offset newPos =
-                              el.position + Offset(mapDx, mapDy);
-                          if (!_hasCollision(
+
+                          _rawDragPosition = _rawDragPosition! + Offset(mapDx, mapDy);
+                          final Offset snappedPos = _snapToGrid(
+                            _rawDragPosition!,
+                            el.size,
+                            el.type,
+                          );
+
+                          final bool isValid = !_hasCollision(
                             el,
-                            newPos,
+                            snappedPos,
                             el.size,
                             el.rotation,
-                          )) {
-                            el.position = newPos;
+                          );
+                          _dragPreviewPos = snappedPos;
+                          _dragPreviewSize = el.size;
+                          _dragPreviewValid = isValid;
+
+                          if (isValid) {
+                            el.position = snappedPos;
                           }
                         });
                       }
                     : null,
                 onPanEnd: widget.mode == MapMode.manage
-                    ? (details) {}
+                    ? (details) {
+                        setState(() {
+                          _rawDragPosition = null;
+                          _dragPreviewPos = null;
+                          _dragPreviewSize = null;
+                        });
+                      }
                     : null,
-                onLongPress: null,
                 child: shelf,
               ),
             ),
@@ -649,10 +906,7 @@ class _StoreMapState extends State<StoreMap>
                       return Transform.rotate(
                         angle: -el.rotation,
                         child: Transform.translate(
-                          offset: Offset(
-                            0,
-                            _bounceAnimation.value - 20.0,
-                          ), 
+                          offset: Offset(0, _bounceAnimation.value - 20.0),
                           child: const Icon(
                             LucideIcons.mapPin,
                             color: Colors.orange,
@@ -665,152 +919,158 @@ class _StoreMapState extends State<StoreMap>
                 ),
               ),
 
-            if (isActive)
-              Positioned(
-                left: 5,
-                top: 5,
-                child: GestureDetector(
-                  onTap: () {
-                    widget.controller.deleteMapElement(el.id);
-                    setState(() {
-                      _activeElementId = null;
-                    });
-                  },
-                  child: Container(
-                    padding: const EdgeInsets.all(6),
-                    decoration: const BoxDecoration(
-                      color: Colors.redAccent,
-                      shape: BoxShape.circle,
-                      boxShadow: [
-                        BoxShadow(color: Colors.black26, blurRadius: 4),
-                      ],
-                    ),
-                    child: const Icon(
-                      LucideIcons.x,
-                      size: 14,
-                      color: Colors.white,
-                    ),
+            // ==========================================
+            // 4-WAY SMART STRETCH ARROWS (WALLS ONLY)
+            // ==========================================
+            if (widget.mode == MapMode.manage && isActive && el.type == ElementType.wall) ...[
+              
+              // --- 1. LEFT ARROW ---
+              if (!isVertical) 
+                Positioned(
+                  left: -16, 
+                  top: (el.size.height / 2) - 12,
+                  child: GestureDetector(
+                    onPanUpdate: (details) {
+                      setState(() {
+                        final double localDx = details.delta.dx; 
+                        double newWidth = el.size.width - localDx; 
+                        if (newWidth < minSize) newWidth = minSize; 
+
+                        final double cosR = math.cos(el.rotation);
+                        final double sinR = math.sin(el.rotation);
+                        final double appliedDx = el.size.width - newWidth;
+                        final Offset newPosition = el.position + Offset(appliedDx * cosR, appliedDx * sinR);
+
+                        if (!_hasCollision(el, newPosition, Size(newWidth, el.size.height), el.rotation)) {
+                          el.size = Size(newWidth, el.size.height);
+                          el.position = newPosition;
+                        }
+                      });
+                    },
+                    child: _buildArrow(Icons.chevron_left),
                   ),
                 ),
-              ),
 
-            if (widget.mode == MapMode.manage && isActive)
+              // --- 2. RIGHT ARROW ---
+              if (!isVertical)
+                Positioned(
+                  right: -16, 
+                  top: (el.size.height / 2) - 12,
+                  child: GestureDetector(
+                    onPanUpdate: (details) {
+                      setState(() {
+                        double newWidth = el.size.width + details.delta.dx;
+                        if (newWidth < minSize) newWidth = minSize;
+
+                        if (!_hasCollision(el, el.position, Size(newWidth, el.size.height), el.rotation)) {
+                          el.size = Size(newWidth, el.size.height);
+                        }
+                      });
+                    },
+                    child: _buildArrow(Icons.chevron_right),
+                  ),
+                ),
+
+              // --- 3. TOP ARROW ---
+              if (!isHorizontal && isWall) 
+                Positioned(
+                  top: -16, 
+                  left: (el.size.width / 2) - 12,
+                  child: GestureDetector(
+                    onPanUpdate: (details) {
+                      setState(() {
+                        final double localDy = details.delta.dy; 
+                        double newHeight = el.size.height - localDy; 
+                        if (newHeight < minSize) newHeight = minSize; 
+
+                        final double cosR = math.cos(el.rotation);
+                        final double sinR = math.sin(el.rotation);
+                        final double appliedDy = el.size.height - newHeight;
+                        
+                        final Offset newPosition = el.position + Offset(-appliedDy * sinR, appliedDy * cosR);
+
+                        if (!_hasCollision(el, newPosition, Size(el.size.width, newHeight), el.rotation)) {
+                          el.size = Size(el.size.width, newHeight);
+                          el.position = newPosition;
+                        }
+                      });
+                    },
+                    child: _buildArrow(Icons.expand_less),
+                  ),
+                ),
+
+              // --- 4. BOTTOM ARROW ---
+              if (!isHorizontal && isWall)
+                Positioned(
+                  bottom: -16, 
+                  left: (el.size.width / 2) - 12,
+                  child: GestureDetector(
+                    onPanUpdate: (details) {
+                      setState(() {
+                        double newHeight = el.size.height + details.delta.dy;
+                        if (newHeight < minSize) newHeight = minSize;
+
+                        if (!_hasCollision(el, el.position, Size(el.size.width, newHeight), el.rotation)) {
+                          el.size = Size(el.size.width, newHeight);
+                        }
+                      });
+                    },
+                    child: _buildArrow(Icons.expand_more),
+                  ),
+                ),
+            ],
+
+            // ==========================================
+            // WIDTH-ONLY STRETCH ARROWS (RACKS, SHELVES, CASHIERS)
+            // ==========================================
+            if (widget.mode == MapMode.manage && isActive && el.type != ElementType.wall) ...[
+              
+              // --- LEFT ARROW (Changes Width) ---
               Positioned(
-                left: 5,
-                bottom: 5,
+                left: -16, 
+                top: (el.size.height / 2) - 12,
                 child: GestureDetector(
                   onPanUpdate: (details) {
                     setState(() {
+                      final double localDx = details.delta.dx; 
+                      double newWidth = el.size.width - localDx; 
+                      if (newWidth < minSize) newWidth = minSize; 
+
                       final double cosR = math.cos(el.rotation);
                       final double sinR = math.sin(el.rotation);
+                      final double appliedDx = el.size.width - newWidth;
+                      final Offset newPosition = el.position + Offset(appliedDx * cosR, appliedDx * sinR);
 
-                      final double localDx = details.delta.dx;
-                      final double localDy = details.delta.dy;
-
-                      double newWidth = el.size.width - localDx; 
-                      double newHeight = el.size.height + localDy; 
-
-                      if (newWidth < 40) newWidth = 40;
-                      if (newHeight < 40) newHeight = 40;
-
-                      final Offset oldCenter = Offset(
-                        el.position.dx + el.size.width / 2,
-                        el.position.dy + el.size.height / 2,
-                      );
-                      final Offset oldAnchorLocal = Offset(
-                        el.size.width / 2,
-                        -el.size.height / 2,
-                      );
-                      final Offset oldAnchorGlobal =
-                          oldCenter +
-                          Offset(
-                            oldAnchorLocal.dx * cosR - oldAnchorLocal.dy * sinR,
-                            oldAnchorLocal.dx * sinR + oldAnchorLocal.dy * cosR,
-                          );
-
-                      final Offset newAnchorLocal = Offset(
-                        newWidth / 2,
-                        -newHeight / 2,
-                      );
-                      final Offset newAnchorRotated = Offset(
-                        newAnchorLocal.dx * cosR - newAnchorLocal.dy * sinR,
-                        newAnchorLocal.dx * sinR + newAnchorLocal.dy * cosR,
-                      );
-
-                      final Offset newCenter =
-                          oldAnchorGlobal - newAnchorRotated;
-                      final Offset newPosition =
-                          newCenter - Offset(newWidth / 2, newHeight / 2);
-
-                      if (!_hasCollision(
-                        el,
-                        newPosition,
-                        Size(newWidth, newHeight),
-                        el.rotation,
-                      )) {
-                        el.size = Size(newWidth, newHeight);
+                      if (!_hasCollision(el, newPosition, Size(newWidth, el.size.height), el.rotation)) {
+                        el.size = Size(newWidth, el.size.height);
                         el.position = newPosition;
                       }
                     });
                   },
-                  child: Container(
-                    padding: const EdgeInsets.all(6),
-                    decoration: const BoxDecoration(
-                      color: Colors.white,
-                      shape: BoxShape.circle,
-                      boxShadow: [
-                        BoxShadow(color: Colors.black26, blurRadius: 4),
-                      ],
-                    ),
-                    child: const Icon(
-                      Icons.open_in_full,
-                      size: 12,
-                      color: Colors.black,
-                    ),
-                  ),
+                  child: _buildArrow(Icons.chevron_left),
                 ),
               ),
-            if (widget.mode == MapMode.manage && isActive)
-              Positioned(
-                right: 5,
-                top: 5,
-                child: GestureDetector(
-                  onTap: () {
-                    setState(() {
-                      final double newRot = el.rotation + (math.pi / 2);
 
-                      if (!_hasCollision(el, el.position, el.size, newRot)) {
-                        el.rotation = newRot;
-                      } else {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text(
-                              "Cannot rotate here. It overlaps with another element.",
-                            ),
-                            backgroundColor: Colors.redAccent,
-                            duration: Duration(seconds: 1),
-                          ),
-                        );
+              // --- RIGHT ARROW (Changes Width) ---
+              Positioned(
+                right: -16, 
+                top: (el.size.height / 2) - 12,
+                child: GestureDetector(
+                  onPanUpdate: (details) {
+                    setState(() {
+                      double newWidth = el.size.width + details.delta.dx;
+                      if (newWidth < minSize) newWidth = minSize;
+
+                      if (!_hasCollision(el, el.position, Size(newWidth, el.size.height), el.rotation)) {
+                        el.size = Size(newWidth, el.size.height);
                       }
                     });
                   },
-                  child: Container(
-                    padding: const EdgeInsets.all(6),
-                    decoration: const BoxDecoration(
-                      color: Colors.blue,
-                      shape: BoxShape.circle,
-                      boxShadow: [
-                        BoxShadow(color: Colors.black26, blurRadius: 4),
-                      ],
-                    ),
-                    child: const Icon(
-                      LucideIcons.rotateCw,
-                      size: 14,
-                      color: Colors.white,
-                    ),
-                  ),
+                  child: _buildArrow(Icons.chevron_right),
                 ),
               ),
+            ],
+
           ],
         ),
       ),
@@ -974,6 +1234,19 @@ class _StoreMapState extends State<StoreMap>
     );
   }
 
+  Widget _buildArrow(IconData icon) {
+    return Container(
+      padding: const EdgeInsets.all(2),
+      decoration: BoxDecoration(
+        color: Colors.green,
+        shape: BoxShape.circle,
+        border: Border.all(color: Colors.white, width: 2),
+        boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4)],
+      ),
+      child: Icon(icon, size: 16, color: Colors.white),
+    );
+  }
+
   Widget _buildDetailItem(String label, String value) {
     return Expanded(
       child: Container(
@@ -1097,10 +1370,10 @@ class GridPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
-      ..color = Colors.white 
+      ..color = Colors.white
       ..strokeWidth = 1.5;
 
-    const double step = 40; 
+    const double step = 40;
 
     for (double i = 0; i <= size.width; i += step) {
       canvas.drawLine(Offset(i, 0), Offset(i, size.height), paint);
@@ -1116,7 +1389,7 @@ class GridPainter extends CustomPainter {
 
 class CADBlockPainter extends CustomPainter {
   final Color baseColor;
-  final double zHeight; 
+  final double zHeight;
 
   CADBlockPainter({required this.baseColor, this.zHeight = 25.0});
 
@@ -1133,10 +1406,10 @@ class CADBlockPainter extends CustomPainter {
     final double w = size.width - ex;
     final double h = size.height - ey.abs();
 
-    final pBL = Offset(0, size.height); 
-    final pBR = Offset(w, size.height); 
-    final pTR = Offset(w, size.height - h); 
-    final pTL = Offset(0, size.height - h); 
+    final pBL = Offset(0, size.height);
+    final pBR = Offset(w, size.height);
+    final pTR = Offset(w, size.height - h);
+    final pTL = Offset(0, size.height - h);
 
     final rBL = pBL + Offset(ex, ey);
     final rBR = pBR + Offset(ex, ey);
@@ -1156,9 +1429,9 @@ class CADBlockPainter extends CustomPainter {
       canvas.drawPath(path, strokePaint);
     }
 
-    drawFace([pBR, pTR, rTR, rBR], rightColor); 
-    drawFace([pBL, pBR, rBR, rBL], frontColor); 
-    drawFace([rBL, rBR, rTR, rTL], topColor); 
+    drawFace([pBR, pTR, rTR, rBR], rightColor);
+    drawFace([pBL, pBR, rBR, rBL], frontColor);
+    drawFace([rBL, rBR, rTR, rTL], topColor);
   }
 
   @override
