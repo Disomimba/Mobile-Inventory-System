@@ -48,6 +48,7 @@ class _StoreMapState extends State<StoreMap>
   Offset? _dragPreviewPos;
   Size? _dragPreviewSize;
   bool _dragPreviewValid = true;
+  double _dragPreviewRotation = 0.0;
   Offset? _rawDragPosition;
 
   @override
@@ -420,6 +421,7 @@ class _StoreMapState extends State<StoreMap>
                     _dragPreviewPos = snappedPos;
                     _dragPreviewSize = previewSize;
                     _dragPreviewValid = !_hasCollision(tempEl, snappedPos, previewSize, 0.0);
+                    _dragPreviewRotation = 0.0;
                   });
                 },
                 onLeave: (_) {
@@ -502,14 +504,18 @@ class _StoreMapState extends State<StoreMap>
                                 width: _dragPreviewSize!.width,
                                 height: _dragPreviewSize!.height,
                                 child: IgnorePointer(
-                                  child: Container(
-                                    decoration: BoxDecoration(
-                                      color: _dragPreviewValid
-                                          ? Colors.greenAccent.withOpacity(0.4)
-                                          : Colors.redAccent.withOpacity(0.5),
-                                      border: Border.all(
-                                        color: _dragPreviewValid ? Colors.green : Colors.red,
-                                        width: 2,
+                                  // NEW: Rotate the preview box!
+                                  child: Transform.rotate(
+                                    angle: _dragPreviewRotation,
+                                    child: Container(
+                                      decoration: BoxDecoration(
+                                        color: _dragPreviewValid
+                                            ? Colors.greenAccent.withOpacity(0.4)
+                                            : Colors.redAccent.withOpacity(0.5),
+                                        border: Border.all(
+                                          color: _dragPreviewValid ? Colors.green : Colors.red,
+                                          width: 2,
+                                        ),
                                       ),
                                     ),
                                   ),
@@ -876,6 +882,7 @@ class _StoreMapState extends State<StoreMap>
                           _dragPreviewPos = snappedPos;
                           _dragPreviewSize = el.size;
                           _dragPreviewValid = isValid;
+                          _dragPreviewRotation = el.rotation;
 
                           if (isValid) {
                             el.position = snappedPos;
@@ -947,7 +954,11 @@ class _StoreMapState extends State<StoreMap>
                         }
                       });
                     },
-                    child: _buildArrow(Icons.chevron_left),
+                    child: Container(
+    padding: const EdgeInsets.all(12), // Increases the invisible hit area
+    color: Colors.transparent, 
+    child: _buildArrow(Icons.chevron_left),
+  ),
                   ),
                 ),
 
@@ -957,6 +968,7 @@ class _StoreMapState extends State<StoreMap>
                   right: -16, 
                   top: (el.size.height / 2) - 12,
                   child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
                     onPanUpdate: (details) {
                       setState(() {
                         double newWidth = el.size.width + details.delta.dx;
