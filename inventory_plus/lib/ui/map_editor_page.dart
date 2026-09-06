@@ -247,7 +247,7 @@ class _MapEditorPageState extends State<MapEditorPage> {
               const SizedBox(width: 4),
               Expanded(child: _buildDraggableTool(ElementType.cashier, "Cashier", Colors.purple)),
               const SizedBox(width: 4),
-              Expanded(child: _buildDraggableTool(ElementType.wall, "Path", Colors.grey)),
+              Expanded(child: _buildDraggableTool(ElementType.wall, "Wall", Colors.grey)),
             ],
           ),
         ],
