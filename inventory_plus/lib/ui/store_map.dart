@@ -472,16 +472,55 @@ class _StoreMapState extends State<StoreMap>
       }
     }
 
-    var sortedLayout = List<MapElement>.from(widget.controller.storeLayout);
-    sortedLayout.sort((a, b) {
-      if (a.id == _activeElementId) return 1;
-      if (b.id == _activeElementId) return -1;
-      double distA = a.position.dx + a.position.dy;
-      double distB = b.position.dx + b.position.dy;
-      return distA.compareTo(distB);
-    });
+    // var sortedLayout = List<MapElement>.from(widget.controller.storeLayout);
+    // sortedLayout.sort((a, b) {
+    //   if (a.id == _activeElementId) return 1;
+    //   if (b.id == _activeElementId) return -1;
+    //   double distA = a.position.dx + a.position.dy;
+    //   double distB = b.position.dx + b.position.dy;
+    //   return distA.compareTo(distB);
+    // });
+var sortedLayout = List<MapElement>.from(widget.controller.storeLayout);
 
-    Widget map = LayoutBuilder(
+sortedLayout.sort((a, b) {
+  // --------------------------------------------------
+  // 1. ACTIVE ELEMENT ALWAYS STAYS ON TOP
+  // --------------------------------------------------
+  if (a.id == _activeElementId) return 1;
+  if (b.id == _activeElementId) return -1;
+
+  // --------------------------------------------------
+  // 2. CALCULATE THE CENTER OF EACH ELEMENT
+  // --------------------------------------------------
+  final double aCenterX =
+      a.position.dx + a.size.width / 2;
+  final double aCenterY =
+      a.position.dy + a.size.height / 2;
+
+  final double bCenterX =
+      b.position.dx + b.size.width / 2;
+  final double bCenterY =
+      b.position.dy + b.size.height / 2;
+
+  // --------------------------------------------------
+  // 3. DEPTH DIRECTION
+  //
+  // Your map is viewed diagonally, so X + Y represents
+  // movement toward the front of the store.
+  // Larger value = closer to the viewer.
+  // --------------------------------------------------
+  final double depthA = aCenterX + aCenterY;
+  final double depthB = bCenterX + bCenterY;
+
+  // --------------------------------------------------
+  // 4. NORMAL DEPTH ORDER
+  //
+  // Farther objects are painted first.
+  // Closer objects are painted later.
+  // --------------------------------------------------
+  return depthA.compareTo(depthB);
+});
+        Widget map = LayoutBuilder(
       builder: (context, constraints) {
         if (!_isInitialScaleSet && constraints.maxWidth > 0) {
           _isInitialScaleSet = true;
@@ -845,7 +884,7 @@ class _StoreMapState extends State<StoreMap>
                 transform: Matrix4.identity()
                   ..rotateZ(-el.rotation)
                   ..rotateZ(-math.pi / 4)
-                  ..rotateX(0.20),
+                  ..rotateX(0.17),
                 child: Transform.translate(
                   offset: Offset(
                     (-baseY * 12 - 33) + nudgeX,
