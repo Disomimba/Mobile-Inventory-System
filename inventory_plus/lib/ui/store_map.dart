@@ -38,6 +38,8 @@ class _StoreMapState extends State<StoreMap>
   late AnimationController _animController;
   late Animation<double> _bounceAnimation;
   String? _activeElementId;
+  bool _isAdjustingWidth = false;
+  bool _isNudging = false;
   final TransformationController _transformationController =
       TransformationController();
   bool _isInitialScaleSet = false;
@@ -141,9 +143,8 @@ class _StoreMapState extends State<StoreMap>
               other.type == ElementType.wall) ||
           (activeEl.type == ElementType.wall &&
               other.type == ElementType.door) ||
-      (activeEl.type == ElementType.wall &&
-      other.type == ElementType.wall)    
-              ) {
+          (activeEl.type == ElementType.wall &&
+              other.type == ElementType.wall)) {
         continue; // Skip collision check for doors vs walls
       }
       // ==========================================
@@ -244,124 +245,133 @@ class _StoreMapState extends State<StoreMap>
   }
 
   // ==========================================
-  // COC STYLE BOTTOM ACTION BAR
+  // NUDGE LOGIC
   // ==========================================
-  void _changeElementWidth(MapElement el, double amount) {
-  const double minSizeWall = 15.0;
-  const double minSizeObject = 40.0;
+  void _nudgeElement(MapElement el, Offset delta) {
+    final Offset newPosition = el.position + delta;
 
-  final double minWidth =
-      el.type == ElementType.wall
-          ? minSizeWall
-          : minSizeObject;
-
-  final double newWidth =
-      (el.size.width + amount).clamp(
-        minWidth,
-        double.infinity,
+    if (_hasCollision(el, newPosition, el.size, el.rotation)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Cannot nudge. It would overlap another element."),
+          backgroundColor: Colors.redAccent,
+          duration: Duration(seconds: 1),
+        ),
       );
+      return;
+    }
 
-  // Nothing to change
-  if (newWidth == el.size.width) {
-    return;
+    setState(() {
+      el.position = newPosition;
+    });
   }
 
-  // Keep the object's CENTER in the same location.
-  final Offset center = Offset(
-    el.position.dx + el.size.width / 2,
-    el.position.dy + el.size.height / 2,
-  );
+  // ==========================================
+  // COC STYLE BOTTOM ACTION BAR
+  // ==========================================
+  void _changeElementWidthDirectional(MapElement el, double amount,
+      {required bool isLeft}) {
+    const double minSizeWall = 15.0;
+    const double minSizeObject = 40.0;
 
-  final Size newSize = Size(
-    newWidth,
-    el.size.height,
-  );
+    final double minWidth =
+        el.type == ElementType.wall ? minSizeWall : minSizeObject;
 
-  final Offset newPosition = Offset(
-    center.dx - newSize.width / 2,
-    center.dy - newSize.height / 2,
-  );
+    final double newWidth =
+        (el.size.width + amount).clamp(minWidth, double.infinity);
 
-  // Check collision before applying the resize.
-  if (_hasCollision(
-    el,
-    newPosition,
-    newSize,
-    el.rotation,
-  )) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text(
-          "Cannot change width. It would overlap another element.",
+    final double actualChange = newWidth - el.size.width;
+
+    // Nothing to change
+    if (actualChange == 0) return;
+
+    final Size newSize = Size(newWidth, el.size.height);
+
+    // If expanding/shrinking on the left, shift the X position in the opposite direction.
+    // If on the right, the top-left X position stays the same.
+    final Offset newPosition = isLeft
+        ? Offset(el.position.dx - actualChange, el.position.dy)
+        : el.position;
+
+    // Check collision before applying the resize.
+    if (_hasCollision(el, newPosition, newSize, el.rotation)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content:
+              Text("Cannot change width. It would overlap another element."),
+          backgroundColor: Colors.redAccent,
+          duration: Duration(seconds: 1),
         ),
-        backgroundColor: Colors.redAccent,
-        duration: Duration(seconds: 1),
+      );
+      return;
+    }
+
+    setState(() {
+      el.size = newSize;
+      el.position = newPosition;
+    });
+  }
+
+  Widget _buildBottomActionBar() {
+    final activeEl = widget.controller.storeLayout.firstWhere(
+      (el) => el.id == _activeElementId,
+      orElse: () => MapElement(
+        id: '',
+        type: ElementType.wall,
+        position: Offset.zero,
+        label: '',
       ),
     );
 
-    return;
+    if (activeEl.id.isEmpty) return const SizedBox.shrink();
+
+    // Determine which menu to show
+    Widget currentMenu;
+    if (_isAdjustingWidth) {
+      currentMenu = _buildWidthAdjustmentMenu(activeEl);
+    } else if (_isNudging) {
+      currentMenu = _buildNudgeMenu(activeEl);
+    } else {
+      currentMenu = _buildMainMenu(activeEl);
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1E293B),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.blueGrey, width: 2),
+        boxShadow: const [
+          BoxShadow(
+            color: Colors.black54,
+            blurRadius: 10,
+            offset: Offset(0, 5),
+          ),
+        ],
+      ),
+      child: currentMenu,
+    );
   }
 
-  setState(() {
-    el.size = newSize;
-    el.position = newPosition;
-  });
-}
-  Widget _buildBottomActionBar() {
-  final activeEl = widget.controller.storeLayout.firstWhere(
-    (el) => el.id == _activeElementId,
-    orElse: () => MapElement(
-      id: '',
-      type: ElementType.wall,
-      position: Offset.zero,
-      label: '',
-    ),
-  );
-
-  if (activeEl.id.isEmpty) return const SizedBox.shrink();
-
-  return Container(
-    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-    decoration: BoxDecoration(
-      color: const Color(0xFF1E293B),
-      borderRadius: BorderRadius.circular(16),
-      border: Border.all(color: Colors.blueGrey, width: 2),
-      boxShadow: const [
-        BoxShadow(
-          color: Colors.black54,
-          blurRadius: 10,
-          offset: Offset(0, 5),
-        ),
-      ],
-    ),
-    child: Row(
+  Widget _buildMainMenu(MapElement activeEl) {
+    return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        // =========================
-        // ROTATE
-        // =========================
         _buildActionMenuButton(
           icon: LucideIcons.rotateCw,
           label: "Rotate",
           color: Colors.blue,
           onTap: () {
             setState(() {
-              final double newRot =
-                  activeEl.rotation + (math.pi / 2);
-
+              final double newRot = activeEl.rotation + (math.pi / 2);
               if (!_hasCollision(
-                activeEl,
-                activeEl.position,
-                activeEl.size,
-                newRot,
-              )) {
+                  activeEl, activeEl.position, activeEl.size, newRot)) {
                 activeEl.rotation = newRot;
               } else {
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(
-                    content: Text(
-                      "Cannot rotate. Overlaps with another element.",
-                    ),
+                    content:
+                        Text("Cannot rotate. Overlaps with another element."),
                     backgroundColor: Colors.redAccent,
                     duration: Duration(seconds: 1),
                   ),
@@ -370,68 +380,159 @@ class _StoreMapState extends State<StoreMap>
             });
           },
         ),
-
         const SizedBox(width: 12),
-        Container(
-          width: 1,
-          height: 40,
-          color: Colors.grey.shade700,
-        ),
+        Container(width: 1, height: 40, color: Colors.grey.shade700),
         const SizedBox(width: 12),
-
-        // =========================
-        // WIDTH -
-        // =========================
         _buildActionMenuButton(
-          icon: Icons.remove,
-          label: "Width -",
+          icon: Icons.compare_arrows,
+          label: "Adjust Width",
           color: Colors.orange,
           onTap: () {
-            _changeElementWidth(activeEl, -40);
+            setState(() {
+              _isAdjustingWidth = true;
+              _isNudging = false;
+            });
           },
         ),
-
         const SizedBox(width: 12),
-
-        // =========================
-        // WIDTH +
-        // =========================
+        Container(width: 1, height: 40, color: Colors.grey.shade700),
+        const SizedBox(width: 12),
         _buildActionMenuButton(
-          icon: Icons.add,
-          label: "Width +",
-          color: Colors.greenAccent,
+          icon: Icons.open_with,
+          label: "Nudge",
+          color: Colors.purpleAccent,
           onTap: () {
-            _changeElementWidth(activeEl, 40);
+            setState(() {
+              _isNudging = true;
+              _isAdjustingWidth = false;
+            });
           },
         ),
-
         const SizedBox(width: 12),
-        Container(
-          width: 1,
-          height: 40,
-          color: Colors.grey.shade700,
-        ),
+        Container(width: 1, height: 40, color: Colors.grey.shade700),
         const SizedBox(width: 12),
-
-        // =========================
-        // REMOVE
-        // =========================
         _buildActionMenuButton(
           icon: LucideIcons.trash,
           label: "Remove",
           color: Colors.redAccent,
           onTap: () {
             widget.controller.deleteMapElement(activeEl.id);
-
             setState(() {
               _activeElementId = null;
+              _isAdjustingWidth = false;
+              _isNudging = false;
             });
           },
         ),
       ],
-    ),
-  );
-}
+    );
+  }
+
+  Widget _buildWidthAdjustmentMenu(MapElement activeEl) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _buildActionMenuButton(
+          icon: Icons.arrow_back,
+          label: "Back",
+          color: Colors.white,
+          onTap: () {
+            setState(() {
+              _isAdjustingWidth = false;
+            });
+          },
+        ),
+        const SizedBox(width: 12),
+        Container(width: 1, height: 40, color: Colors.grey.shade700),
+        const SizedBox(width: 12),
+        _buildActionMenuButton(
+          icon: Icons.remove,
+          label: "Dec Left",
+          color: Colors.orangeAccent,
+          onTap: () =>
+              _changeElementWidthDirectional(activeEl, -40, isLeft: true),
+        ),
+        const SizedBox(width: 12),
+        _buildActionMenuButton(
+          icon: Icons.add,
+          label: "Inc Left",
+          color: Colors.greenAccent,
+          onTap: () =>
+              _changeElementWidthDirectional(activeEl, 40, isLeft: true),
+        ),
+        const SizedBox(width: 12),
+        Container(width: 1, height: 40, color: Colors.grey.shade700),
+        const SizedBox(width: 12),
+        _buildActionMenuButton(
+          icon: Icons.remove,
+          label: "Dec Right",
+          color: Colors.orangeAccent,
+          onTap: () =>
+              _changeElementWidthDirectional(activeEl, -40, isLeft: false),
+        ),
+        const SizedBox(width: 12),
+        _buildActionMenuButton(
+          icon: Icons.add,
+          label: "Inc Right",
+          color: Colors.greenAccent,
+          onTap: () =>
+              _changeElementWidthDirectional(activeEl, 40, isLeft: false),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildNudgeMenu(MapElement activeEl) {
+    // 40.0 keeps the object perfectly synced with your grid snap step size.
+    const double step = 40.0; 
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _buildActionMenuButton(
+          icon: Icons.arrow_back,
+          label: "Back",
+          color: Colors.white,
+          onTap: () {
+            setState(() {
+              _isNudging = false;
+            });
+          },
+        ),
+        const SizedBox(width: 12),
+        Container(width: 1, height: 40, color: Colors.grey.shade700),
+        const SizedBox(width: 12),
+        _buildActionMenuButton(
+          icon: Icons.keyboard_arrow_up,
+          label: "Up",
+          color: Colors.blueAccent,
+          onTap: () => _nudgeElement(activeEl, const Offset(0, -step)),
+        ),
+        const SizedBox(width: 12),
+        _buildActionMenuButton(
+          icon: Icons.keyboard_arrow_down,
+          label: "Down",
+          color: Colors.blueAccent,
+          onTap: () => _nudgeElement(activeEl, const Offset(0, step)),
+        ),
+        const SizedBox(width: 12),
+        Container(width: 1, height: 40, color: Colors.grey.shade700),
+        const SizedBox(width: 12),
+        _buildActionMenuButton(
+          icon: Icons.keyboard_arrow_left,
+          label: "Left",
+          color: Colors.blueAccent,
+          onTap: () => _nudgeElement(activeEl, const Offset(-step, 0)),
+        ),
+        const SizedBox(width: 12),
+        _buildActionMenuButton(
+          icon: Icons.keyboard_arrow_right,
+          label: "Right",
+          color: Colors.blueAccent,
+          onTap: () => _nudgeElement(activeEl, const Offset(step, 0)),
+        ),
+      ],
+    );
+  }
 
   Widget _buildActionMenuButton({
     required IconData icon,
@@ -472,55 +573,44 @@ class _StoreMapState extends State<StoreMap>
       }
     }
 
-    // var sortedLayout = List<MapElement>.from(widget.controller.storeLayout);
-    // sortedLayout.sort((a, b) {
-    //   if (a.id == _activeElementId) return 1;
-    //   if (b.id == _activeElementId) return -1;
-    //   double distA = a.position.dx + a.position.dy;
-    //   double distB = b.position.dx + b.position.dy;
-    //   return distA.compareTo(distB);
-    // });
-var sortedLayout = List<MapElement>.from(widget.controller.storeLayout);
+    var sortedLayout = List<MapElement>.from(widget.controller.storeLayout);
 
-sortedLayout.sort((a, b) {
-  // --------------------------------------------------
-  // 1. ACTIVE ELEMENT ALWAYS STAYS ON TOP
-  // --------------------------------------------------
-  if (a.id == _activeElementId) return 1;
-  if (b.id == _activeElementId) return -1;
+    sortedLayout.sort((a, b) {
+      // --------------------------------------------------
+      // 1. ACTIVE ELEMENT ALWAYS STAYS ON TOP
+      // --------------------------------------------------
+      if (a.id == _activeElementId) return 1;
+      if (b.id == _activeElementId) return -1;
 
-  // --------------------------------------------------
-  // 2. CALCULATE THE CENTER OF EACH ELEMENT
-  // --------------------------------------------------
-  final double aCenterX =
-      a.position.dx + a.size.width / 2;
-  final double aCenterY =
-      a.position.dy + a.size.height / 2;
+      // --------------------------------------------------
+      // 2. CALCULATE THE CENTER OF EACH ELEMENT
+      // --------------------------------------------------
+      final double aCenterX = a.position.dx + a.size.width / 2;
+      final double aCenterY = a.position.dy + a.size.height / 2;
 
-  final double bCenterX =
-      b.position.dx + b.size.width / 2;
-  final double bCenterY =
-      b.position.dy + b.size.height / 2;
+      final double bCenterX = b.position.dx + b.size.width / 2;
+      final double bCenterY = b.position.dy + b.size.height / 2;
 
-  // --------------------------------------------------
-  // 3. DEPTH DIRECTION
-  //
-  // Your map is viewed diagonally, so X + Y represents
-  // movement toward the front of the store.
-  // Larger value = closer to the viewer.
-  // --------------------------------------------------
-  final double depthA = aCenterX + aCenterY;
-  final double depthB = bCenterX + bCenterY;
+      // --------------------------------------------------
+      // 3. DEPTH DIRECTION
+      //
+      // Your map is viewed diagonally, so X + Y represents
+      // movement toward the front of the store.
+      // Larger value = closer to the viewer.
+      // --------------------------------------------------
+      final double depthA = aCenterX + aCenterY;
+      final double depthB = bCenterX + bCenterY;
 
-  // --------------------------------------------------
-  // 4. NORMAL DEPTH ORDER
-  //
-  // Farther objects are painted first.
-  // Closer objects are painted later.
-  // --------------------------------------------------
-  return depthA.compareTo(depthB);
-});
-        Widget map = LayoutBuilder(
+      // --------------------------------------------------
+      // 4. NORMAL DEPTH ORDER
+      //
+      // Farther objects are painted first.
+      // Closer objects are painted later.
+      // --------------------------------------------------
+      return depthA.compareTo(depthB);
+    });
+
+    Widget map = LayoutBuilder(
       builder: (context, constraints) {
         if (!_isInitialScaleSet && constraints.maxWidth > 0) {
           _isInitialScaleSet = true;
@@ -635,6 +725,8 @@ sortedLayout.sort((a, b) {
                       if (widget.mode == MapMode.manage) {
                         setState(() {
                           _activeElementId = null;
+                          _isAdjustingWidth = false;
+                          _isNudging = false; // Add reset for nudge menu here
                         });
                       } else if (widget.mode == MapMode.view) {
                         setState(() {
@@ -676,9 +768,8 @@ sortedLayout.sort((a, b) {
                                     child: Container(
                                       decoration: BoxDecoration(
                                         color: _dragPreviewValid
-                                            ? Colors.greenAccent.withOpacity(
-                                                0.4,
-                                              )
+                                            ? Colors.greenAccent
+                                                .withOpacity(0.4)
                                             : Colors.redAccent.withOpacity(0.5),
                                         border: Border.all(
                                           color: _dragPreviewValid
@@ -712,7 +803,6 @@ sortedLayout.sort((a, b) {
     Widget mapDisplay = Stack(
       children: [
         map,
-
         if (widget.mode == MapMode.manage && _activeElementId != null)
           Positioned(
             bottom: 20,
@@ -871,8 +961,8 @@ sortedLayout.sort((a, b) {
         border: !useFootprintOutline && isActive
             ? Border.all(color: Colors.yellowAccent, width: 3)
             : (isHighlighted
-                  ? Border.all(color: Colors.orange, width: 2)
-                  : null),
+                ? Border.all(color: Colors.orange, width: 2)
+                : null),
       ),
       child: Stack(
         clipBehavior: Clip.none,
@@ -952,6 +1042,10 @@ sortedLayout.sort((a, b) {
                 onTap: () async {
                   if (widget.mode == MapMode.manage) {
                     setState(() {
+                      if (_activeElementId != el.id) {
+                        _isAdjustingWidth = false; 
+                        _isNudging = false; // Add reset for nudge menu here
+                      }
                       _activeElementId = el.id;
                     });
                   } else if (widget.mode == MapMode.selection &&
@@ -1074,7 +1168,6 @@ sortedLayout.sort((a, b) {
                 child: shelf,
               ),
             ),
-
             if (isHighlighted)
               Positioned.fill(
                 child: Align(
@@ -1097,9 +1190,6 @@ sortedLayout.sort((a, b) {
                   ),
                 ),
               ),
-
-            
-            
           ],
         ),
       ),
