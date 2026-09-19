@@ -20,10 +20,11 @@ class Face3D {
   const Face3D(this.points, this.color);
 }
 
-/// One real, solid sub-component of a model (a single post, panel, or shelf)
-/// BEFORE it gets sliced into render chunks. This is only used to draw a
-/// clean outline around the true silhouette of that component, so it never
-/// produces the internal seam lines that outlining every render chunk does.
+/// One real, solid sub-component of a model.
+///
+/// This is used for outlines only. The fill geometry may be chunked, but
+/// outlines remain based on the original unsliced part so no seam lines
+/// appear between chunks.
 class BoxPart {
   final double x;
   final double y;
@@ -42,14 +43,20 @@ class BoxPart {
   });
 }
 
-/// A model to render = faces to fill (may be sliced into chunks purely to
-/// fix depth-sort/overlap glitches) + the real, un-sliced parts to outline.
+/// A complete 3D model.
+///
+/// faces = fill geometry
+/// parts = original components used for clean outlines
 class Model3D {
   final List<Face3D> faces;
   final List<BoxPart> parts;
 
   const Model3D(this.faces, this.parts);
 }
+
+// ============================================================================
+// BOX GENERATOR
+// ============================================================================
 
 List<Face3D> createBox({
   required double x,
@@ -62,8 +69,10 @@ List<Face3D> createBox({
 }) {
   final x1 = x - width / 2;
   final x2 = x + width / 2;
+
   final y1 = y - height / 2;
   final y2 = y + height / 2;
+
   final z1 = z - depth / 2;
   final z2 = z + depth / 2;
 
@@ -78,21 +87,48 @@ List<Face3D> createBox({
   final p011 = Point3D(x1, y2, z2);
 
   return [
-    Face3D([p001, p101, p111, p011], color), // Front
-    Face3D([p100, p000, p010, p110], color.withOpacity(0.65)), // Back
-    Face3D([p000, p001, p011, p010], color.withOpacity(0.75)), // Left
-    Face3D([p101, p100, p110, p111], color.withOpacity(0.85)), // Right
-    Face3D([p011, p111, p110, p010], color.withOpacity(0.9)), // Top
-    Face3D([p000, p100, p101, p001], color.withOpacity(0.55)), // Bottom
+    // Front
+    Face3D(
+      [p001, p101, p111, p011],
+      color,
+    ),
+
+    // Back
+    Face3D(
+      [p100, p000, p010, p110],
+      color.withOpacity(0.65),
+    ),
+
+    // Left
+    Face3D(
+      [p000, p001, p011, p010],
+      color.withOpacity(0.75),
+    ),
+
+    // Right
+    Face3D(
+      [p101, p100, p110, p111],
+      color.withOpacity(0.85),
+    ),
+
+    // Top
+    Face3D(
+      [p011, p111, p110, p010],
+      color.withOpacity(0.90),
+    ),
+
+    // Bottom
+    Face3D(
+      [p000, p100, p101, p001],
+      color.withOpacity(0.55),
+    ),
   ];
 }
 
 // ============================================================================
-// CHUNKED BOX GENERATOR (Fixes Painter's Algorithm Glitches!)
-// NOTE: This is for FILL geometry only. It intentionally has no outline of
-// its own — outlining is handled separately per BoxPart (see below) so that
-// slicing a part into chunks never creates visible seam lines.
+// CHUNKED BOX GENERATOR
 // ============================================================================
+
 List<Face3D> createChunkedBox({
   required double x,
   required double y,
@@ -106,6 +142,7 @@ List<Face3D> createChunkedBox({
   int chunksZ = 1,
 }) {
   final faces = <Face3D>[];
+
   final w = width / chunksX;
   final h = height / chunksY;
   final d = depth / chunksZ;
@@ -113,44 +150,61 @@ List<Face3D> createChunkedBox({
   for (int i = 0; i < chunksX; i++) {
     for (int j = 0; j < chunksY; j++) {
       for (int k = 0; k < chunksZ; k++) {
-        faces.addAll(createBox(
-          x: x - width / 2 + w / 2 + i * w,
-          y: y - height / 2 + h / 2 + j * h,
-          z: z - depth / 2 + d / 2 + k * d,
-          width: w,
-          height: h,
-          depth: d,
-          color: color,
-        ));
+        faces.addAll(
+          createBox(
+            x: x - width / 2 + w / 2 + i * w,
+            y: y - height / 2 + h / 2 + j * h,
+            z: z - depth / 2 + d / 2 + k * d,
+            width: w,
+            height: h,
+            depth: d,
+            color: color,
+          ),
+        );
       }
     }
   }
+
   return faces;
 }
 
 Point3D getBoxCenter(List<Face3D> box) {
-  double sumX = 0, sumY = 0, sumZ = 0;
+  double sumX = 0;
+  double sumY = 0;
+  double sumZ = 0;
   int count = 0;
-  for (var face in box) {
-    for (var p in face.points) {
-      sumX += p.x;
-      sumY += p.y;
-      sumZ += p.z;
+
+  for (final face in box) {
+    for (final point in face.points) {
+      sumX += point.x;
+      sumY += point.y;
+      sumZ += point.z;
       count++;
     }
   }
-  return Point3D(sumX / count, sumY / count, sumZ / count);
+
+  if (count == 0) {
+    return const Point3D(0, 0, 0);
+  }
+
+  return Point3D(
+    sumX / count,
+    sumY / count,
+    sumZ / count,
+  );
 }
 
-// Face outward-normals, in the same order createBox() returns its faces:
-// Front, Back, Left, Right, Top, Bottom.
+// ============================================================================
+// FACE NORMALS
+// ============================================================================
+
 const List<Point3D> _kFaceNormals = [
-  Point3D(0, 0, 1),
-  Point3D(0, 0, -1),
-  Point3D(-1, 0, 0),
-  Point3D(1, 0, 0),
-  Point3D(0, 1, 0),
-  Point3D(0, -1, 0),
+  Point3D(0, 0, 1),  // Front
+  Point3D(0, 0, -1), // Back
+  Point3D(-1, 0, 0), // Left
+  Point3D(1, 0, 0),  // Right
+  Point3D(0, 1, 0),  // Top
+  Point3D(0, -1, 0), // Bottom
 ];
 
 List<List<Point3D>> _boxFaceCorners({
@@ -170,15 +224,14 @@ List<List<Point3D>> _boxFaceCorners({
     depth: depth,
     color: const Color(0x00000000),
   );
-  return faces.map((f) => f.points).toList();
+
+  return faces.map((face) => face.points).toList();
 }
 
-/// Shared render routine used by every model painter below.
-///
-/// 1) Draws all (possibly chunked) fill faces, depth-sorted, with NO stroke.
-/// 2) Draws one clean outline per real BoxPart, using its true un-sliced
-///    dimensions, and only strokes the faces that are actually facing the
-///    camera (back-face culling), so hidden edges never show through.
+// ============================================================================
+// SHARED 3D PAINTER
+// ============================================================================
+
 void paintModel3D(
   Canvas canvas,
   Size size,
@@ -189,51 +242,115 @@ void paintModel3D(
   double outlineOpacity = 0.55,
   double outlineWidth = 1.0,
 }) {
-  // ---- FILL PASS ----
-  List<List<Face3D>> boxes = [];
+  // --------------------------------------------------------------------------
+  // FILL PASS
+  //
+  // Group every 6 faces back into their source box/chunk.
+  // --------------------------------------------------------------------------
+
+  final boxes = <List<Face3D>>[];
+
   for (int i = 0; i < model.faces.length; i += 6) {
-    boxes.add(model.faces.sublist(i, i + 6));
+    final end = math.min(i + 6, model.faces.length);
+
+    boxes.add(
+      model.faces.sublist(i, end),
+    );
   }
 
-  boxes.sort((boxA, boxB) {
-    final centerA = getBoxCenter(boxA);
-    final centerB = getBoxCenter(boxB);
-    return rotate(centerA).z.compareTo(rotate(centerB).z);
-  });
+  // Sort complete boxes from farthest to nearest.
+  boxes.sort(
+    (boxA, boxB) {
+      final centerA = getBoxCenter(boxA);
+      final centerB = getBoxCenter(boxB);
+
+      final depthA = rotate(centerA).z;
+      final depthB = rotate(centerB).z;
+
+      return depthA.compareTo(depthB);
+    },
+  );
 
   for (final box in boxes) {
-    box.sort((a, b) {
-      final avgA = a.points.map((p) => rotate(p).z).reduce((v, e) => v + e) / a.points.length;
-      final avgB = b.points.map((p) => rotate(p).z).reduce((v, e) => v + e) / b.points.length;
-      return avgA.compareTo(avgB);
-    });
+    // Sort faces within each box.
+    box.sort(
+      (a, b) {
+        final avgA = a.points
+                .map((p) => rotate(p).z)
+                .fold<double>(0, (sum, value) => sum + value) /
+            a.points.length;
+
+        final avgB = b.points
+                .map((p) => rotate(p).z)
+                .fold<double>(0, (sum, value) => sum + value) /
+            b.points.length;
+
+        return avgA.compareTo(avgB);
+      },
+    );
 
     for (final face in box) {
-      final path = Path();
-      final first = project(rotate(face.points.first), size);
-      path.moveTo(first.dx, first.dy);
-      for (int i = 1; i < face.points.length; i++) {
-        final point = project(rotate(face.points[i]), size);
-        path.lineTo(point.dx, point.dy);
+      if (face.points.length < 3) {
+        continue;
       }
+
+      final path = Path();
+
+      final first =
+          project(rotate(face.points.first), size);
+
+      path.moveTo(
+        first.dx,
+        first.dy,
+      );
+
+      for (int i = 1; i < face.points.length; i++) {
+        final point =
+            project(rotate(face.points[i]), size);
+
+        path.lineTo(
+          point.dx,
+          point.dy,
+        );
+      }
+
       path.close();
-      canvas.drawPath(path, Paint()..style = PaintingStyle.fill..color = face.color);
+
+      canvas.drawPath(
+        path,
+        Paint()
+          ..style = PaintingStyle.fill
+          ..color = face.color,
+      );
     }
   }
 
-  // ---- OUTLINE PASS ----
+  // --------------------------------------------------------------------------
+  // OUTLINE PASS
+  // --------------------------------------------------------------------------
+
   final parts = [...model.parts]
-    ..sort((a, b) {
-      final za = rotate(Point3D(a.x, a.y, a.z)).z;
-      final zb = rotate(Point3D(b.x, b.y, b.z)).z;
-      return za.compareTo(zb);
-    });
+    ..sort(
+      (a, b) {
+        final za = rotate(
+          Point3D(a.x, a.y, a.z),
+        ).z;
+
+        final zb = rotate(
+          Point3D(b.x, b.y, b.z),
+        ).z;
+
+        return za.compareTo(zb);
+      },
+    );
 
   final outlinePaint = Paint()
     ..style = PaintingStyle.stroke
     ..strokeWidth = outlineWidth
     ..strokeJoin = StrokeJoin.round
-    ..color = outlineColor.withOpacity(outlineOpacity);
+    ..color = outlineColor.withOpacity(
+      outlineOpacity,
+    );
 
   for (final part in parts) {
     final faceCorners = _boxFaceCorners(
@@ -246,26 +363,55 @@ void paintModel3D(
     );
 
     for (int f = 0; f < faceCorners.length; f++) {
-      final normal = rotate(_kFaceNormals[f]);
-      if (normal.z <= 0.0001) continue; // back-facing: don't draw a hidden edge
+      final normal = rotate(
+        _kFaceNormals[f],
+      );
+
+      // Only outline camera-facing faces.
+      if (normal.z <= 0.0001) {
+        continue;
+      }
 
       final pts = faceCorners[f];
-      final path = Path();
-      final first = project(rotate(pts[0]), size);
-      path.moveTo(first.dx, first.dy);
-      for (int i = 1; i < pts.length; i++) {
-        final p = project(rotate(pts[i]), size);
-        path.lineTo(p.dx, p.dy);
+
+      if (pts.length < 3) {
+        continue;
       }
+
+      final path = Path();
+
+      final first =
+          project(rotate(pts.first), size);
+
+      path.moveTo(
+        first.dx,
+        first.dy,
+      );
+
+      for (int i = 1; i < pts.length; i++) {
+        final point =
+            project(rotate(pts[i]), size);
+
+        path.lineTo(
+          point.dx,
+          point.dy,
+        );
+      }
+
       path.close();
-      canvas.drawPath(path, outlinePaint);
+
+      canvas.drawPath(
+        path,
+        outlinePaint,
+      );
     }
   }
 }
 
 // ============================================================================
-// FOOTPRINT OUTLINE PAINTER (for selection highlight)
+// FOOTPRINT OUTLINE
 // ============================================================================
+
 class FootprintOutlinePainter extends CustomPainter {
   final double width;
   final double depth;
@@ -294,44 +440,104 @@ class FootprintOutlinePainter extends CustomPainter {
   Point3D rotate(Point3D p) {
     final cosY = math.cos(rotationY);
     final sinY = math.sin(rotationY);
-    final x1 = p.x * cosY - p.z * sinY;
-    final z1 = p.x * sinY + p.z * cosY;
+
+    final x1 =
+        p.x * cosY - p.z * sinY;
+
+    final z1 =
+        p.x * sinY + p.z * cosY;
 
     final cosX = math.cos(rotationX);
     final sinX = math.sin(rotationX);
-    final y2 = p.y * cosX - z1 * sinX;
-    final z2 = p.y * sinX + z1 * cosX;
 
-    return Point3D(x1, y2, z2);
+    final y2 =
+        p.y * cosX - z1 * sinX;
+
+    final z2 =
+        p.y * sinX + z1 * cosX;
+
+    return Point3D(
+      x1,
+      y2,
+      z2,
+    );
   }
 
-  Offset project(Point3D p, Size size) {
+  Offset project(
+    Point3D p,
+    Size size,
+  ) {
     if (cameraDistance != null) {
-      final perspective = cameraDistance! / (cameraDistance! - p.z);
+      final perspective =
+          cameraDistance! /
+          (cameraDistance! - p.z);
+
       return Offset(
-        size.width / 2 + p.x * scale * perspective,
-        size.height / 2 - p.y * scale * perspective,
+        size.width / 2 +
+            p.x * scale * perspective,
+        size.height / 2 -
+            p.y * scale * perspective,
       );
     }
-    return Offset(size.width / 2 + p.x * scale, size.height / 2 - p.y * scale);
+
+    return Offset(
+      size.width / 2 + p.x * scale,
+      size.height / 2 - p.y * scale,
+    );
   }
 
   @override
-  void paint(Canvas canvas, Size size) {
+  void paint(
+    Canvas canvas,
+    Size size,
+  ) {
     final corners = [
-      Point3D(-width / 2, groundY, -depth / 2),
-      Point3D(width / 2, groundY, -depth / 2),
-      Point3D(width / 2, groundY, depth / 2),
-      Point3D(-width / 2, groundY, depth / 2),
+      Point3D(
+        -width / 2,
+        groundY,
+        -depth / 2,
+      ),
+      Point3D(
+        width / 2,
+        groundY,
+        -depth / 2,
+      ),
+      Point3D(
+        width / 2,
+        groundY,
+        depth / 2,
+      ),
+      Point3D(
+        -width / 2,
+        groundY,
+        depth / 2,
+      ),
     ];
 
-    final projected = corners.map((c) => project(rotate(c), size)).toList();
-    if (projected.isEmpty) return;
+    final projected = corners
+        .map(
+          (corner) =>
+              project(rotate(corner), size),
+        )
+        .toList();
 
-    final path = Path()..moveTo(projected[0].dx, projected[0].dy);
-    for (int i = 1; i < projected.length; i++) {
-      path.lineTo(projected[i].dx, projected[i].dy);
+    if (projected.isEmpty) {
+      return;
     }
+
+    final path = Path()
+      ..moveTo(
+        projected.first.dx,
+        projected.first.dy,
+      );
+
+    for (int i = 1; i < projected.length; i++) {
+      path.lineTo(
+        projected[i].dx,
+        projected[i].dy,
+      );
+    }
+
     path.close();
 
     canvas.drawPath(
@@ -344,11 +550,15 @@ class FootprintOutlinePainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant FootprintOutlinePainter oldDelegate) => true;
+  bool shouldRepaint(
+    covariant FootprintOutlinePainter oldDelegate,
+  ) {
+    return true;
+  }
 }
 
 // ============================================================================
-// RACK 3D MODEL & PAINTER
+// RACK
 // ============================================================================
 
 class Rack3D {
@@ -356,60 +566,129 @@ class Rack3D {
   final double height;
   final double depth;
 
-  const Rack3D({this.width = 3.0, this.height = 4.0, this.depth = 1.5});
+  const Rack3D({
+    this.width = 3.0,
+    this.height = 4.0,
+    this.depth = 1.5,
+  });
 
   Model3D build() {
     final faces = <Face3D>[];
     final parts = <BoxPart>[];
+
     const postThickness = 0.15;
     const shelfThickness = 0.10;
-    final postColor = const Color(0xff37474F);
-    final shelfColor = const Color(0xff90A4AE);
 
-    // Slice the model into blocks to fix 3D rendering overlap!
-    int cX = math.max(1, (width / 0.75).ceil());
-    int cY = 6;
+    const postColor =
+        Color(0xff37474F);
 
-    // 4 VERTICAL POSTS (sliced vertically for fill; outlined as one solid post each)
+    const shelfColor =
+        Color(0xff90A4AE);
+
+    final cX = math.max(
+      1,
+      (width / 0.75).ceil(),
+    );
+
+    const cY = 6;
+
+    // ------------------------------------------------------------------------
+    // POSTS
+    // ------------------------------------------------------------------------
+
     final postPositions = [
-      Offset(-width / 2 + postThickness / 2, -depth / 2 + postThickness / 2),
-      Offset(width / 2 - postThickness / 2, -depth / 2 + postThickness / 2),
-      Offset(-width / 2 + postThickness / 2, depth / 2 - postThickness / 2),
-      Offset(width / 2 - postThickness / 2, depth / 2 - postThickness / 2),
+      Offset(
+        -width / 2 +
+            postThickness / 2,
+        -depth / 2 +
+            postThickness / 2,
+      ),
+      Offset(
+        width / 2 -
+            postThickness / 2,
+        -depth / 2 +
+            postThickness / 2,
+      ),
+      Offset(
+        -width / 2 +
+            postThickness / 2,
+        depth / 2 -
+            postThickness / 2,
+      ),
+      Offset(
+        width / 2 -
+            postThickness / 2,
+        depth / 2 -
+            postThickness / 2,
+      ),
     ];
 
     for (final pos in postPositions) {
-      faces.addAll(createChunkedBox(
-        x: pos.dx,
-        y: 0,
-        z: pos.dy,
-        width: postThickness,
-        height: height,
-        depth: postThickness,
-        color: postColor,
-        chunksY: cY,
-      ));
-      parts.add(BoxPart(x: pos.dx, y: 0, z: pos.dy, width: postThickness, height: height, depth: postThickness));
+      faces.addAll(
+        createChunkedBox(
+          x: pos.dx,
+          y: 0,
+          z: pos.dy,
+          width: postThickness,
+          height: height,
+          depth: postThickness,
+          color: postColor,
+          chunksY: cY,
+        ),
+      );
+
+      parts.add(
+        BoxPart(
+          x: pos.dx,
+          y: 0,
+          z: pos.dy,
+          width: postThickness,
+          height: height,
+          depth: postThickness,
+        ),
+      );
     }
 
-    // 4 HORIZONTAL SHELVES (sliced horizontally for fill; outlined as one solid shelf each)
-    const int numShelves = 4;
+    // ------------------------------------------------------------------------
+    // SHELVES
+    // ------------------------------------------------------------------------
+
+    const numShelves = 4;
+
     for (int i = 0; i < numShelves; i++) {
-      double yPos = -height / 2 + (height / (numShelves - 1)) * i;
-      faces.addAll(createChunkedBox(
-        x: 0,
-        y: yPos,
-        z: 0,
-        width: width,
-        height: shelfThickness,
-        depth: depth,
-        color: shelfColor,
-        chunksX: cX,
-      ));
-      parts.add(BoxPart(x: 0, y: yPos, z: 0, width: width, height: shelfThickness, depth: depth));
+      final yPos =
+          -height / 2 +
+          (height / (numShelves - 1)) * i;
+
+      faces.addAll(
+        createChunkedBox(
+          x: 0,
+          y: yPos,
+          z: 0,
+          width: width,
+          height: shelfThickness,
+          depth: depth,
+          color: shelfColor,
+          chunksX: cX,
+        ),
+      );
+
+      parts.add(
+        BoxPart(
+          x: 0,
+          y: yPos,
+          z: 0,
+          width: width,
+          height: shelfThickness,
+          depth: depth,
+        ),
+      );
     }
 
-    return Model3D(faces, parts);
+    return Model3D(
+      faces,
+      parts,
+    );
   }
 }
 
@@ -418,38 +697,76 @@ class RackPainter extends CustomPainter {
   final double rotationY;
   final double rotationX;
 
-  RackPainter({required this.rack, required this.rotationY, required this.rotationX});
+  RackPainter({
+    required this.rack,
+    required this.rotationY,
+    required this.rotationX,
+  });
 
   Point3D rotate(Point3D p) {
     final cosY = math.cos(rotationY);
     final sinY = math.sin(rotationY);
-    final x1 = p.x * cosY - p.z * sinY;
-    final z1 = p.x * sinY + p.z * cosY;
+
+    final x1 =
+        p.x * cosY - p.z * sinY;
+
+    final z1 =
+        p.x * sinY + p.z * cosY;
 
     final cosX = math.cos(rotationX);
     final sinX = math.sin(rotationX);
-    final y2 = p.y * cosX - z1 * sinX;
-    final z2 = p.y * sinX + z1 * cosX;
 
-    return Point3D(x1, y2, z2);
+    final y2 =
+        p.y * cosX - z1 * sinX;
+
+    final z2 =
+        p.y * sinX + z1 * cosX;
+
+    return Point3D(
+      x1,
+      y2,
+      z2,
+    );
   }
 
-  Offset project(Point3D p, Size size) {
+  Offset project(
+    Point3D p,
+    Size size,
+  ) {
     const scale = 40.0;
-    return Offset(size.width / 2 + p.x * scale, size.height / 2 - p.y * scale);
+
+    return Offset(
+      size.width / 2 +
+          p.x * scale,
+      size.height / 2 -
+          p.y * scale,
+    );
   }
 
   @override
-  void paint(Canvas canvas, Size size) {
-    paintModel3D(canvas, size, rack.build(), rotate, project);
+  void paint(
+    Canvas canvas,
+    Size size,
+  ) {
+    paintModel3D(
+      canvas,
+      size,
+      rack.build(),
+      rotate,
+      project,
+    );
   }
 
   @override
-  bool shouldRepaint(covariant RackPainter oldDelegate) => true;
+  bool shouldRepaint(
+    covariant RackPainter oldDelegate,
+  ) {
+    return true;
+  }
 }
 
 // ============================================================================
-// SHELF 3D MODEL & PAINTER
+// SHELF
 // ============================================================================
 
 class Shelf3D {
@@ -457,51 +774,210 @@ class Shelf3D {
   final double height;
   final double depth;
 
-  const Shelf3D({this.width = 2.6, this.height = 4.2, this.depth = 1.2});
+  const Shelf3D({
+    this.width = 2.6,
+    this.height = 4.2,
+    this.depth = 1.2,
+  });
 
   Model3D build() {
     final faces = <Face3D>[];
     final parts = <BoxPart>[];
+
     const thick = 0.15;
-    final exteriorColor = const Color(0xff5D4037);
-    final interiorColor = const Color(0xff795548);
-    final backColor = const Color(0xff4E342E);
 
-    // Slice the model into blocks to fix 3D rendering overlap!
-    int cX = math.max(1, (width / 0.75).ceil());
-    int cY = 6;
+    const exteriorColor =
+        Color(0xff5D4037);
 
-    // Left Panel
-    faces.addAll(createChunkedBox(x: -width / 2 + thick / 2, y: 0, z: 0, width: thick, height: height, depth: depth, color: exteriorColor, chunksY: cY));
-    parts.add(BoxPart(x: -width / 2 + thick / 2, y: 0, z: 0, width: thick, height: height, depth: depth));
+    const interiorColor =
+        Color(0xff795548);
 
-    // Right Panel
-    faces.addAll(createChunkedBox(x: width / 2 - thick / 2, y: 0, z: 0, width: thick, height: height, depth: depth, color: exteriorColor, chunksY: cY));
-    parts.add(BoxPart(x: width / 2 - thick / 2, y: 0, z: 0, width: thick, height: height, depth: depth));
+    const backColor =
+        Color(0xff4E342E);
 
-    final innerWidth = width - (thick * 2);
+    final cX = math.max(
+      1,
+      (width / 0.75).ceil(),
+    );
 
-    // Bottom Panel
-    faces.addAll(createChunkedBox(x: 0, y: -height / 2 + thick / 2, z: 0, width: innerWidth, height: thick, depth: depth, color: exteriorColor, chunksX: cX));
-    parts.add(BoxPart(x: 0, y: -height / 2 + thick / 2, z: 0, width: innerWidth, height: thick, depth: depth));
+    const cY = 6;
 
-    // Top Panel
-    faces.addAll(createChunkedBox(x: 0, y: height / 2 - thick / 2, z: 0, width: innerWidth, height: thick, depth: depth, color: exteriorColor, chunksX: cX));
-    parts.add(BoxPart(x: 0, y: height / 2 - thick / 2, z: 0, width: innerWidth, height: thick, depth: depth));
+    // Left
+    faces.addAll(
+      createChunkedBox(
+        x: -width / 2 + thick / 2,
+        y: 0,
+        z: 0,
+        width: thick,
+        height: height,
+        depth: depth,
+        color: exteriorColor,
+        chunksY: cY,
+      ),
+    );
+
+    parts.add(
+      BoxPart(
+        x: -width / 2 + thick / 2,
+        y: 0,
+        z: 0,
+        width: thick,
+        height: height,
+        depth: depth,
+      ),
+    );
+
+    // Right
+    faces.addAll(
+      createChunkedBox(
+        x: width / 2 - thick / 2,
+        y: 0,
+        z: 0,
+        width: thick,
+        height: height,
+        depth: depth,
+        color: exteriorColor,
+        chunksY: cY,
+      ),
+    );
+
+    parts.add(
+      BoxPart(
+        x: width / 2 - thick / 2,
+        y: 0,
+        z: 0,
+        width: thick,
+        height: height,
+        depth: depth,
+      ),
+    );
+
+    final innerWidth =
+        width - thick * 2;
+
+    // Bottom
+    faces.addAll(
+      createChunkedBox(
+        x: 0,
+        y: -height / 2 + thick / 2,
+        z: 0,
+        width: innerWidth,
+        height: thick,
+        depth: depth,
+        color: exteriorColor,
+        chunksX: cX,
+      ),
+    );
+
+    parts.add(
+      BoxPart(
+        x: 0,
+        y: -height / 2 + thick / 2,
+        z: 0,
+        width: innerWidth,
+        height: thick,
+        depth: depth,
+      ),
+    );
+
+    // Top
+    faces.addAll(
+      createChunkedBox(
+        x: 0,
+        y: height / 2 - thick / 2,
+        z: 0,
+        width: innerWidth,
+        height: thick,
+        depth: depth,
+        color: exteriorColor,
+        chunksX: cX,
+      ),
+    );
+
+    parts.add(
+      BoxPart(
+        x: 0,
+        y: height / 2 - thick / 2,
+        z: 0,
+        width: innerWidth,
+        height: thick,
+        depth: depth,
+      ),
+    );
 
     const backThick = 0.05;
-    // Back Panel
-    faces.addAll(createChunkedBox(x: 0, y: 0, z: -depth / 2 + backThick / 2, width: innerWidth, height: height - (thick * 2), depth: backThick, color: backColor, chunksX: cX, chunksY: cY));
-    parts.add(BoxPart(x: 0, y: 0, z: -depth / 2 + backThick / 2, width: innerWidth, height: height - (thick * 2), depth: backThick));
 
-    const int numInnerShelves = 3;
-    final spacing = (height - (thick * 2)) / (numInnerShelves + 1);
+    // Back
+    faces.addAll(
+      createChunkedBox(
+        x: 0,
+        y: 0,
+        z: -depth / 2 +
+            backThick / 2,
+        width: innerWidth,
+        height: height - thick * 2,
+        depth: backThick,
+        color: backColor,
+        chunksX: cX,
+        chunksY: cY,
+      ),
+    );
+
+    parts.add(
+      BoxPart(
+        x: 0,
+        y: 0,
+        z: -depth / 2 +
+            backThick / 2,
+        width: innerWidth,
+        height: height - thick * 2,
+        depth: backThick,
+      ),
+    );
+
+    // Inner shelves
+    const numInnerShelves = 3;
+
+    final spacing =
+        (height - thick * 2) /
+        (numInnerShelves + 1);
+
     for (int i = 1; i <= numInnerShelves; i++) {
-      final yPos = -height / 2 + thick + (spacing * i) - (thick / 2);
-      faces.addAll(createChunkedBox(x: 0, y: yPos, z: backThick / 2, width: innerWidth, height: thick, depth: depth - backThick, color: interiorColor, chunksX: cX));
-      parts.add(BoxPart(x: 0, y: yPos, z: backThick / 2, width: innerWidth, height: thick, depth: depth - backThick));
+      final yPos =
+          -height / 2 +
+          thick +
+          spacing * i -
+          thick / 2;
+
+      faces.addAll(
+        createChunkedBox(
+          x: 0,
+          y: yPos,
+          z: backThick / 2,
+          width: innerWidth,
+          height: thick,
+          depth: depth - backThick,
+          color: interiorColor,
+          chunksX: cX,
+        ),
+      );
+
+      parts.add(
+        BoxPart(
+          x: 0,
+          y: yPos,
+          z: backThick / 2,
+          width: innerWidth,
+          height: thick,
+          depth: depth - backThick,
+        ),
+      );
     }
-    return Model3D(faces, parts);
+
+    return Model3D(
+      faces,
+      parts,
+    );
   }
 }
 
@@ -510,38 +986,77 @@ class ShelfPainter extends CustomPainter {
   final double rotationY;
   final double rotationX;
 
-  ShelfPainter({required this.shelf, required this.rotationY, required this.rotationX});
+  ShelfPainter({
+    required this.shelf,
+    required this.rotationY,
+    required this.rotationX,
+  });
 
   Point3D rotate(Point3D p) {
     final cosY = math.cos(rotationY);
     final sinY = math.sin(rotationY);
-    final x1 = p.x * cosY - p.z * sinY;
-    final z1 = p.x * sinY + p.z * cosY;
+
+    final x1 =
+        p.x * cosY - p.z * sinY;
+
+    final z1 =
+        p.x * sinY + p.z * cosY;
 
     final cosX = math.cos(rotationX);
     final sinX = math.sin(rotationX);
-    final y2 = p.y * cosX - z1 * sinX;
-    final z2 = p.y * sinX + z1 * cosX;
 
-    return Point3D(x1, y2, z2);
+    final y2 =
+        p.y * cosX - z1 * sinX;
+
+    final z2 =
+        p.y * sinX + z1 * cosX;
+
+    return Point3D(
+      x1,
+      y2,
+      z2,
+    );
   }
 
-  Offset project(Point3D p, Size size) {
+  Offset project(
+    Point3D p,
+    Size size,
+  ) {
     const scale = 40.0;
-    return Offset(size.width / 2 + p.x * scale, size.height / 2 - p.y * scale);
+
+    return Offset(
+      size.width / 2 +
+          p.x * scale,
+      size.height / 2 -
+          p.y * scale,
+    );
   }
 
   @override
-  void paint(Canvas canvas, Size size) {
-    paintModel3D(canvas, size, shelf.build(), rotate, project, outlineOpacity: 0.6);
+  void paint(
+    Canvas canvas,
+    Size size,
+  ) {
+    paintModel3D(
+      canvas,
+      size,
+      shelf.build(),
+      rotate,
+      project,
+      outlineOpacity: 0.6,
+    );
   }
 
   @override
-  bool shouldRepaint(covariant ShelfPainter oldDelegate) => true;
+  bool shouldRepaint(
+    covariant ShelfPainter oldDelegate,
+  ) {
+    return true;
+  }
 }
 
 // ============================================================================
-// CASHIER 3D MODEL & PAINTER
+// CASHIER
 // ============================================================================
 
 class Cashier3D {
@@ -549,40 +1064,170 @@ class Cashier3D {
   final double height;
   final double depth;
 
-  const Cashier3D({this.width = 4.2, this.height = 2.0, this.depth = 1.6});
+  const Cashier3D({
+    this.width = 4.2,
+    this.height = 2.0,
+    this.depth = 1.6,
+  });
 
   Model3D build() {
     final faces = <Face3D>[];
     final parts = <BoxPart>[];
-    final baseColor = const Color(0xffECEFF1);
-    final topColor = const Color(0xff37474F);
-    final deviceColor = const Color(0xff212121);
-    final screenColor = const Color(0xff64B5F6);
-    final customerScreen = const Color(0xff81C784);
-    final scannerColor = const Color(0xffB0BEC5);
-    final glassColor = const Color(0xffE0F7FA);
 
-    void addPart({required double x, required double y, required double z, required double width, required double height, required double depth, required Color color}) {
-      faces.addAll(createBox(x: x, y: y, z: z, width: width, height: height, depth: depth, color: color));
-      parts.add(BoxPart(x: x, y: y, z: z, width: width, height: height, depth: depth));
+    const baseColor =
+        Color(0xffECEFF1);
+
+    const topColor =
+        Color(0xff37474F);
+
+    const deviceColor =
+        Color(0xff212121);
+
+    const screenColor =
+        Color(0xff64B5F6);
+
+    const customerScreen =
+        Color(0xff81C784);
+
+    const scannerColor =
+        Color(0xffB0BEC5);
+
+    const glassColor =
+        Color(0xffE0F7FA);
+
+    void addPart({
+      required double x,
+      required double y,
+      required double z,
+      required double width,
+      required double height,
+      required double depth,
+      required Color color,
+    }) {
+      faces.addAll(
+        createBox(
+          x: x,
+          y: y,
+          z: z,
+          width: width,
+          height: height,
+          depth: depth,
+          color: color,
+        ),
+      );
+
+      parts.add(
+        BoxPart(
+          x: x,
+          y: y,
+          z: z,
+          width: width,
+          height: height,
+          depth: depth,
+        ),
+      );
     }
 
-    addPart(x: 0, y: -1.375, z: 0, width: width, height: 2.75, depth: depth, color: baseColor);
-    addPart(x: 0, y: 0.1, z: 0, width: width + 0.2, height: 0.2, depth: depth + 0.2, color: topColor);
+    addPart(
+      x: 0,
+      y: -1.375,
+      z: 0,
+      width: width,
+      height: 2.75,
+      depth: depth,
+      color: baseColor,
+    );
 
-    double leftSide = -(width / 4);
-    double rightSide = (width / 4);
+    addPart(
+      x: 0,
+      y: 0.1,
+      z: 0,
+      width: width + 0.2,
+      height: 0.2,
+      depth: depth + 0.2,
+      color: topColor,
+    );
 
-    addPart(x: leftSide, y: 0.22, z: 0, width: 1.4, height: 0.05, depth: 1.2, color: scannerColor);
-    addPart(x: leftSide, y: 0.25, z: 0, width: 1.0, height: 0.02, depth: 0.8, color: glassColor);
+    final leftSide =
+        -(width / 4);
 
-    addPart(x: rightSide, y: 0.4, z: 0, width: 0.3, height: 0.4, depth: 0.3, color: deviceColor);
-    addPart(x: rightSide, y: 0.8, z: 0, width: 1.2, height: 0.8, depth: 0.15, color: deviceColor);
-    addPart(x: rightSide, y: 0.8, z: 0.08, width: 1.0, height: 0.65, depth: 0.05, color: screenColor);
-    addPart(x: rightSide, y: 0.85, z: -0.08, width: 0.8, height: 0.4, depth: 0.05, color: customerScreen);
-    addPart(x: rightSide, y: 0.26, z: 0.5, width: 1.1, height: 0.1, depth: 0.6, color: deviceColor);
+    final rightSide =
+        width / 4;
 
-    return Model3D(faces, parts);
+    addPart(
+      x: leftSide,
+      y: 0.22,
+      z: 0,
+      width: 1.4,
+      height: 0.05,
+      depth: 1.2,
+      color: scannerColor,
+    );
+
+    addPart(
+      x: leftSide,
+      y: 0.25,
+      z: 0,
+      width: 1.0,
+      height: 0.02,
+      depth: 0.8,
+      color: glassColor,
+    );
+
+    addPart(
+      x: rightSide,
+      y: 0.4,
+      z: 0,
+      width: 0.3,
+      height: 0.4,
+      depth: 0.3,
+      color: deviceColor,
+    );
+
+    addPart(
+      x: rightSide,
+      y: 0.8,
+      z: 0,
+      width: 1.2,
+      height: 0.8,
+      depth: 0.15,
+      color: deviceColor,
+    );
+
+    addPart(
+      x: rightSide,
+      y: 0.8,
+      z: 0.08,
+      width: 1.0,
+      height: 0.65,
+      depth: 0.05,
+      color: screenColor,
+    );
+
+    addPart(
+      x: rightSide,
+      y: 0.85,
+      z: -0.08,
+      width: 0.8,
+      height: 0.4,
+      depth: 0.05,
+      color: customerScreen,
+    );
+
+    addPart(
+      x: rightSide,
+      y: 0.26,
+      z: 0.5,
+      width: 1.1,
+      height: 0.1,
+      depth: 0.6,
+      color: deviceColor,
+    );
+
+    return Model3D(
+      faces,
+      parts,
+    );
   }
 }
 
@@ -591,38 +1236,76 @@ class CashierPainter extends CustomPainter {
   final double rotationY;
   final double rotationX;
 
-  CashierPainter({required this.cashier, required this.rotationY, required this.rotationX});
+  CashierPainter({
+    required this.cashier,
+    required this.rotationY,
+    required this.rotationX,
+  });
 
   Point3D rotate(Point3D p) {
     final cosY = math.cos(rotationY);
     final sinY = math.sin(rotationY);
-    final x1 = p.x * cosY - p.z * sinY;
-    final z1 = p.x * sinY + p.z * cosY;
+
+    final x1 =
+        p.x * cosY - p.z * sinY;
+
+    final z1 =
+        p.x * sinY + p.z * cosY;
 
     final cosX = math.cos(rotationX);
     final sinX = math.sin(rotationX);
-    final y2 = p.y * cosX - z1 * sinX;
-    final z2 = p.y * sinX + z1 * cosX;
 
-    return Point3D(x1, y2, z2);
+    final y2 =
+        p.y * cosX - z1 * sinX;
+
+    final z2 =
+        p.y * sinX + z1 * cosX;
+
+    return Point3D(
+      x1,
+      y2,
+      z2,
+    );
   }
 
-  Offset project(Point3D p, Size size) {
+  Offset project(
+    Point3D p,
+    Size size,
+  ) {
     const scale = 40.0;
-    return Offset(size.width / 2 + p.x * scale, size.height / 2 - p.y * scale);
+
+    return Offset(
+      size.width / 2 +
+          p.x * scale,
+      size.height / 2 -
+          p.y * scale,
+    );
   }
 
   @override
-  void paint(Canvas canvas, Size size) {
-    paintModel3D(canvas, size, cashier.build(), rotate, project);
+  void paint(
+    Canvas canvas,
+    Size size,
+  ) {
+    paintModel3D(
+      canvas,
+      size,
+      cashier.build(),
+      rotate,
+      project,
+    );
   }
 
   @override
-  bool shouldRepaint(covariant CashierPainter oldDelegate) => true;
+  bool shouldRepaint(
+    covariant CashierPainter oldDelegate,
+  ) {
+    return true;
+  }
 }
 
 // ============================================================================
-// DOOR 3D MODEL & PAINTER
+// DOOR
 // ============================================================================
 
 class Door3D {
@@ -630,26 +1313,105 @@ class Door3D {
   final double height;
   final double depth;
 
-  const Door3D({this.width = 2.0, this.height = 3.5, this.depth = 0.25});
+  const Door3D({
+    this.width = 2.0,
+    this.height = 3.5,
+    this.depth = 0.25,
+  });
 
   Model3D build() {
     final faces = <Face3D>[];
     final parts = <BoxPart>[];
+
     const frame = 0.22;
 
-    void addPart({required double x, required double y, required double z, required double width, required double height, required double depth, required Color color}) {
-      faces.addAll(createBox(x: x, y: y, z: z, width: width, height: height, depth: depth, color: color));
-      parts.add(BoxPart(x: x, y: y, z: z, width: width, height: height, depth: depth));
+    void addPart({
+      required double x,
+      required double y,
+      required double z,
+      required double width,
+      required double height,
+      required double depth,
+      required Color color,
+    }) {
+      faces.addAll(
+        createBox(
+          x: x,
+          y: y,
+          z: z,
+          width: width,
+          height: height,
+          depth: depth,
+          color: color,
+        ),
+      );
+
+      parts.add(
+        BoxPart(
+          x: x,
+          y: y,
+          z: z,
+          width: width,
+          height: height,
+          depth: depth,
+        ),
+      );
     }
 
-    addPart(x: -width / 2 + frame / 2, y: 0, z: 0, width: frame, height: height, depth: depth, color: const Color(0xff6D4C41));
-    addPart(x: width / 2 - frame / 2, y: 0, z: 0, width: frame, height: height, depth: depth, color: const Color(0xff6D4C41));
-    addPart(x: 0, y: height / 2 - frame / 2, z: 0, width: width, height: frame, depth: depth, color: const Color(0xff6D4C41));
+    addPart(
+      x: -width / 2 + frame / 2,
+      y: 0,
+      z: 0,
+      width: frame,
+      height: height,
+      depth: depth,
+      color: const Color(0xff6D4C41),
+    );
 
-    addPart(x: 0, y: -0.05, z: -0.01, width: width - frame * 2, height: height - frame, depth: depth * 0.7, color: const Color(0xffA1887F));
-    addPart(x: 0, y: 0, z: depth * 0.4, width: width - frame * 2.4, height: height - frame * 1.6, depth: 0.05, color: const Color(0xff8D6E63));
+    addPart(
+      x: width / 2 - frame / 2,
+      y: 0,
+      z: 0,
+      width: frame,
+      height: height,
+      depth: depth,
+      color: const Color(0xff6D4C41),
+    );
 
-    return Model3D(faces, parts);
+    addPart(
+      x: 0,
+      y: height / 2 - frame / 2,
+      z: 0,
+      width: width,
+      height: frame,
+      depth: depth,
+      color: const Color(0xff6D4C41),
+    );
+
+    addPart(
+      x: 0,
+      y: -0.05,
+      z: -0.01,
+      width: width - frame * 2,
+      height: height - frame,
+      depth: depth * 0.7,
+      color: const Color(0xffA1887F),
+    );
+
+    addPart(
+      x: 0,
+      y: 0,
+      z: depth * 0.4,
+      width: width - frame * 2.4,
+      height: height - frame * 1.6,
+      depth: 0.05,
+      color: const Color(0xff8D6E63),
+    );
+
+    return Model3D(
+      faces,
+      parts,
+    );
   }
 }
 
@@ -658,48 +1420,122 @@ class DoorPainter extends CustomPainter {
   final double rotationY;
   final double rotationX;
 
-  DoorPainter({required this.door, required this.rotationY, required this.rotationX});
+  DoorPainter({
+    required this.door,
+    required this.rotationY,
+    required this.rotationX,
+  });
 
   Point3D rotate(Point3D p) {
     final cosY = math.cos(rotationY);
     final sinY = math.sin(rotationY);
-    final x1 = p.x * cosY - p.z * sinY;
-    final z1 = p.x * sinY + p.z * cosY;
+
+    final x1 =
+        p.x * cosY - p.z * sinY;
+
+    final z1 =
+        p.x * sinY + p.z * cosY;
 
     final cosX = math.cos(rotationX);
     final sinX = math.sin(rotationX);
-    final y2 = p.y * cosX - z1 * sinX;
-    final z2 = p.y * sinX + z1 * cosX;
 
-    return Point3D(x1, y2, z2);
+    final y2 =
+        p.y * cosX - z1 * sinX;
+
+    final z2 =
+        p.y * sinX + z1 * cosX;
+
+    return Point3D(
+      x1,
+      y2,
+      z2,
+    );
   }
 
-  Offset project(Point3D p, Size size) {
+  Offset project(
+    Point3D p,
+    Size size,
+  ) {
     const scale = 40.0;
-    return Offset(size.width / 2 + p.x * scale, size.height / 2 - p.y * scale);
+
+    return Offset(
+      size.width / 2 +
+          p.x * scale,
+      size.height / 2 -
+          p.y * scale,
+    );
   }
 
   @override
-  void paint(Canvas canvas, Size size) {
-    paintModel3D(canvas, size, door.build(), rotate, project, outlineWidth: 1.5, outlineOpacity: 0.7);
+  void paint(
+    Canvas canvas,
+    Size size,
+  ) {
+    paintModel3D(
+      canvas,
+      size,
+      door.build(),
+      rotate,
+      project,
+      outlineWidth: 1.5,
+      outlineOpacity: 0.7,
+    );
 
+    // ------------------------------------------------------------------------
     // HANDLE
-    final facingFront = rotate(const Point3D(0, 0, 1)).z > 0;
-    final handleZ = facingFront ? (door.depth * 0.6) : (-door.depth * 0.6);
+    // ------------------------------------------------------------------------
 
-    final handle = rotate(Point3D(door.width * 0.35, -0.5, handleZ));
-    final handlePosition = project(handle, size);
+    final facingFront =
+        rotate(
+          const Point3D(0, 0, 1),
+        ).z >
+        0;
 
-    canvas.drawCircle(handlePosition, 4, Paint()..color = const Color(0xffD6B36A)..style = PaintingStyle.fill);
-    canvas.drawCircle(handlePosition, 4, Paint()..style = PaintingStyle.stroke..strokeWidth = 2..color = Colors.black);
+    final handleZ =
+        facingFront
+            ? door.depth * 0.6
+            : -door.depth * 0.6;
+
+    final handle =
+        rotate(
+          Point3D(
+            door.width * 0.35,
+            -0.5,
+            handleZ,
+          ),
+        );
+
+    final handlePosition =
+        project(handle, size);
+
+    canvas.drawCircle(
+      handlePosition,
+      4,
+      Paint()
+        ..color = const Color(0xffD6B36A)
+        ..style = PaintingStyle.fill,
+    );
+
+    canvas.drawCircle(
+      handlePosition,
+      4,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2
+        ..color = Colors.black,
+    );
   }
 
   @override
-  bool shouldRepaint(covariant DoorPainter oldDelegate) => true;
+  bool shouldRepaint(
+    covariant DoorPainter oldDelegate,
+  ) {
+    return true;
+  }
 }
 
 // ============================================================================
-// WALL 3D MODEL & PAINTER
+// WALL
 // ============================================================================
 
 class Wall3D {
@@ -707,7 +1543,11 @@ class Wall3D {
   final double height;
   final double depth;
 
-  const Wall3D({this.width = 4.0, this.height = 6.0, this.depth = 0.5});
+  const Wall3D({
+    this.width = 4.0,
+    this.height = 6.0,
+    this.depth = 0.5,
+  });
 
   Model3D build() {
     final faces = createBox(
@@ -719,8 +1559,22 @@ class Wall3D {
       depth: depth,
       color: const Color(0xff9E9E9E),
     );
-    final parts = [BoxPart(x: 0, y: 0, z: 0, width: width, height: height, depth: depth)];
-    return Model3D(faces, parts);
+
+    final parts = [
+      BoxPart(
+        x: 0,
+        y: 0,
+        z: 0,
+        width: width,
+        height: height,
+        depth: depth,
+      ),
+    ];
+
+    return Model3D(
+      faces,
+      parts,
+    );
   }
 }
 
@@ -729,32 +1583,71 @@ class WallPainter extends CustomPainter {
   final double rotationY;
   final double rotationX;
 
-  WallPainter({required this.wall, required this.rotationY, required this.rotationX});
+  WallPainter({
+    required this.wall,
+    required this.rotationY,
+    required this.rotationX,
+  });
 
   Point3D rotate(Point3D p) {
     final cosY = math.cos(rotationY);
     final sinY = math.sin(rotationY);
-    final x1 = p.x * cosY - p.z * sinY;
-    final z1 = p.x * sinY + p.z * cosY;
+
+    final x1 =
+        p.x * cosY - p.z * sinY;
+
+    final z1 =
+        p.x * sinY + p.z * cosY;
 
     final cosX = math.cos(rotationX);
     final sinX = math.sin(rotationX);
-    final y2 = p.y * cosX - z1 * sinX;
-    final z2 = p.y * sinX + z1 * cosX;
 
-    return Point3D(x1, y2, z2);
+    final y2 =
+        p.y * cosX - z1 * sinX;
+
+    final z2 =
+        p.y * sinX + z1 * cosX;
+
+    return Point3D(
+      x1,
+      y2,
+      z2,
+    );
   }
 
-  Offset project(Point3D p, Size size) {
+  Offset project(
+    Point3D p,
+    Size size,
+  ) {
     const scale = 40.0;
-    return Offset(size.width / 2 + p.x * scale, size.height / 2 - p.y * scale);
+
+    return Offset(
+      size.width / 2 +
+          p.x * scale,
+      size.height / 2 -
+          p.y * scale,
+    );
   }
 
   @override
-  void paint(Canvas canvas, Size size) {
-    paintModel3D(canvas, size, wall.build(), rotate, project);
+  void paint(
+    Canvas canvas,
+    Size size,
+  ) {
+    paintModel3D(
+      canvas,
+      size,
+      wall.build(),
+      rotate,
+      project,
+      outlineOpacity: 0.55,
+    );
   }
 
   @override
-  bool shouldRepaint(covariant WallPainter oldDelegate) => true;
+  bool shouldRepaint(
+    covariant WallPainter oldDelegate,
+  ) {
+    return true;
+  }
 }

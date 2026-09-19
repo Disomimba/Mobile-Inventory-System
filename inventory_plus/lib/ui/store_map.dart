@@ -39,6 +39,7 @@ class _StoreMapState extends State<StoreMap>
   late Animation<double> _bounceAnimation;
   String? _activeElementId;
   bool _isAdjustingWidth = false;
+
   bool _isNudging = false;
   final TransformationController _transformationController =
       TransformationController();
@@ -51,6 +52,7 @@ class _StoreMapState extends State<StoreMap>
   Size? _dragPreviewSize;
   bool _dragPreviewValid = true;
   double _dragPreviewRotation = 0.0;
+  ElementType? _dragPreviewType;
   Offset? _rawDragPosition;
 
   @override
@@ -269,16 +271,22 @@ class _StoreMapState extends State<StoreMap>
   // ==========================================
   // COC STYLE BOTTOM ACTION BAR
   // ==========================================
-  void _changeElementWidthDirectional(MapElement el, double amount,
-      {required bool isLeft}) {
+  void _changeElementWidthDirectional(
+    MapElement el,
+    double amount, {
+    required bool isLeft,
+  }) {
     const double minSizeWall = 15.0;
     const double minSizeObject = 40.0;
 
-    final double minWidth =
-        el.type == ElementType.wall ? minSizeWall : minSizeObject;
+    final double minWidth = el.type == ElementType.wall
+        ? minSizeWall
+        : minSizeObject;
 
-    final double newWidth =
-        (el.size.width + amount).clamp(minWidth, double.infinity);
+    final double newWidth = (el.size.width + amount).clamp(
+      minWidth,
+      double.infinity,
+    );
 
     final double actualChange = newWidth - el.size.width;
 
@@ -297,8 +305,9 @@ class _StoreMapState extends State<StoreMap>
     if (_hasCollision(el, newPosition, newSize, el.rotation)) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content:
-              Text("Cannot change width. It would overlap another element."),
+          content: Text(
+            "Cannot change width. It would overlap another element.",
+          ),
           backgroundColor: Colors.redAccent,
           duration: Duration(seconds: 1),
         ),
@@ -365,13 +374,18 @@ class _StoreMapState extends State<StoreMap>
             setState(() {
               final double newRot = activeEl.rotation + (math.pi / 2);
               if (!_hasCollision(
-                  activeEl, activeEl.position, activeEl.size, newRot)) {
+                activeEl,
+                activeEl.position,
+                activeEl.size,
+                newRot,
+              )) {
                 activeEl.rotation = newRot;
               } else {
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(
-                    content:
-                        Text("Cannot rotate. Overlaps with another element."),
+                    content: Text(
+                      "Cannot rotate. Overlaps with another element.",
+                    ),
                     backgroundColor: Colors.redAccent,
                     duration: Duration(seconds: 1),
                   ),
@@ -484,7 +498,7 @@ class _StoreMapState extends State<StoreMap>
 
   Widget _buildNudgeMenu(MapElement activeEl) {
     // 40.0 keeps the object perfectly synced with your grid snap step size.
-    const double step = 40.0; 
+    const double step = 40.0;
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -572,43 +586,75 @@ class _StoreMapState extends State<StoreMap>
         mapHeight = el.position.dy + el.size.height + 100;
       }
     }
+List<MapElement> _buildRenderOrder() {
+  final elements = List<MapElement>.from(widget.controller.storeLayout);
+  if (elements.length <= 1) return elements;
 
-    var sortedLayout = List<MapElement>.from(widget.controller.storeLayout);
+  // 1. Pre-calculate exact bounds for all elements to ensure performance
+  final bounds = <String, List<double>>{};
+  for (var el in elements) {
+    final c = _getCorners(el.position, el.size, el.rotation);
+    bounds[el.id] = [
+      c.map((p) => p.dx).reduce(math.min), // 0: minX
+      c.map((p) => p.dx).reduce(math.max), // 1: maxX
+      c.map((p) => p.dy).reduce(math.min), // 2: minY
+      c.map((p) => p.dy).reduce(math.max), // 3: maxY
+    ];
+  }
 
-    sortedLayout.sort((a, b) {
-      // --------------------------------------------------
-      // 1. ACTIVE ELEMENT ALWAYS STAYS ON TOP
-      // --------------------------------------------------
-      if (a.id == _activeElementId) return 1;
-      if (b.id == _activeElementId) return -1;
+  // 2. Helper function: Should element 'A' draw BEFORE element 'B'? (Is A behind B?)
+  bool isBehind(MapElement a, MapElement b) {
+    final bA = bounds[a.id]!;
+    final bB = bounds[b.id]!;
+    const double e = 0.5; // Tolerance for floating point snapping
 
-      // --------------------------------------------------
-      // 2. CALCULATE THE CENTER OF EACH ELEMENT
-      // --------------------------------------------------
-      final double aCenterX = a.position.dx + a.size.width / 2;
-      final double aCenterY = a.position.dy + a.size.height / 2;
+    bool overlapX = !(bA[1] <= bB[0] + e || bA[0] >= bB[1] - e);
+    bool overlapY = !(bA[3] <= bB[2] + e || bA[2] >= bB[3] - e);
 
-      final double bCenterX = b.position.dx + b.size.width / 2;
-      final double bCenterY = b.position.dy + b.size.height / 2;
+    // -- SCENARIO A: Objects are intersecting/touching on the grid --
+    if (overlapX && overlapY) {
+      // Doors always render after the wall they share space with
+      if (a.type == ElementType.wall && b.type == ElementType.door) return true;
+      if (a.type == ElementType.door && b.type == ElementType.wall) return false;
 
-      // --------------------------------------------------
-      // 3. DEPTH DIRECTION
-      //
-      // Your map is viewed diagonally, so X + Y represents
-      // movement toward the front of the store.
-      // Larger value = closer to the viewer.
-      // --------------------------------------------------
-      final double depthA = aCenterX + aCenterY;
-      final double depthB = bCenterX + bCenterY;
+      // Props embedded in walls: isolate the wall's thickness to find true depth
+      if (a.type == ElementType.wall && b.type != ElementType.wall) {
+        bool aIsHoriz = (bA[1] - bA[0]) > (bA[3] - bA[2]);
+        return aIsHoriz ? bA[3] < bB[3] : bA[1] < bB[1];
+      }
+      if (b.type == ElementType.wall && a.type != ElementType.wall) {
+        bool bIsHoriz = (bB[1] - bB[0]) > (bB[3] - bB[2]);
+        return bIsHoriz ? bA[3] < bB[3] : bA[1] < bB[1];
+      }
+    }
 
-      // --------------------------------------------------
-      // 4. NORMAL DEPTH ORDER
-      //
-      // Farther objects are painted first.
-      // Closer objects are painted later.
-      // --------------------------------------------------
-      return depthA.compareTo(depthB);
-    });
+    // -- SCENARIO B: Objects are strictly separated on the grid --
+    if (bA[1] <= bB[0] + e) return true;  // A is strictly to the left of B
+    if (bA[3] <= bB[2] + e) return true;  // A is strictly above B
+    if (bB[1] <= bA[0] + e) return false; // B is strictly to the left of A
+    if (bB[3] <= bA[2] + e) return false; // B is strictly above A
+
+    // -- SCENARIO C: Fallback for identically placed overlapping objects --
+    return (bA[1] + bA[3]) < (bB[1] + bB[3]);
+  }
+
+  // 3. Custom Stable Insertion Sort
+  // This loop safely forces the elements into their calculated layers without Dart's strict sorting crashes.
+  for (int i = 1; i < elements.length; i++) {
+    MapElement key = elements[i];
+    int j = i - 1;
+
+    // Shift elements up if they are visually in front of the key
+    while (j >= 0 && isBehind(key, elements[j])) {
+      elements[j + 1] = elements[j];
+      j = j - 1;
+    }
+    elements[j + 1] = key;
+  }
+
+  return elements;
+}
+    final sortedLayout = _buildRenderOrder();
 
     Widget map = LayoutBuilder(
       builder: (context, constraints) {
@@ -641,8 +687,10 @@ class _StoreMapState extends State<StoreMap>
             builder: (BuildContext dropContext) {
               return DragTarget<ElementType>(
                 onMove: (details) {
-                  final RenderBox box =
-                      dropContext.findRenderObject() as RenderBox;
+                  final RenderBox? box =
+                      _mapKey.currentContext?.findRenderObject()
+                          as RenderBox?;
+                  if (box == null) return;
                   final Offset localOffset = box.globalToLocal(details.offset);
 
                   final Size previewSize = _getDefaultSize(details.data);
@@ -670,17 +718,21 @@ class _StoreMapState extends State<StoreMap>
                       0.0,
                     );
                     _dragPreviewRotation = 0.0;
+                    _dragPreviewType = details.data;
                   });
                 },
                 onLeave: (_) {
                   setState(() {
                     _dragPreviewPos = null;
                     _dragPreviewSize = null;
+                    _dragPreviewType = null;
                   });
                 },
                 onAcceptWithDetails: (details) {
-                  final RenderBox box =
-                      dropContext.findRenderObject() as RenderBox;
+                  final RenderBox? box =
+                      _mapKey.currentContext?.findRenderObject()
+                          as RenderBox?;
+                  if (box == null) return;
                   final Offset localOffset = box.globalToLocal(details.offset);
 
                   final Size finalSize = _getDefaultSize(details.data);
@@ -717,6 +769,7 @@ class _StoreMapState extends State<StoreMap>
                   setState(() {
                     _dragPreviewPos = null;
                     _dragPreviewSize = null;
+                    _dragPreviewType = null;
                   });
                 },
                 builder: (context, candidateData, rejectedData) {
@@ -755,29 +808,49 @@ class _StoreMapState extends State<StoreMap>
                               size: Size(mapWidth, mapHeight),
                             ),
                             if (_dragPreviewPos != null &&
-                                _dragPreviewSize != null)
+                                _dragPreviewSize != null &&
+                                _dragPreviewType != null)
                               Positioned(
                                 left: _dragPreviewPos!.dx,
                                 top: _dragPreviewPos!.dy,
                                 width: _dragPreviewSize!.width,
                                 height: _dragPreviewSize!.height,
                                 child: IgnorePointer(
-                                  // NEW: Rotate the preview box!
                                   child: Transform.rotate(
                                     angle: _dragPreviewRotation,
-                                    child: Container(
-                                      decoration: BoxDecoration(
-                                        color: _dragPreviewValid
-                                            ? Colors.greenAccent
-                                                .withOpacity(0.4)
-                                            : Colors.redAccent.withOpacity(0.5),
-                                        border: Border.all(
-                                          color: _dragPreviewValid
-                                              ? Colors.green
-                                              : Colors.red,
-                                          width: 2,
+                                    child: Stack(
+                                      clipBehavior: Clip.none,
+                                      children: [
+                                        // Low-opacity render of the actual object.
+                                        Opacity(
+                                          opacity: 0.55,
+                                          child: _buildElementVisual(
+                                            _dragPreviewType!,
+                                            _dragPreviewSize!,
+                                            _dragPreviewRotation,
+                                          ),
                                         ),
-                                      ),
+                                        // Subtle valid/invalid tint over the
+                                        // footprint so placement feedback
+                                        // still reads at a glance.
+                                        Positioned.fill(
+                                          child: Container(
+                                            decoration: BoxDecoration(
+                                              color: _dragPreviewValid
+                                                  ? Colors.greenAccent
+                                                        .withOpacity(0.12)
+                                                  : Colors.redAccent
+                                                        .withOpacity(0.25),
+                                              border: Border.all(
+                                                color: _dragPreviewValid
+                                                    ? Colors.green
+                                                    : Colors.red,
+                                                width: 2,
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ],
                                     ),
                                   ),
                                 ),
@@ -848,6 +921,90 @@ class _StoreMapState extends State<StoreMap>
     }
   }
 
+  /// Renders just the 3D model for a given type/size/rotation, with no
+  /// interaction wrapper — used for the drag/move ghost preview.
+  Widget _buildElementVisual(ElementType type, Size size, double rotation) {
+    final double modelWidth = size.width / 40.0;
+    final double modelDepth = size.height / 40.0;
+    const double mapRotX = 0.95;
+    final double mapRotZ = math.pi / 4;
+    final double true3DRotationY = rotation + mapRotZ;
+
+    CustomPainter? modelPainter;
+    double baseY = 0.0;
+    double nudgeX = 0.0;
+    double nudgeY = 0.0;
+
+    switch (type) {
+      case ElementType.rack:
+        modelPainter = RackPainter(
+          rack: Rack3D(width: modelWidth, depth: modelDepth, height: 8.0),
+          rotationX: mapRotX,
+          rotationY: true3DRotationY,
+        );
+        baseY = -5.0;
+        nudgeX = -26.0;
+        nudgeY = -3.0;
+        break;
+      case ElementType.shelf:
+        modelPainter = ShelfPainter(
+          shelf: Shelf3D(width: modelWidth, depth: modelDepth, height: 7.0),
+          rotationX: mapRotX,
+          rotationY: true3DRotationY,
+        );
+        baseY = -3.5;
+        nudgeX = -10.0;
+        nudgeY = -9.0;
+        break;
+      case ElementType.cashier:
+        modelPainter = CashierPainter(
+          cashier: Cashier3D(width: modelWidth, depth: modelDepth, height: 3.5),
+          rotationX: mapRotX,
+          rotationY: true3DRotationY,
+        );
+        baseY = -2.75;
+        break;
+      case ElementType.door:
+        modelPainter = DoorPainter(
+          door: Door3D(width: modelWidth, depth: modelDepth, height: 6.0),
+          rotationX: mapRotX,
+          rotationY: true3DRotationY,
+        );
+        baseY = -3.0;
+        break;
+      case ElementType.wall:
+        modelPainter = WallPainter(
+          wall: Wall3D(width: modelWidth, depth: modelDepth, height: 6.0),
+          rotationX: mapRotX,
+          rotationY: true3DRotationY,
+        );
+        baseY = -3.0;
+        break;
+      default:
+        modelPainter = null;
+    }
+
+    if (modelPainter == null) {
+      return SizedBox(width: size.width, height: size.height);
+    }
+
+    return SizedBox(
+      width: size.width,
+      height: size.height,
+      child: Transform(
+        alignment: Alignment.center,
+        transform: Matrix4.identity()
+          ..rotateZ(-rotation)
+          ..rotateZ(-math.pi / 4)
+          ..rotateX(0.17),
+        child: Transform.translate(
+          offset: Offset((-baseY * 12 - 33) + nudgeX, (baseY * 12 - 35) + nudgeY),
+          child: CustomPaint(painter: modelPainter, size: size),
+        ),
+      ),
+    );
+  }
+
   Widget _buildPhysicalElement(MapElement el) {
     final bool isHighlighted = el.id == widget.highlightId;
     final bool isActive =
@@ -868,6 +1025,10 @@ class _StoreMapState extends State<StoreMap>
 
     final double true3DRotationY = el.rotation + mapRotZ;
 
+final bool isTallThin = el.type == ElementType.wall || el.type == ElementType.door;
+    final double extraHeight = isTallThin ? 180.0 : 40.0;
+    final double topOffset = isTallThin ? -160.0 : -20.0;
+    
     CustomPainter? modelPainter;
     double baseY = 0.0;
     double modelHeight = 0.0;
@@ -951,6 +1112,13 @@ class _StoreMapState extends State<StoreMap>
 
     final bool useFootprintOutline = false;
 
+    // Walls/doors are visually thin (15px), so give them extra invisible
+    // hit-test padding to make them easier to hover/tap precisely.
+    final double hitPadding =
+        (el.type == ElementType.wall || el.type == ElementType.door)
+        ? 12.0
+        : 0.0;
+
     Widget shelf = Container(
       width: el.size.width,
       height: el.size.height,
@@ -961,8 +1129,8 @@ class _StoreMapState extends State<StoreMap>
         border: !useFootprintOutline && isActive
             ? Border.all(color: Colors.yellowAccent, width: 3)
             : (isHighlighted
-                ? Border.all(color: Colors.orange, width: 2)
-                : null),
+                  ? Border.all(color: Colors.orange, width: 2)
+                  : null),
       ),
       child: Stack(
         clipBehavior: Clip.none,
@@ -1036,14 +1204,17 @@ class _StoreMapState extends State<StoreMap>
           clipBehavior: Clip.none,
           children: [
             Positioned(
-              left: 20,
-              top: 20,
-              child: GestureDetector(
+              left: 20 - hitPadding,
+              top: 20 - hitPadding,
+              child: MouseRegion(
+                cursor: SystemMouseCursors.click,
+                child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
                 onTap: () async {
                   if (widget.mode == MapMode.manage) {
                     setState(() {
                       if (_activeElementId != el.id) {
-                        _isAdjustingWidth = false; 
+                        _isAdjustingWidth = false;
                         _isNudging = false; // Add reset for nudge menu here
                       }
                       _activeElementId = el.id;
@@ -1149,6 +1320,7 @@ class _StoreMapState extends State<StoreMap>
                           _dragPreviewSize = el.size;
                           _dragPreviewValid = isValid;
                           _dragPreviewRotation = el.rotation;
+                          _dragPreviewType = el.type;
 
                           if (isValid) {
                             el.position = snappedPos;
@@ -1162,10 +1334,18 @@ class _StoreMapState extends State<StoreMap>
                           _rawDragPosition = null;
                           _dragPreviewPos = null;
                           _dragPreviewSize = null;
+                          _dragPreviewType = null;
                         });
                       }
                     : null,
-                child: shelf,
+                child: Container(
+                  // Transparent padding = bigger tap/hover target without
+                  // changing how thin the wall/door actually looks.
+                  padding: EdgeInsets.all(hitPadding),
+                  color: Colors.transparent,
+                  child: shelf,
+                ),
+                ),
               ),
             ),
             if (isHighlighted)
