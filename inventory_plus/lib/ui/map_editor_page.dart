@@ -269,14 +269,9 @@ class _MapEditorPageState extends State<MapEditorPage> {
     return LongPressDraggable<ElementType>(
       data: type,
       delay: const Duration(milliseconds: 150), 
-      feedback: Material(
-        color: Colors.transparent,
-        child: Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(8)),
-          child: Icon(getIcon(type), color: Colors.white),
-        ),
-      ),
+      // Empty feedback: the 3D ghost preview drawn on the map itself is
+      // the only thing that should follow the cursor while dragging.
+      feedback: const SizedBox.shrink(),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 8),
         decoration: BoxDecoration(

@@ -1348,32 +1348,41 @@ final bool isTallThin = el.type == ElementType.wall || el.type == ElementType.do
                 ),
               ),
             ),
-            if (isHighlighted)
-              Positioned.fill(
-                child: Align(
-                  alignment: Alignment.center,
-                  child: AnimatedBuilder(
-                    animation: _bounceAnimation,
-                    builder: (context, child) {
-                      return Transform.rotate(
-                        angle: -el.rotation,
-                        child: Transform.translate(
-                          offset: Offset(0, _bounceAnimation.value - 20.0),
-                          child: const Icon(
-                            LucideIcons.mapPin,
-                            color: Colors.orange,
-                            size: 28,
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                ),
-              ),
           ],
         ),
       ),
     );
+  }
+
+  /// Inverse of the ambient isometric Transform applied to the whole map
+  /// (rotateX(-0.95) then rotateZ(0.785)). Wrapping a widget in this
+  /// transform makes it render flat / facing the viewer ("standing") instead
+  /// of lying skewed on the tilted floor plane, while its Positioned anchor
+  /// point still tracks the object's real map position.
+  Matrix4 _billboardTransform() {
+    final Matrix4 ambient = Matrix4.identity()
+      ..rotateX(-0.95)
+      ..rotateZ(0.785);
+    return Matrix4.inverted(ambient);
+  }
+
+  /// How far above the object's anchor point (in local map units) the
+  /// bounce-marker pin should float, so it clears the top of the object's
+  /// 3D model instead of hovering mid-way through it. Scaled roughly to
+  /// each type's modelHeight used in _buildElementVisual/_buildPhysicalElement.
+  double _pinHeightOffset(ElementType type) {
+    switch (type) {
+      case ElementType.rack:
+        return 92.0;
+      case ElementType.shelf:
+        return 80.0;
+      case ElementType.door:
+        return 70.0;
+      case ElementType.wall:
+        return 70.0;
+      case ElementType.cashier:
+        return 55.0;
+    }
   }
 
   Widget _buildFloatingPopup(double mapWidth) {
@@ -1389,10 +1398,45 @@ final bool isTallThin = el.type == ElementType.wall || el.type == ElementType.do
       px = el.position.dx - 215;
     }
 
-    return Positioned(
-      left: px,
-      top: py,
-      child: Material(
+    final Matrix4 billboard = _billboardTransform();
+
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        // Arrow/pin marking exactly which object this popup belongs to.
+        // Billboarded so it stands upright instead of lying on the floor.
+        Positioned(
+          left: el.position.dx + el.size.width / 2 - 100,
+          top: el.position.dy - _pinHeightOffset(el.type),
+          child: Transform(
+            transform: billboard,
+            alignment: Alignment.bottomCenter,
+            child: AnimatedBuilder(
+              animation: _bounceAnimation,
+              builder: (context, child) {
+                return Transform.translate(
+                  offset: Offset(0, _bounceAnimation.value),
+                  child: child,
+                );
+              },
+              child: const Icon(
+                LucideIcons.mapPin,
+                color: Colors.orange,
+                size: 26,
+                shadows: [Shadow(color: Colors.black54, blurRadius: 4)],
+              ),
+            ),
+          ),
+        ),
+        Positioned(
+          left: px,
+          top: py,
+          child: Transform(
+            transform: billboard,
+            // Pivot at the anchor corner so the card's position stays
+            // pinned near the object while its face unfolds flat/upright.
+            alignment: Alignment.topLeft,
+            child: Material(
         color: Colors.transparent,
         child: Container(
           width: 200,
@@ -1509,6 +1553,9 @@ final bool isTallThin = el.type == ElementType.wall || el.type == ElementType.do
           ),
         ),
       ),
+          ),
+        ),
+      ],
     );
   }
 
