@@ -55,6 +55,11 @@ class _StoreMapState extends State<StoreMap>
   ElementType? _dragPreviewType;
   Offset? _rawDragPosition;
 
+  // ==========================================
+  // NEW: State for the left toolbar
+  // ==========================================
+  bool _isToolbarExpanded = false;
+
   @override
   void initState() {
     super.initState();
@@ -73,6 +78,29 @@ class _StoreMapState extends State<StoreMap>
     _animController.dispose();
     _transformationController.dispose();
     super.dispose();
+  }
+
+  // ==========================================
+  // NEW: Zoom logic for the right controls
+  // ==========================================
+  void _zoom(double zoomFactor) {
+    final double scale = _transformationController.value.getMaxScaleOnAxis();
+    final double newScale = (scale * zoomFactor).clamp(0.1, 2.5);
+    final double actualFactor = newScale / scale;
+
+    // Get screen center to zoom in/out smoothly towards the center
+    final Size screenSize = MediaQuery.of(context).size;
+    final Offset center = Offset(screenSize.width / 2, screenSize.height / 2);
+
+    final Matrix4 matrix = _transformationController.value.clone();
+    final Offset centerInMap =
+        MatrixUtils.transformPoint(Matrix4.inverted(matrix), center);
+
+    matrix.translate(centerInMap.dx, centerInMap.dy);
+    matrix.scale(actualFactor, actualFactor);
+    matrix.translate(-centerInMap.dx, -centerInMap.dy);
+
+    _transformationController.value = matrix;
   }
 
   Size _getDefaultSize(ElementType type) {
@@ -186,6 +214,231 @@ class _StoreMapState extends State<StoreMap>
     return false;
   }
 
+  // ==========================================
+  // NEW: Build the left expandable toolbar
+  // ==========================================
+  Widget _buildLeftToolbar() {
+    return Positioned(
+      bottom: 20,
+      left: 20,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // AnimatedSize handles the smooth expansion of the container's height
+          AnimatedSize(
+            duration: const Duration(milliseconds: 350),
+            curve: Curves.easeInOut,
+            alignment: Alignment.bottomLeft,
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 350),
+              switchInCurve: Curves.easeOutBack, // Slight bounce at the top
+              switchOutCurve: Curves.easeIn,
+              transitionBuilder: (Widget child, Animation<double> animation) {
+                // Combines a fade-in with a slide-up motion
+                return FadeTransition(
+                  opacity: animation,
+                  child: SlideTransition(
+                    position: Tween<Offset>(
+                      begin: const Offset(0.0, 0.3), // Starts 30% lower and slides up to 0
+                      end: Offset.zero,
+                    ).animate(animation),
+                    child: child,
+                  ),
+                );
+              },
+              child: _isToolbarExpanded
+                  ? Column(
+                      // Keys are required for AnimatedSwitcher to know when to animate
+                      key: const ValueKey('toolbar_expanded'),
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _buildDraggableToolbarItem(
+                            ElementType.door, LucideIcons.doorOpen, Colors.green),
+                        const SizedBox(height: 8),
+                        _buildDraggableToolbarItem(
+                            ElementType.wall, Icons.line_weight, Colors.blue),
+                        const SizedBox(height: 8),
+                        _buildDraggableToolbarItem(
+                            ElementType.shelf, Icons.shelves, Colors.orange),
+                        const SizedBox(height: 8),
+                        _buildDraggableToolbarItem(
+                            ElementType.rack, Icons.view_headline, Colors.purple),
+                        const SizedBox(height: 8),
+                        _buildDraggableToolbarItem(
+                            ElementType.cashier, Icons.point_of_sale, Colors.blueGrey),
+                        const SizedBox(height: 16),
+                      ],
+                    )
+                  : const SizedBox(key: ValueKey('toolbar_collapsed'), width: 56, height: 0),
+            ),
+          ),
+          GestureDetector(
+            onTap: () {
+              setState(() {
+                _isToolbarExpanded = !_isToolbarExpanded;
+              });
+            },
+            child: Container(
+              width: 56,
+              height: 56,
+              decoration: BoxDecoration(
+                color: Colors.orange,
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: const [
+                  BoxShadow(
+                      color: Colors.black45, blurRadius: 8, offset: Offset(0, 4)),
+                ],
+              ),
+              child: AnimatedRotation(
+                turns: _isToolbarExpanded ? 0.125 : 0.0,
+                duration: const Duration(milliseconds: 250),
+                curve: Curves.easeInOut,
+                child: const Icon(
+                  Icons.add,
+                  color: Colors.black,
+                  size: 32,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ==========================================
+  // NEW: Helper for the left toolbar items
+  // ==========================================
+  Widget _buildDraggableToolbarItem(
+      ElementType type, IconData icon, Color color) {
+    
+    final String labelName = type.name[0].toUpperCase() + type.name.substring(1);
+    bool isHovered = false; // Local state for hover tracking
+
+    return StatefulBuilder(
+      builder: (context, setState) {
+        return MouseRegion(
+          onEnter: (_) => setState(() => isHovered = true),
+          onExit: (_) => setState(() => isHovered = false),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // The Draggable Icon
+              Draggable<ElementType>(
+                data: type,
+                feedback: Material(
+                  color: Colors.transparent,
+                  child: Container(
+                    width: 56,
+                    height: 56,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF1E293B),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: color, width: 2),
+                    ),
+                    child: Icon(icon, color: color, size: 28),
+                  ),
+                ),
+                child: Container(
+                  width: 56,
+                  height: 56,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF1E293B),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      // Change border to orange when hovered
+                      color: isHovered ? Colors.orange : Colors.blueGrey.withOpacity(0.5), 
+                      width: isHovered ? 2.0 : 1.5,
+                    ),
+                  ),
+                  child: Stack(
+                    children: [
+                      Center(child: Icon(icon, color: color, size: 24)),
+                      Positioned(
+                        top: 6,
+                        right: 6,
+                        child: Container(
+                          width: 6,
+                          height: 6,
+                          decoration: BoxDecoration(
+                            color: color,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              
+              // Custom Tooltip shown on the right when hovered
+              if (isHovered) ...[
+                const SizedBox(width: 12),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF1E293B),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.orange, width: 1.5),
+                    boxShadow: const [
+                      BoxShadow(color: Colors.black45, blurRadius: 4, offset: Offset(0, 2)),
+                    ],
+                  ),
+                  child: Text(
+                    labelName,
+                    style: const TextStyle(
+                      color: Colors.white, 
+                      fontSize: 13, 
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  // ==========================================
+  // NEW: Build the right zoom controls
+  // ==========================================
+  Widget _buildZoomControls() {
+    return Positioned(
+      bottom: 20,
+      right: 20,
+      child: Container(
+        decoration: BoxDecoration(
+          color: const Color(0xFF1E293B),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.blueGrey.withOpacity(0.5), width: 1.5),
+          boxShadow: const [
+            BoxShadow(
+                color: Colors.black45, blurRadius: 8, offset: Offset(0, 4)),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(
+              icon: const Icon(Icons.add, color: Colors.white),
+              onPressed: () => _zoom(1.2), // Zoom in
+            ),
+            Container(
+                height: 1, width: 40, color: Colors.blueGrey.withOpacity(0.5)),
+            IconButton(
+              icon: const Icon(Icons.remove, color: Colors.white),
+              onPressed: () => _zoom(0.8), // Zoom out
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -204,7 +457,7 @@ class _StoreMapState extends State<StoreMap>
       clipBehavior: Clip.antiAlias,
       child: Column(
         children: [
-          if (widget.mode == MapMode.view) _buildHeader(),
+          // if (widget.mode == MapMode.view) _buildHeader(),
           _buildLiveMapDisplay(),
           if (widget.location != null) _buildFooter(),
         ],
@@ -586,74 +839,77 @@ class _StoreMapState extends State<StoreMap>
         mapHeight = el.position.dy + el.size.height + 100;
       }
     }
-List<MapElement> _buildRenderOrder() {
-  final elements = List<MapElement>.from(widget.controller.storeLayout);
-  if (elements.length <= 1) return elements;
+    List<MapElement> _buildRenderOrder() {
+      final elements = List<MapElement>.from(widget.controller.storeLayout);
+      if (elements.length <= 1) return elements;
 
-  // 1. Pre-calculate exact bounds for all elements to ensure performance
-  final bounds = <String, List<double>>{};
-  for (var el in elements) {
-    final c = _getCorners(el.position, el.size, el.rotation);
-    bounds[el.id] = [
-      c.map((p) => p.dx).reduce(math.min), // 0: minX
-      c.map((p) => p.dx).reduce(math.max), // 1: maxX
-      c.map((p) => p.dy).reduce(math.min), // 2: minY
-      c.map((p) => p.dy).reduce(math.max), // 3: maxY
-    ];
-  }
-
-  // 2. Helper function: Should element 'A' draw BEFORE element 'B'? (Is A behind B?)
-  bool isBehind(MapElement a, MapElement b) {
-    final bA = bounds[a.id]!;
-    final bB = bounds[b.id]!;
-    const double e = 0.5; // Tolerance for floating point snapping
-
-    bool overlapX = !(bA[1] <= bB[0] + e || bA[0] >= bB[1] - e);
-    bool overlapY = !(bA[3] <= bB[2] + e || bA[2] >= bB[3] - e);
-
-    // -- SCENARIO A: Objects are intersecting/touching on the grid --
-    if (overlapX && overlapY) {
-      // Doors always render after the wall they share space with
-      if (a.type == ElementType.wall && b.type == ElementType.door) return true;
-      if (a.type == ElementType.door && b.type == ElementType.wall) return false;
-
-      // Props embedded in walls: isolate the wall's thickness to find true depth
-      if (a.type == ElementType.wall && b.type != ElementType.wall) {
-        bool aIsHoriz = (bA[1] - bA[0]) > (bA[3] - bA[2]);
-        return aIsHoriz ? bA[3] < bB[3] : bA[1] < bB[1];
+      // 1. Pre-calculate exact bounds for all elements to ensure performance
+      final bounds = <String, List<double>>{};
+      for (var el in elements) {
+        final c = _getCorners(el.position, el.size, el.rotation);
+        bounds[el.id] = [
+          c.map((p) => p.dx).reduce(math.min), // 0: minX
+          c.map((p) => p.dx).reduce(math.max), // 1: maxX
+          c.map((p) => p.dy).reduce(math.min), // 2: minY
+          c.map((p) => p.dy).reduce(math.max), // 3: maxY
+        ];
       }
-      if (b.type == ElementType.wall && a.type != ElementType.wall) {
-        bool bIsHoriz = (bB[1] - bB[0]) > (bB[3] - bB[2]);
-        return bIsHoriz ? bA[3] < bB[3] : bA[1] < bB[1];
+
+      // 2. Helper function: Should element 'A' draw BEFORE element 'B'? (Is A behind B?)
+      bool isBehind(MapElement a, MapElement b) {
+        final bA = bounds[a.id]!;
+        final bB = bounds[b.id]!;
+        const double e = 0.5; // Tolerance for floating point snapping
+
+        bool overlapX = !(bA[1] <= bB[0] + e || bA[0] >= bB[1] - e);
+        bool overlapY = !(bA[3] <= bB[2] + e || bA[2] >= bB[3] - e);
+
+        // -- SCENARIO A: Objects are intersecting/touching on the grid --
+        if (overlapX && overlapY) {
+          // Doors always render after the wall they share space with
+          if (a.type == ElementType.wall && b.type == ElementType.door)
+            return true;
+          if (a.type == ElementType.door && b.type == ElementType.wall)
+            return false;
+
+          // Props embedded in walls: isolate the wall's thickness to find true depth
+          if (a.type == ElementType.wall && b.type != ElementType.wall) {
+            bool aIsHoriz = (bA[1] - bA[0]) > (bA[3] - bA[2]);
+            return aIsHoriz ? bA[3] < bB[3] : bA[1] < bB[1];
+          }
+          if (b.type == ElementType.wall && a.type != ElementType.wall) {
+            bool bIsHoriz = (bB[1] - bB[0]) > (bB[3] - bB[2]);
+            return bIsHoriz ? bA[3] < bB[3] : bA[1] < bB[1];
+          }
+        }
+
+        // -- SCENARIO B: Objects are strictly separated on the grid --
+        if (bA[1] <= bB[0] + e) return true; // A is strictly to the left of B
+        if (bA[3] <= bB[2] + e) return true; // A is strictly above B
+        if (bB[1] <= bA[0] + e) return false; // B is strictly to the left of A
+        if (bB[3] <= bA[2] + e) return false; // B is strictly above A
+
+        // -- SCENARIO C: Fallback for identically placed overlapping objects --
+        return (bA[1] + bA[3]) < (bB[1] + bB[3]);
       }
+
+      // 3. Custom Stable Insertion Sort
+      // This loop safely forces the elements into their calculated layers without Dart's strict sorting crashes.
+      for (int i = 1; i < elements.length; i++) {
+        MapElement key = elements[i];
+        int j = i - 1;
+
+        // Shift elements up if they are visually in front of the key
+        while (j >= 0 && isBehind(key, elements[j])) {
+          elements[j + 1] = elements[j];
+          j = j - 1;
+        }
+        elements[j + 1] = key;
+      }
+
+      return elements;
     }
 
-    // -- SCENARIO B: Objects are strictly separated on the grid --
-    if (bA[1] <= bB[0] + e) return true;  // A is strictly to the left of B
-    if (bA[3] <= bB[2] + e) return true;  // A is strictly above B
-    if (bB[1] <= bA[0] + e) return false; // B is strictly to the left of A
-    if (bB[3] <= bA[2] + e) return false; // B is strictly above A
-
-    // -- SCENARIO C: Fallback for identically placed overlapping objects --
-    return (bA[1] + bA[3]) < (bB[1] + bB[3]);
-  }
-
-  // 3. Custom Stable Insertion Sort
-  // This loop safely forces the elements into their calculated layers without Dart's strict sorting crashes.
-  for (int i = 1; i < elements.length; i++) {
-    MapElement key = elements[i];
-    int j = i - 1;
-
-    // Shift elements up if they are visually in front of the key
-    while (j >= 0 && isBehind(key, elements[j])) {
-      elements[j + 1] = elements[j];
-      j = j - 1;
-    }
-    elements[j + 1] = key;
-  }
-
-  return elements;
-}
     final sortedLayout = _buildRenderOrder();
 
     Widget map = LayoutBuilder(
@@ -687,11 +943,11 @@ List<MapElement> _buildRenderOrder() {
             builder: (BuildContext dropContext) {
               return DragTarget<ElementType>(
                 onMove: (details) {
-                  final RenderBox? box =
-                      _mapKey.currentContext?.findRenderObject()
-                          as RenderBox?;
+                  final RenderBox? box = _mapKey.currentContext
+                      ?.findRenderObject() as RenderBox?;
                   if (box == null) return;
-                  final Offset localOffset = box.globalToLocal(details.offset);
+                  final Offset localOffset =
+                      box.globalToLocal(details.offset);
 
                   final Size previewSize = _getDefaultSize(details.data);
                   final snappedPos = _snapToGrid(
@@ -729,11 +985,11 @@ List<MapElement> _buildRenderOrder() {
                   });
                 },
                 onAcceptWithDetails: (details) {
-                  final RenderBox? box =
-                      _mapKey.currentContext?.findRenderObject()
-                          as RenderBox?;
+                  final RenderBox? box = _mapKey.currentContext
+                      ?.findRenderObject() as RenderBox?;
                   if (box == null) return;
-                  final Offset localOffset = box.globalToLocal(details.offset);
+                  final Offset localOffset =
+                      box.globalToLocal(details.offset);
 
                   final Size finalSize = _getDefaultSize(details.data);
                   final Offset finalPos = _snapToGrid(
@@ -838,9 +1094,9 @@ List<MapElement> _buildRenderOrder() {
                                             decoration: BoxDecoration(
                                               color: _dragPreviewValid
                                                   ? Colors.greenAccent
-                                                        .withOpacity(0.12)
+                                                      .withOpacity(0.12)
                                                   : Colors.redAccent
-                                                        .withOpacity(0.25),
+                                                      .withOpacity(0.25),
                                               border: Border.all(
                                                 color: _dragPreviewValid
                                                     ? Colors.green
@@ -883,6 +1139,13 @@ List<MapElement> _buildRenderOrder() {
             right: 0,
             child: Center(child: _buildBottomActionBar()),
           ),
+        // ==========================================
+        // NEW: Left Toolbar & Right Zoom Controls injected here
+        // ==========================================
+        if (widget.mode == MapMode.manage) ...[
+          _buildLeftToolbar(),
+          _buildZoomControls(),
+        ],
       ],
     );
 
@@ -1025,10 +1288,11 @@ List<MapElement> _buildRenderOrder() {
 
     final double true3DRotationY = el.rotation + mapRotZ;
 
-final bool isTallThin = el.type == ElementType.wall || el.type == ElementType.door;
+    final bool isTallThin =
+        el.type == ElementType.wall || el.type == ElementType.door;
     final double extraHeight = isTallThin ? 180.0 : 40.0;
     final double topOffset = isTallThin ? -160.0 : -20.0;
-    
+
     CustomPainter? modelPainter;
     double baseY = 0.0;
     double modelHeight = 0.0;
@@ -1116,8 +1380,8 @@ final bool isTallThin = el.type == ElementType.wall || el.type == ElementType.do
     // hit-test padding to make them easier to hover/tap precisely.
     final double hitPadding =
         (el.type == ElementType.wall || el.type == ElementType.door)
-        ? 12.0
-        : 0.0;
+            ? 12.0
+            : 0.0;
 
     Widget shelf = Container(
       width: el.size.width,
@@ -1129,8 +1393,8 @@ final bool isTallThin = el.type == ElementType.wall || el.type == ElementType.do
         border: !useFootprintOutline && isActive
             ? Border.all(color: Colors.yellowAccent, width: 3)
             : (isHighlighted
-                  ? Border.all(color: Colors.orange, width: 2)
-                  : null),
+                ? Border.all(color: Colors.orange, width: 2)
+                : null),
       ),
       child: Stack(
         clipBehavior: Clip.none,
@@ -1209,142 +1473,142 @@ final bool isTallThin = el.type == ElementType.wall || el.type == ElementType.do
               child: MouseRegion(
                 cursor: SystemMouseCursors.click,
                 child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: () async {
-                  if (widget.mode == MapMode.manage) {
-                    setState(() {
-                      if (_activeElementId != el.id) {
-                        _isAdjustingWidth = false;
-                        _isNudging = false; // Add reset for nudge menu here
-                      }
-                      _activeElementId = el.id;
-                    });
-                  } else if (widget.mode == MapMode.selection &&
-                      widget.selectedItemId != null) {
-                    if (el.type == ElementType.door ||
-                        el.type == ElementType.cashier ||
-                        el.type == ElementType.wall) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text(
-                            "Cannot assign items to ${el.type.name}s.",
-                          ),
-                          backgroundColor: Colors.redAccent,
-                        ),
-                      );
-                      return;
-                    }
-                    await widget.controller.assignItemToLocation(
-                      widget.selectedItemId!,
-                      el.id,
-                    );
-
-                    if (mounted) {
-                      if (widget.onSelectionAssigned != null) {
-                        widget.onSelectionAssigned!();
-                      }
-                      setState(() {});
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text(
-                            "Item assigned to location!",
-                            style: TextStyle(color: Colors.white),
-                          ),
-                          backgroundColor: Colors.green,
-                        ),
-                      );
-                    }
-                  } else if (widget.mode == MapMode.pick) {
-                    if (el.type == ElementType.door ||
-                        el.type == ElementType.cashier ||
-                        el.type == ElementType.wall) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text(
-                            "Cannot assign items to ${el.type.name}s.",
-                          ),
-                          backgroundColor: Colors.redAccent,
-                        ),
-                      );
-                      return;
-                    }
-                    if (widget.onElementSelected != null) {
-                      widget.onElementSelected!(el);
-                    }
-                  } else if (widget.mode == MapMode.view) {
-                    if (el.type != ElementType.door &&
-                        el.type != ElementType.cashier &&
-                        el.type != ElementType.wall) {
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () async {
+                    if (widget.mode == MapMode.manage) {
                       setState(() {
-                        if (_selectedPopupElement?.id == el.id) {
-                          _selectedPopupElement = null;
-                        } else {
-                          _selectedPopupElement = el;
+                        if (_activeElementId != el.id) {
+                          _isAdjustingWidth = false;
+                          _isNudging = false; // Add reset for nudge menu here
                         }
+                        _activeElementId = el.id;
                       });
-                    }
-                  }
-                },
-                onPanStart: widget.mode == MapMode.manage
-                    ? (details) {
-                        _rawDragPosition = el.position;
+                    } else if (widget.mode == MapMode.selection &&
+                        widget.selectedItemId != null) {
+                      if (el.type == ElementType.door ||
+                          el.type == ElementType.cashier ||
+                          el.type == ElementType.wall) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              "Cannot assign items to ${el.type.name}s.",
+                            ),
+                            backgroundColor: Colors.redAccent,
+                          ),
+                        );
+                        return;
                       }
-                    : null,
-                onPanUpdate: widget.mode == MapMode.manage
-                    ? (details) {
+                      await widget.controller.assignItemToLocation(
+                        widget.selectedItemId!,
+                        el.id,
+                      );
+
+                      if (mounted) {
+                        if (widget.onSelectionAssigned != null) {
+                          widget.onSelectionAssigned!();
+                        }
+                        setState(() {});
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              "Item assigned to location!",
+                              style: TextStyle(color: Colors.white),
+                            ),
+                            backgroundColor: Colors.green,
+                          ),
+                        );
+                      }
+                    } else if (widget.mode == MapMode.pick) {
+                      if (el.type == ElementType.door ||
+                          el.type == ElementType.cashier ||
+                          el.type == ElementType.wall) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              "Cannot assign items to ${el.type.name}s.",
+                            ),
+                            backgroundColor: Colors.redAccent,
+                          ),
+                        );
+                        return;
+                      }
+                      if (widget.onElementSelected != null) {
+                        widget.onElementSelected!(el);
+                      }
+                    } else if (widget.mode == MapMode.view) {
+                      if (el.type != ElementType.door &&
+                          el.type != ElementType.cashier &&
+                          el.type != ElementType.wall) {
                         setState(() {
-                          _activeElementId = el.id;
-                          final double cosR = math.cos(el.rotation);
-                          final double sinR = math.sin(el.rotation);
-
-                          final double mapDx =
-                              details.delta.dx * cosR - details.delta.dy * sinR;
-                          final double mapDy =
-                              details.delta.dx * sinR + details.delta.dy * cosR;
-
-                          _rawDragPosition =
-                              _rawDragPosition! + Offset(mapDx, mapDy);
-                          final Offset snappedPos = _snapToGrid(
-                            _rawDragPosition!,
-                            el.size,
-                            el.type,
-                          );
-
-                          final bool isValid = !_hasCollision(
-                            el,
-                            snappedPos,
-                            el.size,
-                            el.rotation,
-                          );
-                          _dragPreviewPos = snappedPos;
-                          _dragPreviewSize = el.size;
-                          _dragPreviewValid = isValid;
-                          _dragPreviewRotation = el.rotation;
-                          _dragPreviewType = el.type;
-
-                          if (isValid) {
-                            el.position = snappedPos;
+                          if (_selectedPopupElement?.id == el.id) {
+                            _selectedPopupElement = null;
+                          } else {
+                            _selectedPopupElement = el;
                           }
                         });
                       }
-                    : null,
-                onPanEnd: widget.mode == MapMode.manage
-                    ? (details) {
-                        setState(() {
-                          _rawDragPosition = null;
-                          _dragPreviewPos = null;
-                          _dragPreviewSize = null;
-                          _dragPreviewType = null;
-                        });
-                      }
-                    : null,
-                child: Container(
-                  // Transparent padding = bigger tap/hover target without
-                  // changing how thin the wall/door actually looks.
-                  padding: EdgeInsets.all(hitPadding),
-                  color: Colors.transparent,
-                  child: shelf,
-                ),
+                    }
+                  },
+                  onPanStart: widget.mode == MapMode.manage
+                      ? (details) {
+                          _rawDragPosition = el.position;
+                        }
+                      : null,
+                  onPanUpdate: widget.mode == MapMode.manage
+                      ? (details) {
+                          setState(() {
+                            _activeElementId = el.id;
+                            final double cosR = math.cos(el.rotation);
+                            final double sinR = math.sin(el.rotation);
+
+                            final double mapDx = details.delta.dx * cosR -
+                                details.delta.dy * sinR;
+                            final double mapDy = details.delta.dx * sinR +
+                                details.delta.dy * cosR;
+
+                            _rawDragPosition =
+                                _rawDragPosition! + Offset(mapDx, mapDy);
+                            final Offset snappedPos = _snapToGrid(
+                              _rawDragPosition!,
+                              el.size,
+                              el.type,
+                            );
+
+                            final bool isValid = !_hasCollision(
+                              el,
+                              snappedPos,
+                              el.size,
+                              el.rotation,
+                            );
+                            _dragPreviewPos = snappedPos;
+                            _dragPreviewSize = el.size;
+                            _dragPreviewValid = isValid;
+                            _dragPreviewRotation = el.rotation;
+                            _dragPreviewType = el.type;
+
+                            if (isValid) {
+                              el.position = snappedPos;
+                            }
+                          });
+                        }
+                      : null,
+                  onPanEnd: widget.mode == MapMode.manage
+                      ? (details) {
+                          setState(() {
+                            _rawDragPosition = null;
+                            _dragPreviewPos = null;
+                            _dragPreviewSize = null;
+                            _dragPreviewType = null;
+                          });
+                        }
+                      : null,
+                  child: Container(
+                    // Transparent padding = bigger tap/hover target without
+                    // changing how thin the wall/door actually looks.
+                    padding: EdgeInsets.all(hitPadding),
+                    color: Colors.transparent,
+                    child: shelf,
+                  ),
                 ),
               ),
             ),
@@ -1437,122 +1701,126 @@ final bool isTallThin = el.type == ElementType.wall || el.type == ElementType.do
             // pinned near the object while its face unfolds flat/upright.
             alignment: Alignment.topLeft,
             child: Material(
-        color: Colors.transparent,
-        child: Container(
-          width: 200,
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(12),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.3),
-                blurRadius: 12,
-                offset: const Offset(0, 6),
-              ),
-            ],
-            border: Border.all(color: Colors.orange, width: 2),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 8,
-                ),
+              color: Colors.transparent,
+              child: Container(
+                width: 200,
                 decoration: BoxDecoration(
-                  color: Colors.orange.withOpacity(0.15),
-                  borderRadius: const BorderRadius.vertical(
-                    top: Radius.circular(10),
-                  ),
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.3),
+                      blurRadius: 12,
+                      offset: const Offset(0, 6),
+                    ),
+                  ],
+                  border: Border.all(color: Colors.orange, width: 2),
                 ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Expanded(
-                      child: Text(
-                        el.label,
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          color: Colors.orange,
-                          fontSize: 13,
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 8,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.orange.withOpacity(0.15),
+                        borderRadius: const BorderRadius.vertical(
+                          top: Radius.circular(10),
                         ),
-                        overflow: TextOverflow.ellipsis,
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Expanded(
+                            child: Text(
+                              el.label,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                color: Colors.orange,
+                                fontSize: 13,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          GestureDetector(
+                            onTap: () =>
+                                setState(() => _selectedPopupElement = null),
+                            child: const Icon(
+                              LucideIcons.x,
+                              size: 14,
+                              color: Colors.black54,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
-                    GestureDetector(
-                      onTap: () => setState(() => _selectedPopupElement = null),
-                      child: const Icon(
-                        LucideIcons.x,
-                        size: 14,
-                        color: Colors.black54,
-                      ),
+                    Container(
+                      constraints: const BoxConstraints(maxHeight: 180),
+                      child: assignedItems.isEmpty
+                          ? const Padding(
+                              padding: EdgeInsets.all(12.0),
+                              child: Text(
+                                "Empty",
+                                style:
+                                    TextStyle(color: Colors.grey, fontSize: 11),
+                              ),
+                            )
+                          : ListView.separated(
+                              shrinkWrap: true,
+                              padding: EdgeInsets.zero,
+                              itemCount: assignedItems.length,
+                              separatorBuilder: (_, __) =>
+                                  const Divider(height: 1),
+                              itemBuilder: (context, index) {
+                                final item = assignedItems[index];
+                                return Padding(
+                                  padding: const EdgeInsets.all(10.0),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        item.name,
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.w600,
+                                          fontSize: 11,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Row(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.spaceBetween,
+                                        children: [
+                                          Text(
+                                            "SKU: ${item.sku}",
+                                            style: const TextStyle(
+                                              fontSize: 10,
+                                              color: Colors.grey,
+                                            ),
+                                          ),
+                                          Text(
+                                            "Qty: ${item.quantity}",
+                                            style: const TextStyle(
+                                              fontSize: 10,
+                                              fontWeight: FontWeight.bold,
+                                              color: Colors.orange,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              },
+                            ),
                     ),
                   ],
                 ),
               ),
-              Container(
-                constraints: const BoxConstraints(maxHeight: 180),
-                child: assignedItems.isEmpty
-                    ? const Padding(
-                        padding: EdgeInsets.all(12.0),
-                        child: Text(
-                          "Empty",
-                          style: TextStyle(color: Colors.grey, fontSize: 11),
-                        ),
-                      )
-                    : ListView.separated(
-                        shrinkWrap: true,
-                        padding: EdgeInsets.zero,
-                        itemCount: assignedItems.length,
-                        separatorBuilder: (_, __) => const Divider(height: 1),
-                        itemBuilder: (context, index) {
-                          final item = assignedItems[index];
-                          return Padding(
-                            padding: const EdgeInsets.all(10.0),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  item.name,
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.w600,
-                                    fontSize: 11,
-                                  ),
-                                ),
-                                const SizedBox(height: 4),
-                                Row(
-                                  mainAxisAlignment:
-                                      MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    Text(
-                                      "SKU: ${item.sku}",
-                                      style: const TextStyle(
-                                        fontSize: 10,
-                                        color: Colors.grey,
-                                      ),
-                                    ),
-                                    Text(
-                                      "Qty: ${item.quantity}",
-                                      style: const TextStyle(
-                                        fontSize: 10,
-                                        fontWeight: FontWeight.bold,
-                                        color: Colors.orange,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ],
-                            ),
-                          );
-                        },
-                      ),
-              ),
-            ],
-          ),
-        ),
-      ),
+            ),
           ),
         ),
       ],

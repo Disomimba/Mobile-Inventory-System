@@ -151,7 +151,7 @@ class _MapEditorPageState extends State<MapEditorPage> {
         body: Column(
           children: [
             _buildModeSelector(),
-            if (_mode == MapMode.manage) _buildManageToolbar(),
+            // if (_mode == MapMode.manage) _buildManageToolbar(),
             if (_mode == MapMode.selection) _buildSelectionToolbar(),
             Expanded(
               child: StoreMap(
