@@ -19,6 +19,24 @@ class MapElement {
     this.rotation = 0.0,
   });
 
+  MapElement copyWith({
+    String? id,
+    ElementType? type,
+    Offset? position,
+    Size? size,
+    String? label,
+    double? rotation,
+  }) {
+    return MapElement(
+      id: id ?? this.id,
+      type: type ?? this.type,
+      position: position ?? this.position,
+      size: size ?? this.size,
+      label: label ?? this.label,
+      rotation: rotation ?? this.rotation,
+    );
+  }
+
   Map<String, dynamic> toJson() => {
     'id': id,
     'type': type.index,
