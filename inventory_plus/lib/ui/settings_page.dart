@@ -69,16 +69,16 @@ class _SettingsPageState extends State<SettingsPage> {
 
           _buildSectionHeader("WAREHOUSE CONFIGURATION"),
 
-          _buildSettingTile(
-            icon: LucideIcons.map,
-            color: Colors.blue,
-            title: "Store Layout Designer",
-            subtitle: "Manage racks, shelves, and pathways",
-            onTap: () => _openResponsivePage(
-              context,
-              MapEditorPage(controller: widget.controller),
-            ),
-          ),
+          // _buildSettingTile(
+          //   icon: LucideIcons.map,
+          //   color: Colors.blue,
+          //   title: "Store Layout Designer",
+          //   subtitle: "Manage racks, shelves, and pathways",
+          //   onTap: () => _openResponsivePage(
+          //     context,
+          //     MapEditorPage(controller: widget.controller),
+          //   ),
+          // ),
           _buildSettingTile(
             icon: LucideIcons.printer,
             color: Colors.orange,

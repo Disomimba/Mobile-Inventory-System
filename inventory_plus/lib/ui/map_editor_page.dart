@@ -37,136 +37,99 @@ class _MapEditorPageState extends State<MapEditorPage> {
 
   @override
   Widget build(BuildContext context) {
-    return WillPopScope(
-      onWillPop: () async {
-        final currentLayoutJson = jsonEncode(widget.controller.storeLayout.map((e) => e.toJson()).toList());
-        
-        // If no changes were made or changes were already saved, allow pop immediately
-        if (currentLayoutJson == _initialLayoutJson || _isSaved) {
-          return true;
-        }
-
-        // Prompt the user for confirmation
-        final shouldPop = await showDialog<bool>(
-          context: context,
-          builder: (context) => AlertDialog(
-            title: const Text("Unsaved Changes"),
-            content: const Text("You have unsaved changes. Are you sure you want to leave? Your changes will be lost."),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context, false),
-                child: const Text("Stay"),
-              ),
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-                onPressed: () => Navigator.pop(context, true),
-                child: const Text("Leave", style: TextStyle(color: Colors.white)),
-              ),
-            ],
-          ),
-        );
-
-        return shouldPop ?? false;
-      },
-      child: Scaffold(
-        appBar: AppBar(
-          title: const Text("Store Layout Designer"),
-          backgroundColor: const Color(0xFF0F172A),
-          foregroundColor: Colors.white,
-          actions: [
-            IconButton(
-              icon: const Icon(LucideIcons.trash2),
-              onPressed: () {
-                showDialog(
-                  context: context,
-                  builder: (context) => AlertDialog(
-                    title: const Text("Clear Map?"),
-                    content: const Text("Are you sure you want to delete the entire map layout?"),
-                    actions: [
-                      TextButton(
-                        onPressed: () => Navigator.pop(context),
-                        child: const Text("Cancel"),
-                      ),
-                      ElevatedButton(
-                        style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-                        onPressed: () {
-                          Navigator.pop(context);
-                          widget.controller.clearMapLayout().then((_) {
-                            if (mounted) {
-                              setState(() {});
-                            }
-                          });
-                        },
-                        child: const Text("Delete", style: TextStyle(color: Colors.white)),
-                      ),
-                    ],
-                  ),
-                );
-              },
-            ),
-            IconButton(
-              icon: const Icon(LucideIcons.save),
-              onPressed: () {
-                showDialog(
-                  context: context,
-                  // 1. CHANGE 'context' to 'dialogContext' HERE:
-                  builder: (dialogContext) => AlertDialog(
-                    title: const Text("Save Map?"),
-                    content: const Text("Are you sure you want to save the current map layout?"),
-                    actions: [
-                      TextButton(
-                        // 2. USE 'dialogContext' TO CLOSE THE DIALOG:
-                        onPressed: () => Navigator.pop(dialogContext),
-                        child: const Text("Cancel"),
-                      ),
-                      ElevatedButton(
-                        style: ElevatedButton.styleFrom(backgroundColor: Colors.blue),
-                        onPressed: () async {
-                          // 3. USE 'dialogContext' TO CLOSE THE DIALOG
-                          Navigator.pop(dialogContext);
-                          
-                          setState(() {
-                            _isSaved = true;
-                          });
-                          
-                          await widget.controller.saveLayout(); 
-                          
-                          // 4. NOW THIS USES THE SAFE, MAIN PAGE CONTEXT:
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text("Store Layout Designer"),
+        backgroundColor: const Color(0xFF0F172A),
+        foregroundColor: Colors.white,
+        actions: [
+          IconButton(
+            icon: const Icon(LucideIcons.trash2),
+            onPressed: () {
+              showDialog(
+                context: context,
+                builder: (context) => AlertDialog(
+                  title: const Text("Clear Map?"),
+                  content: const Text("Are you sure you want to delete the entire map layout?"),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text("Cancel"),
+                    ),
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+                      onPressed: () {
+                        Navigator.pop(context);
+                        widget.controller.clearMapLayout().then((_) {
                           if (mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text("Store layout saved successfully!")),
-                            );
-                            Navigator.pop(context); // Go back to the previous screen
+                            setState(() {});
                           }
-                        },
-                        child: const Text("Save", style: TextStyle(color: Colors.white)),
-                      ),
-                    ],
-                  ),
-                );
+                        });
+                      },
+                      child: const Text("Delete", style: TextStyle(color: Colors.white)),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+          IconButton(
+            icon: const Icon(LucideIcons.save),
+            onPressed: () {
+              showDialog(
+                context: context,
+                builder: (dialogContext) => AlertDialog(
+                  title: const Text("Save Map?"),
+                  content: const Text("Are you sure you want to save the current map layout?"),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(dialogContext),
+                      child: const Text("Cancel"),
+                    ),
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(backgroundColor: Colors.blue),
+                      onPressed: () async {
+                        Navigator.pop(dialogContext); // Close the dialog
+                        
+                        setState(() {
+                          _isSaved = true;
+                        });
+                        
+                        await widget.controller.saveLayout(); 
+                        
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text("Store layout saved successfully!")),
+                          );
+                          // REMOVED: Navigator.pop(context) because this is no longer a modal!
+                        }
+                      },
+                      child: const Text("Save", style: TextStyle(color: Colors.white)),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+        ],
+      ),
+      body: Column(
+        children: [
+          _buildModeSelector(),
+          if (_mode == MapMode.selection) _buildSelectionToolbar(),
+          Expanded(
+            child: StoreMap(
+              controller: widget.controller,
+              mode: _mode,
+              selectedItemId: _selectedItemId,
+              onSelectionAssigned: () {
+                setState(() {
+                  _selectedItemId = null;
+                });
               },
             ),
-          ],
-        ),
-        body: Column(
-          children: [
-            _buildModeSelector(),
-            // if (_mode == MapMode.manage) _buildManageToolbar(),
-            if (_mode == MapMode.selection) _buildSelectionToolbar(),
-            Expanded(
-              child: StoreMap(
-                controller: widget.controller,
-                mode: _mode,
-                selectedItemId: _selectedItemId,
-                onSelectionAssigned: () {
-                  setState(() {
-                    _selectedItemId = null;
-                  });
-                },
-              ),
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }

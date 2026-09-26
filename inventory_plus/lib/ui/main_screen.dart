@@ -9,6 +9,7 @@ import 'settings_page.dart';
 import 'dashboard_page.dart';
 import 'pos_cart_page.dart';
 import 'order_queue_page.dart';
+import 'map_editor_page.dart';
 
 class MainScreen extends StatefulWidget {
   final InventoryController controller;
@@ -134,6 +135,7 @@ class _MainScreenState extends State<MainScreen> {
         final int posIndex = (isCashier || isAdmin) ? pageIndex++ : -1;
         final int orderQueueIndex = (isHelper || isAdmin) ? pageIndex++ : -1;
         final int inventoryIndex = pageIndex++;
+        final int mapIndex = isAdmin ? pageIndex++ : -1;
         final int settingsIndex = pageIndex++;
 
         // 3. THE MASTER PAGE LIST
@@ -149,18 +151,25 @@ class _MainScreenState extends State<MainScreen> {
           pages.add(OrderQueuePage(controller: widget.controller));
         }
         
-        pages.addAll([
+       pages.add(
           InventoryPage(
             controller: widget.controller,
             onSelectItem: _handleSelectItem,
-          ),
+          )
+        );
+          
+          if (isAdmin) {
+          pages.add(MapEditorPage(controller: widget.controller));
+        }
+
+        pages.add(
           SettingsPage(
             controller: widget.controller,
             userName: widget.controller.currentUserName ?? "Unknown User",
             userId: widget.controller.currentUserId ?? "Unknown ID",
             userRole: widget.controller.currentUserRole ?? "staff",
-          ),
-        ]);
+          )
+        );
 
         // ==========================================
         // DESKTOP LAYOUT (Sidebar)
@@ -230,6 +239,13 @@ class _MainScreenState extends State<MainScreen> {
                           'Inventory',
                           activeIcon: Icons.inventory_2,
                         ),
+                        if (isAdmin)
+                          _buildSidebarItem(
+                            mapIndex,
+                            Icons.map_outlined,
+                            'Store Layout',
+                            activeIcon: Icons.map,
+                          ),
                         _buildSidebarItem(
                           settingsIndex,
                           Icons.settings_outlined,
@@ -305,6 +321,12 @@ class _MainScreenState extends State<MainScreen> {
                   selectedIcon: Icon(Icons.assignment, color: Colors.white),
                   label: 'Inventory',
                 ),
+                if (isAdmin)
+                  const NavigationDestination(
+                    icon: Icon(Icons.map_outlined, color: Colors.grey),
+                    selectedIcon: Icon(Icons.map, color: Colors.white),
+                    label: 'Map',
+                  ),
                 const NavigationDestination(
                   icon: Icon(Icons.settings_outlined, color: Colors.grey),
                   selectedIcon: Icon(Icons.settings, color: Colors.white),
