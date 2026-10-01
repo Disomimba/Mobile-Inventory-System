@@ -6,6 +6,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import '../logic/inventory_controller.dart';
 import '../data/inventory.dart';
+import '../data/ai_insights_service.dart';
 
 class DashboardPage extends StatefulWidget {
   final InventoryController controller;
@@ -24,7 +25,7 @@ class _DashboardPageState extends State<DashboardPage> {
 
   bool _isBulletedFormat = true;
 
-  final String _groqApiUrl = "https://api.groq.com/openai/v1/chat/completions";
+  final AIInsightsService _aiService = AIInsightsService();
 
   @override
   void initState() {
@@ -52,196 +53,94 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   Future<void> _fetchForecast() async {
+  if (!mounted) return;
+  setState(() => _isFetchingForecast = true);
+
+  try {
+    // 1. Get all your current inventory items
+    final allItems = widget.controller.filterInventory(query: "", category: "All");
+    
+    // 2. Convert them into the List<Map<String, dynamic>> that your teammate's method requires
+    final List<Map<String, dynamic>> salesData = allItems.map((item) => {
+      'name': item.name,
+      'current_quantity': item.quantity,
+      'max_capacity': item.maxQuantity,
+      // If your item model has price or sales properties, add them here:
+      // 'price': item.price, 
+    }).toList();
+
+    // 3. Call your teammate's method using your existing _forecastingFilter (e.g., 'Season' or 'Month')
+    final result = await _aiService.getDemandForecast(_forecastingFilter, salesData);
+
     if (!mounted) return;
-    setState(() => _isFetchingForecast = true);
 
-    try {
-      final currentMonth = _getCurrentMonth();
-      String forecastingContext;
-      String formatInstruction;
+    // 4. Update the UI with the Gemini response
+    setState(() {
+      _forecastInsightText = result;
+    });
 
-      if (_forecastingFilter == 'Season') {
-        forecastingContext =
-            "Focus purely on upcoming Philippine seasonal and climate shifts (e.g., entering the rainy/typhoon season or summer heat). Forecast demand ONLY for hardware, construction, plumbing, and maintenance materials (e.g., roof sealants, G.I. sheets, water hose, cement).";
-      } else {
-        forecastingContext =
-            "Focus strictly on short-term hardware sales trends, local construction activities, and month-to-month demand patterns for building materials and tools.";
-      }
-
-      if (_isBulletedFormat) {
-        formatInstruction =
-            "Format the output as a professional, clean bulleted list using the '•' symbol. Recommend SPECIFIC HARDWARE ITEM NAMES in ALL CAPS for emphasis, followed by a brief 5-word reason. Example: '• ELASTOMERIC SEALANT: Approaching heavy rainy season.' DO NOT use markdown like asterisks (**).";
-      } else {
-        formatInstruction =
-            "Format the output as a professional, concise executive summary paragraph (maximum 3 sentences). DO NOT list specific item names. Instead, explain the upcoming trend and recommend broad HARDWARE PRODUCT CATEGORIES (e.g., 'waterproofing materials', 'structural reinforcements'). DO NOT use markdown like asterisks (**).";
-      }
-
-      final prompt =
-          """
-      You are an AI Demand Forecasting system strictly for a small-to-medium hardware and construction supply store located in the Philippines. 
-      The current month is $currentMonth.
-      $forecastingContext
-      $formatInstruction
-      
-      CRITICAL RULES:
-      - ONLY suggest construction, plumbing, electrical, carpentry, and maintenance materials.
-      - DO NOT suggest personal care (skincare), clothing, umbrellas, food, consumer electronics, or household appliances.
-      - Do not include any conversational intro or outro text.
-      """;
-
-      final groqApiKey = dotenv.env['GROQ_API_KEY']?.trim() ?? '';
-
-      if (groqApiKey.isEmpty) {
-        if (!mounted) return;
-        setState(() {
-          _forecastInsightText = "API Key not found.";
-          _isFetchingForecast = false;
-        });
-        return;
-      }
-
-      final response = await http.post(
-        Uri.parse(_groqApiUrl),
-        headers: {
-          'Authorization': 'Bearer $groqApiKey',
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode({
-          "model": "llama-3.1-8b-instant",
-          "messages": [
-            {
-              "role": "system",
-              "content":
-                  "You are a professional inventory forecaster for a traditional hardware and construction supply store in the Philippines.",
-            },
-            {"role": "user", "content": prompt},
-          ],
-          "temperature": 0.2,
-        }),
-      );
-
-      if (!mounted) return;
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        String rawContent = data['choices'][0]['message']['content'].trim();
-        String cleanContent = rawContent.replaceAll(RegExp(r'\*+'), '');
-
-        setState(() {
-          _forecastInsightText = cleanContent;
-        });
-      } else {
-        setState(() {
-          _forecastInsightText = "Error fetching forecast.";
-        });
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() => _forecastInsightText = "Network error: $e");
-      }
-    } finally {
-      if (mounted) {
-        setState(() => _isFetchingForecast = false);
-      }
+  } catch (e) {
+    if (mounted) {
+      setState(() => _forecastInsightText = "Network error: $e");
+    }
+  } finally {
+    if (mounted) {
+      setState(() => _isFetchingForecast = false);
     }
   }
+}
 
   Future<void> _fetchAIRecommendations() async {
-    if (!mounted) return;
-    setState(() => _isLoadingAI = true);
+  if (!mounted) return;
+  setState(() => _isLoadingAI = true);
 
-    try {
-      final allItems = widget.controller.filterInventory(
-        query: "",
-        category: "All",
-      );
+  try {
+    // 1. Keep your existing inventory filtering
+    final allItems = widget.controller.filterInventory(
+      query: "",
+      category: "All",
+    );
 
-      final criticalItems = allItems
-          .where((i) => i.quantity > 0 && i.quantity <= (i.maxQuantity * 0.10))
-          .map(
-            (i) =>
-                "${i.name} (Current: ${i.quantity}, Max Capacity: ${i.maxQuantity})",
-          )
-          .join(', ');
+    final criticalItems = allItems
+        .where((i) => i.quantity > 0 && i.quantity <= (i.maxQuantity * 0.10))
+        .map((i) => "${i.name} (Current: ${i.quantity}, Max Capacity: ${i.maxQuantity})")
+        .join(', ');
 
-      final deadItems = allItems
-          .where((i) => i.quantity <= 0)
-          .map((i) => "${i.name} (Max Capacity: ${i.maxQuantity})")
-          .join(', ');
-
-      final prompt =
-          """
-      I manage a hardware store. Here is my internal inventory data:
-      Out-of-stock items: ${deadItems.isEmpty ? 'None' : deadItems}. 
-      Critical Stock (under 10% capacity) items: ${criticalItems.isEmpty ? 'None' : criticalItems}.
-
-      Provide a strict INTERNAL restocking action plan.
-      Follow these strict rules:
-      1. Use the '•' symbol for bullet points.
-      2. Write specific ITEM NAMES in ALL CAPS. DO NOT use markdown formatting like asterisks (**).
-      3. Create a single section titled "URGENT REPLENISH".
-      4. List each item in this format:
-         1. [ITEM NAME]
-            - [Brief 1-sentence reason for urgency]
-            - [Recommended replenishment quantity]
-      5. End the message with a single paragraph of justification explaining why these specific items were prioritized to maximize store revenue and customer satisfaction.
-      6. Keep it extremely brief. No conversational filler.
-      """;
-
-      final groqApiKey = dotenv.env['GROQ_API_KEY']?.trim() ?? '';
-
-      if (groqApiKey.isEmpty) {
-        if (!mounted) return;
-        setState(() {
-          _aiRecommendation = "API Key not found.";
-          _isLoadingAI = false;
-        });
-        return;
-      }
-
-      final response = await http.post(
-        Uri.parse(_groqApiUrl),
-        headers: {
-          'Authorization': 'Bearer $groqApiKey',
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode({
-          "model": "llama-3.1-8b-instant",
-          "messages": [
-            {
-              "role": "system",
-              "content":
-                  "You are a professional inventory manager. You follow formatting instructions exactly.",
-            },
-            {"role": "user", "content": prompt},
-          ],
-          "temperature": 0.1,
-        }),
-      );
-
+    final deadItems = allItems
+        .where((i) => i.quantity <= 0)
+        .map((i) => "${i.name} (Max Capacity: ${i.maxQuantity})")
+        .join(', ');
+        
+        if (criticalItems.isEmpty && deadItems.isEmpty) {
       if (!mounted) return;
+      setState(() {
+        _aiRecommendation = "All inventory levels are healthy. No items require immediate restocking!";
+        _isLoadingAI = false;
+      });
+      return; // Exit early to avoid sending an empty request to Gemini
+    }
 
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        String rawContent = data['choices'][0]['message']['content'].trim();
-        String cleanContent = rawContent.replaceAll(RegExp(r'\*+'), '');
+    // 2. Call the new method from your teammate's service
+    final result = await _aiService.getRestockRecommendations(criticalItems, deadItems);
 
-        setState(() {
-          _aiRecommendation = cleanContent;
-        });
-      } else {
-        setState(() => _aiRecommendation = "Error fetching insights.");
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() => _aiRecommendation = "Network error: $e");
-      }
-    } finally {
-      if (mounted) {
-        setState(() => _isLoadingAI = false);
-      }
+    if (!mounted) return;
+
+    // 3. Update the UI
+    setState(() {
+      // Clean up asterisks just in case Gemini ignores the prompt instruction
+      _aiRecommendation = result.replaceAll(RegExp(r'\*+'), '').trim();
+    });
+
+  } catch (e) {
+    if (mounted) {
+      setState(() => _aiRecommendation = "Network error: $e");
+    }
+  } finally {
+    if (mounted) {
+      setState(() => _isLoadingAI = false);
     }
   }
+}
 
   // ─── Modal Triggers ────────────────────────────────────────────────────────
 
