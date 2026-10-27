@@ -1,0 +1,172 @@
+import 'dart:convert';
+
+import 'package:google_generative_ai/google_generative_ai.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+import '../services/app_logger.dart';
+
+class AIInsightsService {
+  static const int _cacheLimit = 24;
+
+  // Read the GEMINI_API_KEY from your .env file
+  final String apiKey = dotenv.env['GEMINI_API_KEY'] ?? '';
+  final Map<String, String> _completedRequests = <String, String>{};
+  final Map<String, Future<String>> _inFlightRequests =
+      <String, Future<String>>{};
+
+  // 1. TOP RIGHT CARD: Immediate Restocking Recommendations
+  Future<String> getRestockRecommendations(
+    String criticalItems,
+    String deadItems, {
+    required String cacheScope,
+    bool forceRefresh = false,
+  }) {
+    final key = jsonEncode(<Object?>[
+      'restock-v1',
+      cacheScope,
+      criticalItems,
+      deadItems,
+    ]);
+    return _cachedRequest(
+      key: key,
+      forceRefresh: forceRefresh,
+      load: () => _generateRestockRecommendations(criticalItems, deadItems),
+    );
+  }
+
+  Future<String> _generateRestockRecommendations(
+    String criticalItems,
+    String deadItems,
+  ) async {
+    try {
+      final model = GenerativeModel(model: 'gemini-3.6-flash', apiKey: apiKey);
+
+      final prompt =
+          """
+I manage a hardware store. Here is my internal inventory data:
+Out-of-stock items: ${deadItems.isEmpty ? 'None' : deadItems}. 
+Critical Stock (under 10% capacity) items: ${criticalItems.isEmpty ? 'None' : criticalItems}.
+
+Provide a strict INTERNAL restocking action plan.
+Follow these strict rules:
+1. Use the '•' symbol for bullet points.
+2. Write specific ITEM NAMES in ALL CAPS. DO NOT use markdown formatting like asterisks (**).
+3. Create a single section titled "URGENT REPLENISH".
+4. List each item in this format:
+    1. [ITEM NAME]
+      - [Brief 1-sentence reason for urgency]
+      - [Recommended replenishment quantity]
+5. End the message with a single paragraph of justification explaining why these specific items were prioritized to maximize store revenue and customer satisfaction.
+6. Keep it extremely brief. No conversational filler.
+""";
+
+      final response = await model.generateContent([Content.text(prompt)]);
+      return _requireContent(response.text);
+    } catch (e, stackTrace) {
+      AppLogger.error(
+        'AI restocking request failed',
+        error: e,
+        stackTrace: stackTrace,
+      );
+      rethrow;
+    }
+  }
+
+  // 2. BOTTOM LEFT CARD: Live Demand Forecasting
+  Future<String> getDemandForecast(
+    String timeframe,
+    List<Map<String, dynamic>> salesData, {
+    required String cacheScope,
+    bool forceRefresh = false,
+  }) {
+    final key = jsonEncode(<Object?>[
+      'forecast-v1',
+      cacheScope,
+      timeframe,
+      salesData,
+    ]);
+    return _cachedRequest(
+      key: key,
+      forceRefresh: forceRefresh,
+      load: () => _generateDemandForecast(timeframe, salesData),
+    );
+  }
+
+  Future<String> _generateDemandForecast(
+    String timeframe,
+    List<Map<String, dynamic>> salesData,
+  ) async {
+    try {
+      final model = GenerativeModel(model: 'gemini-3.6-flash', apiKey: apiKey);
+
+      final prompt =
+          '''
+You are an inventory optimization AI.
+Timeframe selected: $timeframe
+Here is the sales and inventory data for this period:
+${salesData.toString()}
+
+Based on this data, provide a concise 3-bullet summary:
+1. Top Performers: Identify the highest valued sales and the fastest-selling items.
+2. Restock Heavily: Recommend which items to restock aggressively and why.
+3. Restock Least: Recommend which slow-moving or low-value items to hold off on restocking.
+Keep it direct, professional, and actionable.
+''';
+
+      final response = await model.generateContent([Content.text(prompt)]);
+      return _requireContent(response.text);
+    } catch (e, stackTrace) {
+      AppLogger.error(
+        'AI forecast request failed',
+        error: e,
+        stackTrace: stackTrace,
+      );
+      rethrow;
+    }
+  }
+
+  Future<String> _cachedRequest({
+    required String key,
+    required bool forceRefresh,
+    required Future<String> Function() load,
+  }) {
+    final inFlight = _inFlightRequests[key];
+    if (inFlight != null) return inFlight;
+
+    final cached = _completedRequests[key];
+    if (!forceRefresh && cached != null) {
+      _completedRequests.remove(key);
+      _completedRequests[key] = cached;
+      return Future<String>.value(cached);
+    }
+
+    late final Future<String> request;
+    request = load()
+        .then((result) {
+          _completedRequests.remove(key);
+          _completedRequests[key] = result;
+          while (_completedRequests.length > _cacheLimit) {
+            _completedRequests.remove(_completedRequests.keys.first);
+          }
+          return result;
+        })
+        .whenComplete(() {
+          if (identical(_inFlightRequests[key], request)) {
+            _inFlightRequests.remove(key);
+          }
+        });
+    _inFlightRequests[key] = request;
+    return request;
+  }
+
+  String _requireContent(String? content) {
+    final value = content?.trim() ?? '';
+    if (value.isEmpty ||
+        RegExp(
+          r'^(error|exception|api error)\s*:',
+          caseSensitive: false,
+        ).hasMatch(value)) {
+      throw const FormatException('AI provider returned an invalid response.');
+    }
+    return value;
+  }
+}

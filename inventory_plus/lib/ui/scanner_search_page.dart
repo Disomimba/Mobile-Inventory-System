@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:inventory_plus/ui/widgets/qr_scanner.dart';
+import 'package:inventory_plus/ui/widgets/app_toast.dart';
 import '../data/inventory.dart'; 
 import '../logic/inventory_controller.dart';
-import 'package:inventory_plus/ui/visual_search_page.dart';
 
 class ScannerSearchPage extends StatefulWidget {
   final InventoryController controller; 
@@ -23,10 +23,6 @@ class _ScannerSearchPageState extends State<ScannerSearchPage> {
   bool _isScanning = true;
   InventoryItem? _scannedItem;
 
-  bool get _canUseAI {
-    final role = widget.controller.currentUserRole?.toLowerCase() ?? 'staff';
-    return role == 'admin' || role == 'staff';
-  }
 
   void _handleRealScan(String scannedValue) async {
     if (!_isScanning) return;
@@ -42,12 +38,7 @@ class _ScannerSearchPageState extends State<ScannerSearchPage> {
       widget.onSelectItem(foundItem);
     } catch (_) {
       // If firstWhere throws, no item was found. Show an error and reset.
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text("Code: $scannedValue not found"),
-          backgroundColor: Colors.redAccent,
-        ),
-      );
+      AppToast.error(context, 'No inventory item matches this code.');
       _resetScanner();
       // Add a small delay before re-enabling scanning to prevent rapid-fire errors.
       await Future.delayed(const Duration(seconds: 2));
@@ -127,40 +118,6 @@ class _ScannerSearchPageState extends State<ScannerSearchPage> {
                   ),
                 ],
               ),
-              if (_canUseAI)
-                ElevatedButton.icon(
-                  onPressed: () {
-                    // This opens your new Object Scanner
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => VisualSearchPage(
-                          controller: widget.controller,
-                          onSelectItem: widget.onSelectItem,
-                        ),
-                      ),
-                    );
-                  },
-                  icon: const Icon(
-                    LucideIcons.scanLine,
-                    size: 16,
-                    color: Colors.white,
-                  ),
-                  label: const Text(
-                    "AI Scanner",
-                    style: TextStyle(color: Colors.white),
-                  ),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.orange,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 8,
-                    ),
-                  ),
-                ),
             ],
           ),
         ],

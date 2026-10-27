@@ -1,11 +1,18 @@
+import 'dart:async';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../data/inventory.dart';
 import '../logic/inventory_controller.dart';
 import 'models_3d.dart';
+import 'widgets/app_toast.dart';
 
 enum MapMode { view, manage, selection, pick }
+
+enum MapSidebarAction { rotate, up, down, left, right, widthLeftMinus, widthLeftPlus, widthRightMinus, widthRightPlus, duplicate, autoAlignWall, delete }
+
+// Updated to the soft light-blue background
+const Color kMapContainerBg = Color.fromARGB(255, 214, 235, 255); 
 
 class StoreMap extends StatefulWidget {
   final InventoryController controller;
@@ -13,9 +20,13 @@ class StoreMap extends StatefulWidget {
   final ItemLocation? location;
   final String? itemName;
   final MapMode mode;
+  final bool showMobileToolbar;
   final String? selectedItemId;
+  final List<MapElement>? layout;
+  final bool itemAssignmentEnabled;
   final VoidCallback? onSelectionAssigned;
   final Function(MapElement)? onElementSelected;
+  final ValueChanged<MapElement?>? onManageSelectionChanged;
 
   const StoreMap({
     super.key,
@@ -24,16 +35,20 @@ class StoreMap extends StatefulWidget {
     this.location,
     this.itemName,
     this.mode = MapMode.view,
+    this.showMobileToolbar = true,
     this.selectedItemId,
+    this.layout,
+    this.itemAssignmentEnabled = true,
     this.onSelectionAssigned,
     this.onElementSelected,
+    this.onManageSelectionChanged,
   });
 
   @override
-  State<StoreMap> createState() => _StoreMapState();
+  State<StoreMap> createState() => StoreMapState();
 }
 
-class _StoreMapState extends State<StoreMap>
+class StoreMapState extends State<StoreMap>
     with SingleTickerProviderStateMixin {
   late AnimationController _animController;
   late Animation<double> _bounceAnimation;
@@ -60,9 +75,46 @@ class _StoreMapState extends State<StoreMap>
   // ==========================================
   bool _isToolbarExpanded = false;
 
+  // --- NEW: Map Centering Variables & Function ---
+  double _currentMapWidth = 1000.0;
+  double _currentMapHeight = 1000.0;
+  Size _currentViewportSize = Size.zero;
+  bool _viewportRecenterQueued = false;
+  StreamSubscription<List<MapElement>>? _mapLayoutSubscription;
+  StreamSubscription<List<InventoryItem>>? _inventorySubscription;
+  bool _mapLayoutLoadFailed = false;
+
+  List<MapElement> get _layout => widget.layout ?? widget.controller.storeLayout;
+
+  void _recenterMap({bool preserveScale = false}) {
+    if (_currentViewportSize == Size.zero) return;
+    
+    double scale;
+    if (preserveScale) {
+      // Use the current zoom level
+      scale = _transformationController.value.getMaxScaleOnAxis();
+    } else {
+      // Calculate initial fit-to-screen scale
+      double scaleX = _currentViewportSize.width / _currentMapWidth;
+      double scaleY = _currentViewportSize.height / _currentMapHeight;
+      scale = math.min(scaleX, scaleY) * 0.9;
+      scale = scale.clamp(0.1, 2.5);
+    }
+
+    double dx = (_currentViewportSize.width - (_currentMapWidth * scale)) / 2;
+    double dy = (_currentViewportSize.height - (_currentMapHeight * scale)) / 2;
+
+    _transformationController.value = Matrix4.identity()
+      ..translate(dx, dy)
+      ..scale(scale);
+  }
+  // -----------------------------------------------
+
   @override
   void initState() {
     super.initState();
+    _bindDomainStreams();
+    unawaited(_ensureLayoutLoaded());
     _animController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1000),
@@ -71,13 +123,98 @@ class _StoreMapState extends State<StoreMap>
     _bounceAnimation = Tween<double>(begin: 0, end: -8).animate(
       CurvedAnimation(parent: _animController, curve: Curves.easeInOut),
     );
+    if (widget.selectedItemId != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _autoOpenItemCard(widget.selectedItemId!);
+      });
+    }
+  }
+
+  Future<void> _ensureLayoutLoaded() async {
+    if (widget.layout != null) return;
+    try {
+      await widget.controller.fetchMapLayout();
+      if (!mounted) return;
+      setState(() => _mapLayoutLoadFailed = false);
+
+      final selectedItemId = widget.selectedItemId;
+      if (selectedItemId != null) {
+        _autoOpenItemCard(selectedItemId);
+      }
+    } catch (error) {
+      if (mounted) setState(() => _mapLayoutLoadFailed = true);
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant StoreMap oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.controller, widget.controller)) {
+      unawaited(_mapLayoutSubscription?.cancel());
+      unawaited(_inventorySubscription?.cancel());
+      _bindDomainStreams();
+      if (widget.layout == null) unawaited(_ensureLayoutLoaded());
+    }
+    if (!identical(oldWidget.layout, widget.layout)) {
+      _resolveCurrentPopupSelection();
+    }
+    // Each mode starts with a clean selection. In particular, an object
+    // highlighted in Preview must not remain glowing in Manage Layout when
+    // the editor sidebar has no active selection.
+    if (oldWidget.mode != widget.mode) {
+      _selectedPopupElement = null;
+      _activeElementId = null;
+      _isNudging = false;
+      _isAdjustingWidth = false;
+    }
   }
 
   @override
   void dispose() {
+    _mapLayoutSubscription?.cancel();
+    _inventorySubscription?.cancel();
     _animController.dispose();
     _transformationController.dispose();
     super.dispose();
+  }
+
+  void _bindDomainStreams() {
+    _mapLayoutSubscription = widget.controller.mapLayoutSnapshots.listen((_) {
+      if (!mounted || widget.layout != null) return;
+      setState(_resolveCurrentPopupSelection);
+    });
+    _inventorySubscription = widget.controller.inventorySnapshots.listen((_) {
+      if (!mounted) return;
+      final String? selectedItemId = widget.selectedItemId;
+      if (selectedItemId != null) {
+        _autoOpenItemCard(selectedItemId);
+      } else {
+        setState(_resolveCurrentPopupSelection);
+      }
+    });
+  }
+
+  void _resolveCurrentPopupSelection() {
+    final String? selectedId = _selectedPopupElement?.id;
+    if (selectedId == null) return;
+    final Iterable<MapElement> matches = _layout.where(
+      (MapElement element) => element.id == selectedId,
+    );
+    _selectedPopupElement = matches.isEmpty ? null : matches.first;
+  }
+
+  void _autoOpenItemCard(String itemId) {
+    MapElement? element;
+    try {
+      final item = widget.controller.allItems.firstWhere((i) => i.id == itemId);
+      
+      if (item.locationId != null) {
+        element = _layout.firstWhere((e) => e.id == item.locationId);
+      }
+    } catch (e) {
+      element = null;
+    }
+    if (mounted) setState(() => _selectedPopupElement = element);
   }
 
   // ==========================================
@@ -165,7 +302,7 @@ class _StoreMapState extends State<StoreMap>
       Offset(-math.sin(rot), math.cos(rot)),
     ];
 
-    for (var other in widget.controller.storeLayout) {
+    for (var other in _layout) {
       if (other.id == activeEl.id) continue;
 
       // ==========================================
@@ -308,7 +445,7 @@ class _StoreMapState extends State<StoreMap>
               width: 56,
               height: 56,
               decoration: BoxDecoration(
-                color: Colors.orange,
+                color: Colors.blue.shade600, // Updated to blue theme
                 borderRadius: BorderRadius.circular(16),
                 boxShadow: const [
                   BoxShadow(
@@ -322,7 +459,7 @@ class _StoreMapState extends State<StoreMap>
                 turns: _isToolbarExpanded ? 0.125 : 0.0,
                 duration: const Duration(milliseconds: 250),
                 curve: Curves.easeInOut,
-                child: const Icon(Icons.add, color: Colors.black, size: 32),
+                child: const Icon(Icons.add, color: Colors.white, size: 32),
               ),
             ),
           ),
@@ -374,9 +511,9 @@ class _StoreMapState extends State<StoreMap>
                     color: const Color(0xFF1E293B),
                     borderRadius: BorderRadius.circular(16),
                     border: Border.all(
-                      // Change border to orange when hovered
+                      // Change border to blue when hovered
                       color: isHovered
-                          ? Colors.orange
+                          ? Colors.blue.shade400
                           : Colors.blueGrey.withOpacity(0.5),
                       width: isHovered ? 2.0 : 1.5,
                     ),
@@ -412,7 +549,7 @@ class _StoreMapState extends State<StoreMap>
                   decoration: BoxDecoration(
                     color: const Color(0xFF1E293B),
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.orange, width: 1.5),
+                    border: Border.all(color: Colors.blue.shade400, width: 1.5),
                     boxShadow: const [
                       BoxShadow(
                         color: Colors.black45,
@@ -477,6 +614,20 @@ class _StoreMapState extends State<StoreMap>
               icon: const Icon(Icons.remove, color: Colors.white),
               onPressed: () => _zoom(0.8), // Zoom out
             ),
+            Container(
+              height: 1,
+              width: 40,
+              color: Colors.blueGrey.withOpacity(0.5),
+            ),
+            IconButton(
+              icon: const Icon(LucideIcons.focus, color: Colors.white, size: 20),
+              onPressed: () {
+                setState(() {
+                  _recenterMap(preserveScale: true);
+                });
+              },
+              tooltip: 'Recenter Map',
+            ),
           ],
         ),
       ),
@@ -485,23 +636,41 @@ class _StoreMapState extends State<StoreMap>
 
   @override
   Widget build(BuildContext context) {
+    if (_mapLayoutLoadFailed &&
+        !widget.controller.isMapLayoutLoadedForActiveLocation) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('Could not load the store map.'),
+            const SizedBox(height: 8),
+            TextButton(
+              onPressed: () {
+                setState(() => _mapLayoutLoadFailed = false);
+                unawaited(_ensureLayoutLoaded());
+              },
+              child: const Text('Retry'),
+            ),
+          ],
+        ),
+      );
+    }
+
     return Container(
-      margin: widget.mode == MapMode.view
-          ? const EdgeInsets.symmetric(vertical: 8)
-          : EdgeInsets.zero,
+      // Margin on all sides so the map doesn't touch the sidebar
+      margin: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: const Color(0xFF0F172A),
-        borderRadius: widget.mode == MapMode.view
-            ? BorderRadius.circular(12)
-            : BorderRadius.zero,
-        border: widget.mode == MapMode.view
-            ? Border.all(color: Colors.grey.shade800)
-            : null,
+        color: kMapContainerBg,
+        borderRadius: BorderRadius.circular(16),
+        // Faint border
+        border: Border.all(
+          color: Colors.black.withOpacity(0.08),
+          width: 1,
+        ),
       ),
       clipBehavior: Clip.antiAlias,
       child: Column(
         children: [
-          // if (widget.mode == MapMode.view) _buildHeader(),
           _buildLiveMapDisplay(),
           if (widget.location != null) _buildFooter(),
         ],
@@ -515,7 +684,7 @@ class _StoreMapState extends State<StoreMap>
       color: const Color(0xFF0F172A),
       child: Row(
         children: [
-          const Icon(LucideIcons.mapPin, color: Colors.orange, size: 20),
+          Icon(LucideIcons.mapPin, color: Colors.blue.shade600, size: 20),
           const SizedBox(width: 8),
           Expanded(
             child: Column(
@@ -546,17 +715,179 @@ class _StoreMapState extends State<StoreMap>
   // ==========================================
   // NUDGE LOGIC
   // ==========================================
+  // Called by the desktop sidebar. Mobile uses the original floating controls.
+  void clearManageSelection() {
+    if (!mounted) return;
+    setState(() { _activeElementId = null; _isNudging = false; _isAdjustingWidth = false; });
+    widget.onManageSelectionChanged?.call(null);
+  }
+
+  void _duplicateSelectedElement(MapElement original) {
+    // Each map element has its own ID. Inventory assignments refer to the
+    // original ID, so the copy starts with no assigned inventory items.
+    const step = 40.0;
+    final clone = MapElement(
+      id: DateTime.now().microsecondsSinceEpoch.toString(),
+      type: original.type,
+      position: original.position,
+      label: original.type.name.toUpperCase(),
+    );
+    clone.size = original.size;
+    clone.rotation = original.rotation;
+
+    // Search outward from the original, snapping to the existing 40-unit grid.
+    Offset? freePosition;
+    for (int radius = 1; radius <= 16 && freePosition == null; radius++) {
+      for (int dy = -radius; dy <= radius && freePosition == null; dy++) {
+        for (int dx = -radius; dx <= radius; dx++) {
+          if (dx.abs() != radius && dy.abs() != radius) continue;
+          final candidate = _snapToGrid(
+            original.position + Offset(dx * step, dy * step),
+            clone.size,
+            clone.type,
+          );
+          if (!_hasCollision(clone, candidate, clone.size, clone.rotation)) {
+            freePosition = candidate;
+            break;
+          }
+        }
+      }
+    }
+    if (freePosition == null) {
+      AppToast.error(context, 'No free space nearby to duplicate this object.');
+      return;
+    }
+    clone.position = freePosition;
+    setState(() {
+      _layout.add(clone);
+      _activeElementId = clone.id;
+      _isNudging = false;
+      _isAdjustingWidth = false;
+    });
+    widget.onManageSelectionChanged?.call(clone);
+  }
+
+  void applySidebarAction(MapSidebarAction action) {
+    final matches = _layout.where((e) => e.id == _activeElementId);
+    if (matches.isEmpty || widget.mode != MapMode.manage) return;
+    final el = matches.first;
+    if (action == MapSidebarAction.duplicate) {
+      _duplicateSelectedElement(el);
+      return;
+    }
+    if (action == MapSidebarAction.autoAlignWall) {
+      if (!_autoAlignWall(el)) {
+        AppToast.error(context, 'No nearby wall endpoints to align.');
+      }
+      return;
+    }
+    if (action == MapSidebarAction.delete) {
+      _layout.removeWhere((MapElement element) => element.id == el.id);
+      setState(() { _activeElementId = null; _isAdjustingWidth = false; _isNudging = false; });
+      widget.onManageSelectionChanged?.call(null);
+      return;
+    }
+    if (action == MapSidebarAction.rotate) {
+      if (el.type == ElementType.wall) {
+        final center = el.position + Offset(el.size.width / 2, el.size.height / 2);
+        final size = Size(el.size.height, el.size.width);
+        final pos = center - Offset(size.width / 2, size.height / 2);
+        if (_hasCollision(el, pos, size, 0)) {
+          AppToast.error(context, 'Cannot rotate. Overlaps with another element.');
+          return;
+        }
+        setState(() { el.size = size; el.position = pos; el.rotation = 0; });
+      } else {
+        final rotation = el.rotation + math.pi / 2;
+        if (_hasCollision(el, el.position, el.size, rotation)) {
+          AppToast.error(context, 'Cannot rotate. Overlaps with another element.');
+          return;
+        }
+        setState(() => el.rotation = rotation);
+      }
+      return;
+    }
+    switch (action) {
+      case MapSidebarAction.up: _nudgeElement(el, const Offset(0, -40)); break;
+      case MapSidebarAction.down: _nudgeElement(el, const Offset(0, 40)); break;
+      case MapSidebarAction.left: _nudgeElement(el, const Offset(-40, 0)); break;
+      case MapSidebarAction.right: _nudgeElement(el, const Offset(40, 0)); break;
+      case MapSidebarAction.widthLeftMinus: _changeElementWidthDirectional(el, -40, isLeft: true); break;
+      case MapSidebarAction.widthLeftPlus: _changeElementWidthDirectional(el, 40, isLeft: true); break;
+      case MapSidebarAction.widthRightMinus: _changeElementWidthDirectional(el, -40, isLeft: false); break;
+      case MapSidebarAction.widthRightPlus: _changeElementWidthDirectional(el, 40, isLeft: false); break;
+      default: break;
+    }
+  }
+
+  // Align endpoints of the selected axis-aligned wall to nearby
+  // perpendicular wall faces. Other elements are never moved.
+  bool _autoAlignWall(MapElement wall) {
+    if (wall.type != ElementType.wall) return false;
+    final horizontal = wall.size.width >= wall.size.height;
+    const tolerance = 45.0; // slightly more than one 40-unit resize step
+    final start = horizontal ? wall.position.dx : wall.position.dy;
+    final end = start + (horizontal ? wall.size.width : wall.size.height);
+    final crossMin = horizontal ? wall.position.dy : wall.position.dx;
+    final crossMax = crossMin + (horizontal ? wall.size.height : wall.size.width);
+
+    final candidates = <double>[];
+    for (final other in _layout) {
+      if (other.id == wall.id || other.type != ElementType.wall) continue;
+      final otherHorizontal = other.size.width >= other.size.height;
+      if (otherHorizontal == horizontal) continue;
+      final otherStart = horizontal ? other.position.dx : other.position.dy;
+      final otherEnd = otherStart +
+          (horizontal ? other.size.width : other.size.height);
+      final otherCrossMin =
+          horizontal ? other.position.dy : other.position.dx;
+      final otherCrossMax = otherCrossMin +
+          (horizontal ? other.size.height : other.size.width);
+      // The perpendicular wall must reach the selected wall's corridor.
+      if (otherCrossMax < crossMin - tolerance ||
+          otherCrossMin > crossMax + tolerance) continue;
+      candidates.add(otherStart);
+      candidates.add(otherEnd);
+    }
+
+    double snap(double endpoint) {
+      var best = endpoint;
+      var distance = tolerance + 0.001;
+      for (final face in candidates) {
+        final d = (endpoint - face).abs();
+        if (d < distance) {
+          distance = d;
+          best = face;
+        }
+      }
+      return best;
+    }
+
+    final nextStart = snap(start);
+    final nextEnd = snap(end);
+    if (nextEnd - nextStart < 15) return false;
+    if ((nextStart - start).abs() < 0.01 &&
+        (nextEnd - end).abs() < 0.01) return false;
+
+    final nextPos = horizontal
+        ? Offset(nextStart, wall.position.dy)
+        : Offset(wall.position.dx, nextStart);
+    final nextSize = horizontal
+        ? Size(nextEnd - nextStart, wall.size.height)
+        : Size(wall.size.width, nextEnd - nextStart);
+    if (_hasCollision(wall, nextPos, nextSize, wall.rotation)) return false;
+    setState(() {
+      wall.position = nextPos;
+      wall.size = nextSize;
+    });
+    return true;
+  }
+
   void _nudgeElement(MapElement el, Offset delta) {
     final Offset newPosition = el.position + delta;
 
     if (_hasCollision(el, newPosition, el.size, el.rotation)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Cannot nudge. It would overlap another element."),
-          backgroundColor: Colors.redAccent,
-          duration: Duration(seconds: 1),
-        ),
-      );
+      AppToast.error(context, "Cannot nudge. It would overlap another element.");
       return;
     }
 
@@ -576,39 +907,41 @@ class _StoreMapState extends State<StoreMap>
     const double minSizeWall = 15.0;
     const double minSizeObject = 40.0;
 
-    final double minWidth = el.type == ElementType.wall
+    final double minLength = el.type == ElementType.wall
         ? minSizeWall
         : minSizeObject;
 
-    final double newWidth = (el.size.width + amount).clamp(
-      minWidth,
+    // Rotating a wall swaps width and height (its rotation stays at zero).
+    // Always resize along the wall's LONG axis so its 15-unit thickness never
+    // grows when a vertical wall is extended from either endpoint.
+    final bool verticalWall = el.type == ElementType.wall &&
+        el.size.height > el.size.width;
+    final double oldLength = verticalWall ? el.size.height : el.size.width;
+    final double newLength = (oldLength + amount).clamp(
+      minLength,
       double.infinity,
     );
 
-    final double actualChange = newWidth - el.size.width;
+    final double actualChange = newLength - oldLength;
 
     // Nothing to change
     if (actualChange == 0) return;
 
-    final Size newSize = Size(newWidth, el.size.height);
+    final Size newSize = verticalWall
+        ? Size(el.size.width, newLength)
+        : Size(newLength, el.size.height);
 
-    // If expanding/shrinking on the left, shift the X position in the opposite direction.
-    // If on the right, the top-left X position stays the same.
+    // Left = first endpoint (left when horizontal, top when vertical).
+    // Right = last endpoint (right when horizontal, bottom when vertical).
     final Offset newPosition = isLeft
-        ? Offset(el.position.dx - actualChange, el.position.dy)
+        ? (verticalWall
+            ? Offset(el.position.dx, el.position.dy - actualChange)
+            : Offset(el.position.dx - actualChange, el.position.dy))
         : el.position;
 
     // Check collision before applying the resize.
     if (_hasCollision(el, newPosition, newSize, el.rotation)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            "Cannot change width. It would overlap another element.",
-          ),
-          backgroundColor: Colors.redAccent,
-          duration: Duration(seconds: 1),
-        ),
-      );
+      AppToast.error(context, "Cannot resize. It would overlap another element.");
       return;
     }
 
@@ -619,7 +952,7 @@ class _StoreMapState extends State<StoreMap>
   }
 
   Widget _buildBottomActionBar() {
-    final activeEl = widget.controller.storeLayout.firstWhere(
+    final activeEl = _layout.firstWhere(
       (el) => el.id == _activeElementId,
       orElse: () => MapElement(
         id: '',
@@ -680,9 +1013,7 @@ class _StoreMapState extends State<StoreMap>
                   activeEl.position = newPos;
                   activeEl.rotation = 0.0; // Force matrix rotation to 0
                 } else {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text("Cannot rotate. Overlaps with another element."), backgroundColor: Colors.redAccent),
-                  );
+                  AppToast.error(context, "Cannot rotate. Overlaps with another element.");
                 }
               } else {
                 // Normal 3D rotation for objects
@@ -734,7 +1065,9 @@ class _StoreMapState extends State<StoreMap>
           label: "Remove",
           color: Colors.redAccent,
           onTap: () {
-            widget.controller.deleteMapElement(activeEl.id);
+            _layout.removeWhere(
+              (MapElement element) => element.id == activeEl.id,
+            );
             setState(() {
               _activeElementId = null;
               _isAdjustingWidth = false;
@@ -886,7 +1219,7 @@ class _StoreMapState extends State<StoreMap>
     const double padding = 40.0;
 
     // 1. Find the bounds of all placed elements (including negative coordinates)
-    for (var el in widget.controller.storeLayout) {
+    for (var el in _layout) {
       if (el.position.dx < minX) minX = el.position.dx;
       if (el.position.dy < minY) minY = el.position.dy;
 
@@ -1062,7 +1395,7 @@ class _StoreMapState extends State<StoreMap>
     }
 
     List<MapElement> _buildRenderOrder() {
-      final rawElements = List<MapElement>.from(widget.controller.storeLayout);
+      final rawElements = List<MapElement>.from(_layout);
       final elements = _splitWallsAtJunctions(rawElements);
       if (elements.length <= 1) return elements;
 
@@ -1162,6 +1495,27 @@ class _StoreMapState extends State<StoreMap>
 
     Widget map = LayoutBuilder(
       builder: (context, constraints) {
+        final nextViewport = Size(constraints.maxWidth, constraints.maxHeight);
+        final viewportChanged = _currentViewportSize != Size.zero &&
+            _currentViewportSize != nextViewport;
+        _currentViewportSize = nextViewport;
+        _currentMapWidth = mapWidth;
+        _currentMapHeight = mapHeight;
+
+        // Manage/Assign use a sidebar; Preview has a wider canvas.
+        // Keep the current zoom, but recenter when the viewport changes.
+        if (viewportChanged &&
+            _isInitialScaleSet &&
+            !_viewportRecenterQueued &&
+            nextViewport.width > 0 &&
+            nextViewport.height > 0) {
+          _viewportRecenterQueued = true;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            _viewportRecenterQueued = false;
+            if (mounted) _recenterMap(preserveScale: true);
+          });
+        }
+
         if (!_isInitialScaleSet && constraints.maxWidth > 0) {
           _isInitialScaleSet = true;
           WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -1184,6 +1538,7 @@ class _StoreMapState extends State<StoreMap>
         return InteractiveViewer(
           transformationController: _transformationController,
           constrained: false,
+          scaleEnabled: false,
           minScale: 0.1,
           maxScale: 2.5,
           boundaryMargin: const EdgeInsets.all(double.infinity),
@@ -1267,17 +1622,10 @@ class _StoreMapState extends State<StoreMap>
 
                   if (!_hasCollision(newEl, finalPos, finalSize, 0.0)) {
                     setState(() {
-                      widget.controller.storeLayout.add(newEl);
+                      _layout.add(newEl);
                     });
                   } else {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text(
-                          "Cannot place element here. It overlaps with another.",
-                        ),
-                        backgroundColor: Colors.redAccent,
-                      ),
-                    );
+                    AppToast.error(context, "Cannot place element here. It overlaps with another.");
                   }
 
                   setState(() {
@@ -1295,6 +1643,7 @@ class _StoreMapState extends State<StoreMap>
                           _isAdjustingWidth = false;
                           _isNudging = false; // Add reset for nudge menu here
                         });
+                        widget.onManageSelectionChanged?.call(null);
                       } else if (widget.mode == MapMode.view) {
                         setState(() {
                           _selectedPopupElement = null;
@@ -1310,9 +1659,8 @@ class _StoreMapState extends State<StoreMap>
                         key: _mapKey,
                         width: mapWidth,
                         height: mapHeight,
-                        decoration: BoxDecoration(
-                          color: const Color.fromARGB(255, 124, 126, 129),
-                          border: Border.all(color: Colors.blueGrey, width: 2),
+                        decoration: const BoxDecoration(
+                          color: Colors.transparent, // Completely transparent to show background
                         ),
                         child: Stack(
                           clipBehavior: Clip.none,
@@ -1352,9 +1700,9 @@ class _StoreMapState extends State<StoreMap>
                                             decoration: BoxDecoration(
                                               color: _dragPreviewValid
                                                   ? Colors.greenAccent
-                                                        .withOpacity(0.12)
+                                                      .withOpacity(0.12)
                                                   : Colors.redAccent
-                                                        .withOpacity(0.25),
+                                                      .withOpacity(0.25),
                                               border: Border.all(
                                                 color: _dragPreviewValid
                                                     ? Colors.green
@@ -1372,7 +1720,8 @@ class _StoreMapState extends State<StoreMap>
                             ...sortedLayout.map(
                               (el) => _buildPhysicalElement(el, minX, minY),
                             ),
-                            if (_selectedPopupElement != null)
+                            if (widget.mode == MapMode.view &&
+                                _selectedPopupElement != null)
                               _buildFloatingPopup(mapWidth, minX, minY),
                           ],
                         ),
@@ -1390,7 +1739,7 @@ class _StoreMapState extends State<StoreMap>
     Widget mapDisplay = Stack(
       children: [
         map,
-        if (widget.mode == MapMode.manage && _activeElementId != null)
+        if (widget.mode == MapMode.manage && widget.showMobileToolbar && _activeElementId != null)
           Positioned(
             bottom: 20,
             left: 0,
@@ -1400,29 +1749,21 @@ class _StoreMapState extends State<StoreMap>
         // ==========================================
         // NEW: Left Toolbar & Right Zoom Controls injected here
         // ==========================================
-        if (widget.mode == MapMode.manage) ...[
+        if (widget.mode == MapMode.manage && widget.showMobileToolbar) ...[
           _buildLeftToolbar(),
-          _buildZoomControls(),
         ],
+        
+          _buildZoomControls(),
       ],
     );
 
-    if (widget.mode == MapMode.view) {
-      return Container(
-        height: 400,
+    return Expanded(
+      child: Container(
         width: double.infinity,
-        color: const Color(0xFF0F172A),
+        color: Colors.transparent,
         child: mapDisplay,
-      );
-    } else {
-      return Expanded(
-        child: Container(
-          width: double.infinity,
-          color: const Color(0xFF0F172A),
-          child: mapDisplay,
-        ),
-      );
-    }
+      ),
+    );
   }
 
   Color _getElementColor(ElementType type, bool isHighlighted) {
@@ -1441,7 +1782,6 @@ class _StoreMapState extends State<StoreMap>
         return Colors.grey;
     }
   }
-
   /// Renders just the 3D model for a given type/size/rotation, with no
   /// interaction wrapper — used for the drag/move ghost preview.
   Widget _buildElementVisual(ElementType type, Size size, double rotation) {
@@ -1537,6 +1877,10 @@ class _StoreMapState extends State<StoreMap>
     final bool isHighlighted = sourceId == widget.highlightId;
     final bool isActive =
         sourceId == _activeElementId && widget.mode == MapMode.manage;
+    // Also highlight the object whose details are open in Preview mode.
+    final bool isPreviewSelected = widget.mode == MapMode.view &&
+        _selectedPopupElement?.id == sourceId;
+    final bool showObjectGlow = isActive || isPreviewSelected;
 
     // `el` may be a synthetic wall segment created by _splitWallsAtJunctions
     // purely for rendering/z-order purposes — it is NOT in storeLayout and
@@ -1544,7 +1888,7 @@ class _StoreMapState extends State<StoreMap>
     // dragging, collision-checking and callbacks must operate on the real
     // source element instead. For non-wall elements sourceId == el.id, so
     // this just resolves to el itself.
-    final MapElement interactiveEl = widget.controller.storeLayout.firstWhere(
+    final MapElement interactiveEl = _layout.firstWhere(
       (e) => e.id == sourceId,
       orElse: () => el,
     );
@@ -1667,9 +2011,9 @@ class _StoreMapState extends State<StoreMap>
             ? baseColor.withOpacity(0.3)
             : Colors.transparent,
         border: !useFootprintOutline && isActive
-            ? Border.all(color: Colors.yellowAccent, width: 3)
+            ? Border.all(color: Colors.blue.shade600, width: 3)
             : (isHighlighted
-                  ? Border.all(color: Colors.orange, width: 2)
+                  ? Border.all(color: Colors.blue.shade400, width: 2)
                   : null),
       ),
       child: Stack(
@@ -1688,9 +2032,29 @@ class _StoreMapState extends State<StoreMap>
                     (-baseY * 12 - 33) + nudgeX,
                     (baseY * 12 - 35) + nudgeY,
                   ),
-                  child: CustomPaint(
-                    painter: modelPainter,
-                    size: Size(el.size.width, el.size.height),
+                  child: Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      if (showObjectGlow)
+                        // The glow is made from the SAME 3D painter, so it
+                        // follows the rendered object instead of its floor tile.
+                        // No continuous animation or expensive blur filter.
+                        ColorFiltered(
+                          colorFilter: const ColorFilter.mode(
+                            Color(0xBBFF9800), BlendMode.srcIn),
+                          child: Transform.scale(
+                            scale: 1.045,
+                            child: CustomPaint(
+                              painter: modelPainter,
+                              size: Size(el.size.width, el.size.height),
+                            ),
+                          ),
+                        ),
+                      CustomPaint(
+                        painter: modelPainter,
+                        size: Size(el.size.width, el.size.height),
+                      ),
+                    ],
                   ),
                 ),
               ),
@@ -1759,18 +2123,22 @@ class _StoreMapState extends State<StoreMap>
                         }
                         _activeElementId = interactiveEl.id;
                       });
+                      widget.onManageSelectionChanged?.call(interactiveEl);
                     } else if (widget.mode == MapMode.selection &&
                         widget.selectedItemId != null) {
+                      if (!widget.itemAssignmentEnabled) {
+                        AppToast.error(
+                          context,
+                          'Save or reload the map before assigning items.',
+                        );
+                        return;
+                      }
                       if (el.type == ElementType.door ||
                           el.type == ElementType.cashier ||
                           el.type == ElementType.wall) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text(
-                              "Cannot assign items to ${el.type.name}s.",
-                            ),
-                            backgroundColor: Colors.redAccent,
-                          ),
+                        AppToast.error(
+                          context,
+                          "Cannot assign items to ${el.type.name}s.",
                         );
                         return;
                       }
@@ -1784,28 +2152,14 @@ class _StoreMapState extends State<StoreMap>
                           widget.onSelectionAssigned!();
                         }
                         setState(() {});
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text(
-                              "Item assigned to location!",
-                              style: TextStyle(color: Colors.white),
-                            ),
-                            backgroundColor: Colors.green,
-                          ),
-                        );
+                        AppToast.success(context, "Item assigned to location!");
                       }
-                    } else if (widget.mode == MapMode.pick) {
+
+                  } else if (widget.mode == MapMode.pick) {
                       if (el.type == ElementType.door ||
                           el.type == ElementType.cashier ||
                           el.type == ElementType.wall) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text(
-                              "Cannot assign items to ${el.type.name}s.",
-                            ),
-                            backgroundColor: Colors.redAccent,
-                          ),
-                        );
+                        AppToast.error(context, "Cannot assign items to ${el.type.name}s.");
                         return;
                       }
                       if (widget.onElementSelected != null) {
@@ -1949,31 +2303,7 @@ class _StoreMapState extends State<StoreMap>
     return Stack(
       clipBehavior: Clip.none,
       children: [
-        // Arrow/pin marking exactly which object this popup belongs to.
-        // Billboarded so it stands upright instead of lying on the floor.
-        Positioned(
-          left: el.position.dx + el.size.width / 2 - 100 - minX,
-          top: el.position.dy - _pinHeightOffset(el.type) - minY,
-          child: Transform(
-            transform: billboard,
-            alignment: Alignment.bottomCenter,
-            child: AnimatedBuilder(
-              animation: _bounceAnimation,
-              builder: (context, child) {
-                return Transform.translate(
-                  offset: Offset(0, _bounceAnimation.value),
-                  child: child,
-                );
-              },
-              child: const Icon(
-                LucideIcons.mapPin,
-                color: Colors.orange,
-                size: 26,
-                shadows: [Shadow(color: Colors.black54, blurRadius: 4)],
-              ),
-            ),
-          ),
-        ),
+        // No location pin: the selected 3D model glows instead.
         Positioned(
           left: px,
           top: py,
@@ -1996,7 +2326,7 @@ class _StoreMapState extends State<StoreMap>
                       offset: const Offset(0, 6),
                     ),
                   ],
-                  border: Border.all(color: Colors.orange, width: 2),
+                  border: Border.all(color: Colors.blue.shade600, width: 2),
                 ),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -2008,7 +2338,7 @@ class _StoreMapState extends State<StoreMap>
                         vertical: 8,
                       ),
                       decoration: BoxDecoration(
-                        color: Colors.orange.withOpacity(0.15),
+                        color: Colors.blue.shade600.withOpacity(0.15),
                         borderRadius: const BorderRadius.vertical(
                           top: Radius.circular(10),
                         ),
@@ -2019,9 +2349,9 @@ class _StoreMapState extends State<StoreMap>
                           Expanded(
                             child: Text(
                               el.label,
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontWeight: FontWeight.bold,
-                                color: Colors.orange,
+                                color: Colors.blue.shade600,
                                 fontSize: 13,
                               ),
                               overflow: TextOverflow.ellipsis,
@@ -2087,10 +2417,10 @@ class _StoreMapState extends State<StoreMap>
                                           ),
                                           Text(
                                             "Qty: ${item.quantity}",
-                                            style: const TextStyle(
+                                            style: TextStyle(
                                               fontSize: 10,
                                               fontWeight: FontWeight.bold,
-                                              color: Colors.orange,
+                                              color: Colors.blue.shade600,
                                             ),
                                           ),
                                         ],
@@ -2237,8 +2567,8 @@ class _StoreMapState extends State<StoreMap>
                             children: [
                               Text(
                                 "Qty: ${item.quantity} ${item.unit}",
-                                style: const TextStyle(
-                                  color: Colors.orange,
+                                style: TextStyle(
+                                  color: Colors.blue.shade600,
                                   fontWeight: FontWeight.bold,
                                 ),
                               ),
@@ -2264,27 +2594,54 @@ class _StoreMapState extends State<StoreMap>
   }
 }
 
+// class GridPainter extends CustomPainter {
+//   @override
+//   void paint(Canvas canvas, Size size) {
+//     final gridPaint = Paint()
+//       ..color = Colors.white
+//       ..strokeWidth = 1.5
+//       ..style = PaintingStyle.stroke;
+
+//     // Draw the white isometric grid lines across the available area
+//     const double step = 40;
+
+//     for (double i = 0; i <= size.width; i += step) {
+//       canvas.drawLine(Offset(i, 0), Offset(i, size.height), gridPaint);
+//     }
+//     for (double i = 0; i <= size.height; i += step) {
+//       canvas.drawLine(Offset(0, i), Offset(size.width, i), gridPaint);
+//     }
+//   }
+
+//   @override
+//   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+// }
 class GridPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
-    final paint = Paint()
+    // 1. DRAW THE FLOOR BACKGROUND COLOR
+    // Change this hex code to whatever color you want the grid area to be
+    final floorPaint = Paint()..color = const Color.fromARGB(255, 165, 205, 245); 
+    canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), floorPaint);
+
+    // 2. DRAW THE GRID LINES
+    final linePaint = Paint()
       ..color = Colors.white
       ..strokeWidth = 1.5;
 
     const double step = 40;
 
     for (double i = 0; i <= size.width; i += step) {
-      canvas.drawLine(Offset(i, 0), Offset(i, size.height), paint);
+      canvas.drawLine(Offset(i, 0), Offset(i, size.height), linePaint);
     }
     for (double i = 0; i <= size.height; i += step) {
-      canvas.drawLine(Offset(0, i), Offset(size.width, i), paint);
+      canvas.drawLine(Offset(0, i), Offset(size.width, i), linePaint);
     }
   }
 
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
-
 class CADBlockPainter extends CustomPainter {
   final Color baseColor;
   final double zHeight;

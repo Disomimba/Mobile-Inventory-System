@@ -1,20 +1,51 @@
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
-import '../../data/inventory.dart'; 
+import '../../data/inventory.dart';
+import '../../logic/inventory_controller.dart';
+
+const Color _primaryBlue = Color(0xFF2563EB);
+const String _fontFam = 'Hellix';
 
 class ItemCard extends StatelessWidget {
-  final InventoryItem item; 
+  final InventoryItem item;
+  final InventoryController controller;
   final Function(InventoryItem) onClick;
 
   const ItemCard({
     super.key,
     required this.item,
+    required this.controller,
     required this.onClick,
   });
 
+  Color _statusColor(StockStatus status) {
+    switch (status) {
+      case StockStatus.ok:
+        return Colors.grey.shade600;
+      case StockStatus.low:
+        return Colors.orange; // Kept orange for semantic low-stock warning
+      case StockStatus.critical:
+      case StockStatus.out:
+        return Colors.red; // Kept red for semantic out-of-stock warning
+    }
+  }
+
+  String? _statusLabel(StockStatus status) {
+    switch (status) {
+      case StockStatus.ok:
+        return null;
+      case StockStatus.low:
+        return 'LOW STOCK';
+      case StockStatus.critical:
+        return 'CRITICAL';
+      case StockStatus.out:
+        return 'OUT OF STOCK';
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final bool isLowStock = item.quantity <= (item.maxQuantity * 0.20);
+    final status = controller.stockStatusFor(item);
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 12.0),
@@ -38,9 +69,8 @@ class ItemCard extends StatelessWidget {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _buildImage(isLowStock),
+              _buildImage(status),
               const SizedBox(width: 16),
-              
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -48,7 +78,7 @@ class ItemCard extends StatelessWidget {
                   children: [
                     _buildNameAndPrice(),
                     const SizedBox(height: 8),
-                    _buildStockAndLocation(isLowStock),
+                    _buildStockAndLocation(status),
                   ],
                 ),
               ),
@@ -69,31 +99,40 @@ class ItemCard extends StatelessWidget {
             Expanded(
               child: Text(
                 item.name,
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14,
+                  fontFamily: _fontFam,
+                ),
                 overflow: TextOverflow.ellipsis,
               ),
             ),
             Text(
               '₱${item.price.toStringAsFixed(2)}',
               style: const TextStyle(
-                color: Colors.orange,
+                color: _primaryBlue,
                 fontWeight: FontWeight.bold,
                 fontSize: 14,
+                fontFamily: _fontFam,
               ),
             ),
           ],
         ),
         const SizedBox(height: 4),
         Text(
-          'SKU: ${item.sku}',
-          style: TextStyle(color: Colors.grey.shade500, fontSize: 12),
+          item.sku,
+          style: TextStyle(
+            color: Colors.grey.shade500, 
+            fontSize: 12,
+            fontFamily: _fontFam,
+          ),
         ),
       ],
     );
   }
 
-  Widget _buildStockAndLocation(bool isLowStock) {
-    
+  Widget _buildStockAndLocation(StockStatus status) {
+    final isAlert = status != StockStatus.ok;
 
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -112,28 +151,21 @@ class ItemCard extends StatelessWidget {
                 "${item.quantity.toStringAsFixed(item.quantity.truncateToDouble() == item.quantity ? 0 : 2)}${item.unit}",
                 style: TextStyle(
                   fontSize: 12,
-                  color: isLowStock ? Colors.red : Colors.grey.shade600,
-                  fontWeight: isLowStock ? FontWeight.w600 : FontWeight.normal,
+                  color: _statusColor(status),
+                  fontWeight: isAlert ? FontWeight.w600 : FontWeight.normal,
+                  fontFamily: _fontFam,
                 ),
               ),
             ],
           ),
         ),
-        
-        // Row(
-        //   children: [
-        //     const Icon(LucideIcons.mapPin, size: 12, color: Colors.grey),
-        //     const SizedBox(width: 4),
-        //     Text(
-        //       locationText, 
-        //       style: const TextStyle(fontSize: 12, color: Colors.grey),
-        //     ),
-        //   ],
-        // ),
       ],
     );
   }
-  Widget _buildImage(bool isLowStock) {
+
+  Widget _buildImage(StockStatus status) {
+    final label = _statusLabel(status);
+
     return Stack(
       children: [
         Container(
@@ -153,21 +185,22 @@ class ItemCard extends StatelessWidget {
             ),
           ),
         ),
-        if (isLowStock)
+        if (label != null)
           Positioned(
             bottom: 0,
             left: 0,
             right: 0,
             child: Container(
-              color: Colors.red,
+              color: _statusColor(status),
               padding: const EdgeInsets.symmetric(vertical: 2),
-              child: const Text(
-                'LOW STOCK',
+              child: Text(
+                label,
                 textAlign: TextAlign.center,
-                style: TextStyle(
+                style: const TextStyle(
                   color: Colors.white,
                   fontSize: 9,
                   fontWeight: FontWeight.bold,
+                  fontFamily: _fontFam,
                 ),
               ),
             ),

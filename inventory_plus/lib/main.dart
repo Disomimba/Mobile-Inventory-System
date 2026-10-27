@@ -1,34 +1,85 @@
+import 'package:flutter/foundation.dart';
+import 'package:flutter_litert/flutter_litert.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter/material.dart';
 import 'ui/login_page.dart';
 import 'ui/main_screen.dart'; 
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'logic/inventory_controller.dart'; 
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'login/auth_service.dart';
+import 'navigation/main_section.dart';
+import 'services/main_section_url.dart';
+import 'services/realtime/realtime_sync_service.dart';
+import 'services/app_logger.dart';
+import 'ui/widgets/startup_restoration_surface.dart';
 
 Future<void> main() async {
+  final startupStopwatch = Stopwatch()..start();
   WidgetsFlutterBinding.ensureInitialized();
-  
-  try {
-    await dotenv.load(fileName: "lib/.env");
+  AppLogger.configure();
+  final initialRequestedPath = readMainSectionPath();
 
-    await Supabase.initialize(
+  if (kDebugMode) debugPrint('[Startup] Flutter entry');
+  
+try {
+      await dotenv.load(fileName: "lib/.env");
+      // Use const String.fromEnvironment to read Vercel's injected keys
+      // await Supabase.initialize(
+      //   url: const String.fromEnvironment('SUPABASE_URL'),
+      //   anonKey: const String.fromEnvironment('SUPABASE_ANON_KEY'),
+      // );
+
+      await Supabase.initialize(
       url: dotenv.env['SUPABASE_URL']!,
       anonKey: dotenv.env['SUPABASE_ANON_KEY']!,
     );
+    if (kDebugMode) {
+      debugPrint(
+        '[Startup] Supabase initialized '
+        'elapsed=${startupStopwatch.elapsedMilliseconds}ms',
+      );
+    }
   } catch (e) {
-    print("Initialization Error: $e");
+    debugPrint("Initialization Error: $e");
   }
 
   final inventoryController = InventoryController();
+  final realtimeSyncService = RealtimeSyncService();
 
-  runApp(InventoryApp(controller: inventoryController));
+  inventoryController.bindRealtimeSync(realtimeSyncService);
+
+  runApp(
+    InventoryApp(
+      controller: inventoryController,
+      realtimeSync: realtimeSyncService,
+      initialRequestedPath: initialRequestedPath,
+    ),
+  );
+  if (kDebugMode) {
+    debugPrint(
+      '[Startup] runApp requested '
+      'elapsed=${startupStopwatch.elapsedMilliseconds}ms',
+    );
+  }
+}
+Future<void> initDetectorRuntime() async {
+  if (kIsWeb) {
+    await initializeWeb(); // loads the LiteRT.js/TFLite.js runtime in-browser
+  }
 }
 
 class InventoryApp extends StatelessWidget {
   final InventoryController controller;
+  final RealtimeSyncService realtimeSync;
+  final String initialRequestedPath;
 
-  const InventoryApp({super.key, required this.controller});
+  const InventoryApp({
+    super.key,
+    required this.controller,
+    required this.realtimeSync,
+    required this.initialRequestedPath,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -41,9 +92,36 @@ class InventoryApp extends StatelessWidget {
       ),
       initialRoute: '/',
       routes: {
-        '/': (context) => AuthWrapper(controller: controller),
+        '/': (context) => AuthWrapper(
+          controller: controller,
+          realtimeSync: realtimeSync,
+          requestedPath: initialRequestedPath,
+        ),
         '/login': (context) => LoginPage(controller: controller),
-        '/main': (context) => MainScreen(controller: controller),
+      },
+      onGenerateRoute: (settings) {
+        final section = MainSection.fromPath(settings.name);
+        if (settings.name == '/main' || section != null) {
+          if (settings.arguments is! AuthenticatedMainRoute) {
+            return MaterialPageRoute<void>(
+              settings: settings,
+              builder: (context) => AuthWrapper(
+                controller: controller,
+                realtimeSync: realtimeSync,
+                requestedPath: settings.name ?? '/main',
+              ),
+            );
+          }
+          return MaterialPageRoute<void>(
+            settings: settings,
+            builder: (context) => MainScreen(
+              controller: controller,
+              realtimeSync: realtimeSync,
+              initialSection: section,
+            ),
+          );
+        }
+        return null;
       },
     );
   }
@@ -51,14 +129,24 @@ class InventoryApp extends StatelessWidget {
 
 class AuthWrapper extends StatefulWidget {
   final InventoryController controller;
+  final RealtimeSyncService realtimeSync;
+  final String requestedPath;
 
-  const AuthWrapper({super.key, required this.controller});
+  const AuthWrapper({
+    super.key,
+    required this.controller,
+    required this.realtimeSync,
+    required this.requestedPath,
+  });
 
   @override
   State<AuthWrapper> createState() => _AuthWrapperState();
 }
 
 class _AuthWrapperState extends State<AuthWrapper> {
+  _AuthRestoreState _restoreState = _AuthRestoreState.restoring;
+  bool _restoreInFlight = false;
+
   @override
   void initState() {
     super.initState();
@@ -68,55 +156,177 @@ class _AuthWrapperState extends State<AuthWrapper> {
   }
 
   Future<void> _checkAuth() async {
-    final prefs = await SharedPreferences.getInstance();
-    final isLoggedIn = prefs.getBool('isLoggedIn') ?? false;
-    final userId = prefs.getString('userId');
-    
-    if (isLoggedIn && userId != null) {
+    if (_restoreInFlight) return;
+    _restoreInFlight = true;
+    if (mounted) {
+      setState(() => _restoreState = _AuthRestoreState.restoring);
+    }
+    final stopwatch = Stopwatch()..start();
+    if (kDebugMode) debugPrint('[Startup] Auth restore started');
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final isLoggedIn = prefs.getBool('isLoggedIn') ?? false;
+      final sessionToken = prefs.getString('sessionToken');
+
+      if (!isLoggedIn || sessionToken == null || sessionToken.isEmpty) {
+        await prefs.clear();
+        await _routeToLogin();
+        return;
+      }
+
       try {
-        // Fetch user profile from the 'profiles' table.
-        final userProfile = await Supabase.instance.client
-            .from('profiles') 
-            .select()
-            .eq('id', userId)
-            .maybeSingle();
+        final userProfile = await AuthService().restoreSession(sessionToken);
 
-        if (userProfile != null) {
-          final String? assignedLocationId = userProfile['location_id'];
+        if (userProfile == null) {
+          await prefs.clear();
+          await _routeToLogin();
+          return;
+        }
 
-          widget.controller.setLoggedInUser(
-            name: userProfile['name'] ?? 'User',
-            id: userId,
-            role: userProfile['role'] ?? 'staff',
+        final assignedLocationId = userProfile['location_id']?.toString();
+        final userId = userProfile['id']?.toString();
+        final role = userProfile['role']?.toString();
+        if (assignedLocationId == null ||
+            assignedLocationId.isEmpty ||
+            userId == null ||
+            userId.isEmpty ||
+            role == null ||
+            role.isEmpty) {
+          throw const FormatException(
+            'Session restoration returned an incomplete profile.',
           );
+        }
 
-          if (assignedLocationId != null && assignedLocationId.isNotEmpty) {
-            await widget.controller.loadAppData(assignedLocationId);
-            if (mounted) {
-              Navigator.pushReplacementNamed(context, '/main');
-              return;
-            }
+        widget.controller.setLoggedInUser(
+          name: userProfile['name']?.toString() ?? 'User',
+          id: userId,
+          role: role,
+          email: userProfile['email']?.toString(),
+          sessionToken: sessionToken,
+        );
+        widget.controller.setActiveLocation(assignedLocationId);
+
+        if (!mounted) return;
+        setState(() => _restoreState = _AuthRestoreState.authenticated);
+        if (kDebugMode) {
+          debugPrint(
+            '[Startup] Restored profile, role, location, and session '
+            'elapsed=${stopwatch.elapsedMilliseconds}ms',
+          );
+        }
+        final requestedSection = MainSection.fromPath(widget.requestedPath);
+        final restoredSection = MainSection.resolveForRole(
+          requestedSection,
+          role,
+        );
+        try {
+          await widget.realtimeSync.start(
+            locationId: assignedLocationId,
+            userId: userId,
+            userRole: role,
+          );
+        } catch (error, stackTrace) {
+          // Realtime transport failure is not proof that the restored
+          // application session is invalid. MainScreen will safely retry the
+          // same idempotent session start after its first frame.
+          debugPrint('[Startup] Realtime restore start failed: $error');
+          debugPrintStack(stackTrace: stackTrace);
+          try {
+            await widget.realtimeSync.stop();
+          } catch (stopError, stopStackTrace) {
+            debugPrint('[Startup] Partial realtime cleanup failed: $stopError');
+            debugPrintStack(stackTrace: stopStackTrace);
           }
         }
-      } catch (e) {
-        print("Error restoring session: $e");
+        if (!mounted) return;
+        Navigator.pushReplacementNamed(
+          context,
+          restoredSection.routePath,
+          arguments: const AuthenticatedMainRoute(),
+        );
+        if (kDebugMode) {
+          debugPrint('[Startup] MainScreen route requested');
+        }
+      } catch (error, stackTrace) {
+        debugPrint('[Startup] Session restore temporarily failed: $error');
+        debugPrintStack(stackTrace: stackTrace);
+        if (mounted) {
+          setState(() => _restoreState = _AuthRestoreState.failed);
+        }
       }
-      // If fetching profile or app data loading fails, clear session and fall back to login
-      await prefs.clear();
+    } catch (error, stackTrace) {
+      debugPrint('[Startup] Session storage restore failed: $error');
+      debugPrintStack(stackTrace: stackTrace);
+      if (mounted) {
+        setState(() => _restoreState = _AuthRestoreState.failed);
+      }
+    } finally {
+      _restoreInFlight = false;
     }
-    
-    if (mounted) {
-      Navigator.pushReplacementNamed(context, '/login');
-    }
+  }
+
+  Future<void> _routeToLogin() async {
+    if (!mounted) return;
+    setState(() => _restoreState = _AuthRestoreState.invalid);
+    Navigator.pushReplacementNamed(context, '/login');
+    if (kDebugMode) debugPrint('[Startup] LoginPage route requested');
   }
 
   @override
   Widget build(BuildContext context) {
-    return const Scaffold(
-      backgroundColor: Color(0xFF0F172A),
-      body: Center(
-        child: CircularProgressIndicator(color: Colors.orange),
-      ),
-    );
+    if (_restoreState == _AuthRestoreState.failed) {
+      return Scaffold(
+        backgroundColor: const Color(0xFFF4F6F8),
+        body: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 360),
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(
+                    Icons.cloud_off_outlined,
+                    color: Color(0xFF64748B),
+                    size: 32,
+                  ),
+                  const SizedBox(height: 14),
+                  const Text(
+                    'Unable to restore your session',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: Color(0xFF0F172A),
+                      fontSize: 17,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  const Text(
+                    'Check your connection and try again. Your saved session '
+                    'has not been cleared.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: Color(0xFF64748B),
+                      height: 1.4,
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+                  FilledButton.icon(
+                    onPressed: _checkAuth,
+                    icon: const Icon(Icons.refresh, size: 18),
+                    label: const Text('Retry'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return const StartupRestorationSurface();
   }
 }
+
+enum _AuthRestoreState { restoring, authenticated, invalid, failed }

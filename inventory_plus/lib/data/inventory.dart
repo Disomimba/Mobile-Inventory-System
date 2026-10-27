@@ -46,7 +46,7 @@ class MapElement {
     'height': size.height,
     'label': label,
     'rotation': rotation,
-  };
+  };  
 
   factory MapElement.fromJson(Map<String, dynamic> json) => MapElement(
     id: json['id'],
@@ -188,44 +188,166 @@ class CustomerOrderItem {
   });
 
   Map<String, dynamic> toJson() => {
-    'product_id': productId,
-    'product_name': productName,
-    'quantity': quantity,
-  };
+        'product_id': productId,
+        'product_name': productName,
+        'quantity': quantity,
+      };
 
   factory CustomerOrderItem.fromJson(Map<String, dynamic> json) =>
       CustomerOrderItem(
-        productId: json['product_id'],
-        productName: json['product_name'],
-        quantity: (json['quantity'] as num).toDouble(),
+        // The fallback ?? checks ensure it can read both your old format and the new format
+        productId: json['product_id']?.toString() ?? json['productId']?.toString() ?? '',
+        productName: json['product_name']?.toString() ?? json['productName']?.toString() ?? 'Unknown',
+        quantity: (json['quantity'] as num?)?.toDouble() ?? 0.0,
       );
 }
-
 class CustomerOrder {
   final String id;
+  final List<CustomerOrderItem> items;
   final String status;
   final DateTime createdAt;
-  final List<CustomerOrderItem> items;
+  final DateTime? _canonicalEventAt;
+  final double totalAmount;
+  final double discountAmount;
+  final String? paymentMode;
+  final double cashGiven;
+  final double changeAmount;
+  final String? paymentReference;
+
+  final String? createdById;
+  final String? createdByName;
+
+  final String? assignedHelperId;
+  final String? assignedHelperName;
+  final DateTime? assignedAt;
+  final String? assignedByAdminId;
+  final String? assignedByAdminName;
+
+  final String? preparedById;
+  final String? preparedByName;
+  final DateTime? preparedAt;
+
+  final String? completedById;
+  final String? completedByName;
+  final DateTime? completedAt;
+
+  final String? cancelledById;
+  final String? cancelledByName;
+  final DateTime? cancelledAt;
+
+  final String? returnedById;
+  final String? returnedByName;
+  final DateTime? returnedAt;
+  final String? returnReason;
 
   CustomerOrder({
     required this.id,
+    required this.items,
     required this.status,
     required this.createdAt,
-    required this.items,
-  });
+    DateTime? eventAt,
+    this.totalAmount = 0.0,
+    this.discountAmount = 0.0,
+    this.paymentMode,
+    this.cashGiven = 0.0,
+    this.changeAmount = 0.0,
+    this.paymentReference,
+    this.createdById,
+    this.createdByName,
+    this.assignedHelperId,
+    this.assignedHelperName,
+    this.assignedAt,
+    this.assignedByAdminId,
+    this.assignedByAdminName,
+    this.preparedById,
+    this.preparedByName,
+    this.preparedAt,
+    this.completedById,
+    this.completedByName,
+    this.completedAt,
+    this.cancelledById,
+    this.cancelledByName,
+    this.cancelledAt,
+    this.returnedById,
+    this.returnedByName,
+    this.returnedAt,
+    this.returnReason,
+  }) : _canonicalEventAt = eventAt;
 
-  factory CustomerOrder.fromSupabase(Map<String, dynamic> map) {
-    var itemsList = <CustomerOrderItem>[];
-    if (map['items'] != null) {
-      itemsList = (map['items'] as List)
-          .map((i) => CustomerOrderItem.fromJson(i as Map<String, dynamic>))
-          .toList();
-    }
-    return CustomerOrder(
-      id: map['id'].toString(),
-      status: map['status'] ?? 'pending',
-      createdAt: DateTime.parse(map['created_at']).toLocal(),
-      items: itemsList,
+  DateTime get eventAt {
+    final canonical = _canonicalEventAt;
+    if (canonical != null) return canonical;
+    final candidates = <DateTime?>[
+      createdAt,
+      assignedAt,
+      preparedAt,
+      completedAt,
+      cancelledAt,
+      returnedAt,
+    ].whereType<DateTime>();
+    return candidates.reduce(
+      (latest, value) => value.isAfter(latest) ? value : latest,
     );
+  }
+
+  factory CustomerOrder.fromJson(Map<String, dynamic> json) {
+    return CustomerOrder(
+      id: json['id'].toString(),
+      status: json['status'] ?? 'pending',
+      createdAt: _parseDate(json['created_at']) ?? DateTime.now(),
+      eventAt: _parseDate(json['event_at']),
+      totalAmount: (json['total_amount'] as num?)?.toDouble() ?? 0.0,
+      discountAmount: (json['discount_amount'] as num?)?.toDouble() ?? 0.0,
+      paymentMode: json['payment_mode']?.toString(),
+      cashGiven: (json['cash_given'] as num?)?.toDouble() ?? 0.0,
+      changeAmount: (json['change_amount'] as num?)?.toDouble() ?? 0.0,
+      paymentReference: json['payment_reference']?.toString(),
+
+      createdById: json['created_by_id']?.toString(),
+      createdByName: json['created_by_name']?.toString(),
+
+      assignedHelperId: json['assigned_helper_id']?.toString(),
+      assignedHelperName: json['assigned_helper_name']?.toString(),
+      assignedAt: _parseDate(json['assigned_at']),
+      assignedByAdminId: json['assigned_by_admin_id']?.toString(),
+      assignedByAdminName: json['assigned_by_admin_name']?.toString(),
+
+      preparedById: json['prepared_by_id']?.toString(),
+      preparedByName: json['prepared_by_name']?.toString(),
+      preparedAt: _parseDate(json['prepared_at']),
+
+      completedById: json['completed_by_id']?.toString(),
+      completedByName: json['completed_by_name']?.toString(),
+      completedAt: _parseDate(json['completed_at']),
+
+      cancelledById: json['cancelled_by_id']?.toString(),
+      cancelledByName: json['cancelled_by_name']?.toString(),
+      cancelledAt: _parseDate(json['cancelled_at']),
+
+      returnedById: json['returned_by_id']?.toString(),
+      returnedByName: json['returned_by_name']?.toString(),
+      returnedAt: _parseDate(json['returned_at']),
+      returnReason: json['return_reason']?.toString(),
+
+      items:
+          (json['items'] as List<dynamic>?)
+              ?.map(
+                (i) => CustomerOrderItem.fromJson(
+                  Map<String, dynamic>.from(i as Map),
+                ),
+              )
+              .toList() ??
+          [],
+    );
+  }
+
+  static DateTime? _parseDate(dynamic value) {
+    if (value == null) return null;
+
+    try {
+      return DateTime.parse(value.toString()).toLocal();
+    } catch (_) {
+      return null;
+    }
   }
 }

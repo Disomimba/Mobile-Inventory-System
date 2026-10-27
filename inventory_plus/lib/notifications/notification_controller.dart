@@ -1,0 +1,659 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
+import '../services/app_error_mapper.dart';
+import '../services/app_logger.dart';
+
+import '../services/realtime/realtime_sync_service.dart';
+import 'models/app_notification.dart';
+import 'notification_service.dart';
+import '../logic/inventory_approval.dart';
+
+class NotificationController extends ChangeNotifier {
+  final NotificationService _service;
+
+  NotificationController(this._service);
+
+  List<AppNotification> _notifications = [];
+  bool _isLoading = false;
+  String? _errorMessage;
+  StreamSubscription<void>? _notificationChangesSubscription;
+  StreamSubscription<void>? _orderChangesSubscription;
+  bool _refreshInFlight = false;
+  bool _refreshQueued = false;
+  bool _hasLoadedSnapshot = false;
+  bool _disposed = false;
+
+  List<AppNotification> get notifications {
+    return List.unmodifiable(_notifications);
+  }
+
+  bool get isLoading => _isLoading;
+
+  String? get errorMessage => _errorMessage;
+
+  void _recordError(
+    Object error, {
+    required String operation,
+    AppErrorCategory fallback = AppErrorCategory.dataSave,
+  }) {
+    AppLogger.error(operation, error: error);
+    _errorMessage = AppErrorMapper.message(error, fallback: fallback);
+  }
+
+  int get unreadCount {
+    return _notifications.where((notification) => !notification.isRead).length;
+  }
+
+  bool get hasUnread => unreadCount > 0;
+
+  bool get hasLoadedSnapshot => _hasLoadedSnapshot;
+
+  Future<void> loadNotifications() async {
+    return _refreshNotifications(showLoading: true);
+  }
+
+  Future<void> refresh() {
+    return _refreshNotifications(showLoading: true);
+  }
+
+  void bindRealtimeSync(RealtimeSyncService realtimeSync) {
+    unawaited(_notificationChangesSubscription?.cancel());
+    unawaited(_orderChangesSubscription?.cancel());
+
+    _notificationChangesSubscription = realtimeSync.notificationChanges.listen(
+      (_) => unawaited(_refreshNotifications()),
+      onError: (Object error, StackTrace stackTrace) {
+        debugPrint(
+          '[NotificationController] Notification realtime error: $error',
+        );
+      },
+    );
+
+    // Order ownership/status changes can make a linked notification visible or
+    // invisible without a notification-table event being delivered to every
+    // affected role. Treat Order changes as notification invalidation only.
+    _orderChangesSubscription = realtimeSync.orderChanges.listen(
+      (_) {
+        if (_hasLoadedSnapshot) {
+          unawaited(_refreshNotifications());
+        }
+      },
+      onError: (Object error, StackTrace stackTrace) {
+        debugPrint('[NotificationController] Order invalidation error: $error');
+      },
+    );
+  }
+
+  Future<void> _refreshNotifications({bool showLoading = false}) async {
+    if (_disposed) return;
+    if (_refreshInFlight) {
+      _refreshQueued = true;
+      return;
+    }
+
+    _refreshInFlight = true;
+    if (showLoading) _setLoading(true);
+
+    do {
+      _refreshQueued = false;
+      try {
+        _errorMessage = null;
+        final notifications = await _service.fetchNotifications();
+        if (_disposed) return;
+        _notifications = notifications;
+        _hasLoadedSnapshot = true;
+        debugPrint(
+          '[NotificationController] NOTIFICATIONS REFRESHED '
+          'count=${notifications.length}',
+        );
+        notifyListeners();
+      } catch (e) {
+        if (_disposed) return;
+        _recordError(
+          e,
+          operation: 'Notification load failed',
+          fallback: AppErrorCategory.dataLoad,
+        );
+        notifyListeners();
+      }
+    } while (_refreshQueued && !_disposed);
+
+    _refreshInFlight = false;
+    if (showLoading && !_disposed) _setLoading(false);
+  }
+
+  Future<void> createNotification(AppNotification notification) async {
+    try {
+      _errorMessage = null;
+      await _service.createNotification(notification);
+      await loadNotifications();
+    } catch (e) {
+      _recordError(e, operation: 'Notification creation failed');
+      notifyListeners();
+    }
+  }
+
+  Future<void> markAsRead(String notificationId) async {
+    try {
+      _errorMessage = null;
+
+      await _service.markAsRead(notificationId);
+
+      final index = _notifications.indexWhere(
+        (notification) => notification.id == notificationId,
+      );
+
+      if (index != -1) {
+        _notifications[index] = _notifications[index].copyWith(
+          isRead: true,
+          readAt: DateTime.now(),
+        );
+
+        notifyListeners();
+      }
+    } catch (e) {
+      _recordError(e, operation: 'Notification read update failed');
+      notifyListeners();
+    }
+  }
+
+  Future<void> markNotificationsAsRead(Iterable<String> notificationIds) async {
+    final ids = notificationIds.toSet();
+    if (ids.isEmpty) return;
+    try {
+      _errorMessage = null;
+      await _service.markAsReadBatch(ids);
+      if (_disposed) return;
+      final readAt = DateTime.now();
+      _notifications = _notifications
+          .map(
+            (notification) => ids.contains(notification.id)
+                ? notification.copyWith(isRead: true, readAt: readAt)
+                : notification,
+          )
+          .toList();
+      notifyListeners();
+    } catch (e) {
+      if (_disposed) return;
+      _recordError(e, operation: 'Notification read updates failed');
+      notifyListeners();
+    }
+  }
+
+  Future<void> markAllAsRead() async {
+    try {
+      _errorMessage = null;
+
+      await _service.markAllAsRead();
+
+      _notifications = _notifications
+          .map(
+            (notification) =>
+                notification.copyWith(isRead: true, readAt: DateTime.now()),
+          )
+          .toList();
+
+      notifyListeners();
+    } catch (e) {
+      _recordError(e, operation: 'Mark all notifications read failed');
+      notifyListeners();
+    }
+  }
+
+  Future<void> deleteNotification(String notificationId) async {
+    try {
+      _errorMessage = null;
+
+      await _service.deleteNotification(notificationId);
+
+      _notifications.removeWhere(
+        (notification) => notification.id == notificationId,
+      );
+
+      notifyListeners();
+    } catch (e) {
+      _recordError(e, operation: 'Notification deletion failed');
+      notifyListeners();
+    }
+  }
+
+  void _setLoading(bool value) {
+    _isLoading = value;
+    notifyListeners();
+  }
+
+  Future<void> notifyNewOrder({
+    required String locationId,
+    required String orderId,
+    required String createdByName,
+    required DateTime createdAt,
+  }) async {
+    try {
+      _errorMessage = null;
+
+      await _service.notifyNewOrder(
+        locationId: locationId,
+        orderId: orderId,
+        createdByName: createdByName,
+        createdAt: createdAt,
+      );
+
+      await loadNotifications();
+    } catch (e) {
+      _recordError(e, operation: 'New order notification failed');
+      notifyListeners();
+    }
+  }
+
+  Future<void> notifyTransactionCompleted({
+    required String locationId,
+    required String orderId,
+    required String amount,
+    required String processedByName,
+    required DateTime completedAt,
+  }) async {
+    try {
+      _errorMessage = null;
+
+      await _service.notifyTransactionCompleted(
+        locationId: locationId,
+        orderId: orderId,
+        amount: amount,
+        processedByName: processedByName,
+        completedAt: completedAt,
+      );
+
+      await loadNotifications();
+    } catch (e) {
+      _recordError(e, operation: 'Transaction notification failed');
+      notifyListeners();
+    }
+  }
+
+  Future<void> resolveNewOrderNotification({required String orderId}) async {
+    try {
+      _errorMessage = null;
+
+      await _service.resolveNewOrderNotification(orderId: orderId);
+
+      await loadNotifications();
+    } catch (e) {
+      _recordError(e, operation: 'New order notification resolution failed');
+      notifyListeners();
+    }
+  }
+
+  Future<void> notifyOrderPrepared({
+    required String locationId,
+    required String orderId,
+    required String preparedByName,
+    required DateTime preparedAt,
+  }) async {
+    try {
+      _errorMessage = null;
+
+      await _service.notifyOrderPrepared(
+        locationId: locationId,
+        orderId: orderId,
+        preparedByName: preparedByName,
+        preparedAt: preparedAt,
+      );
+
+      await loadNotifications();
+    } catch (e) {
+      _recordError(e, operation: 'Prepared order notification failed');
+      notifyListeners();
+    }
+  }
+
+  Future<void> resolveOrderPreparedNotification({
+    required String orderId,
+  }) async {
+    try {
+      _errorMessage = null;
+
+      await _service.resolveOrderPreparedNotification(orderId: orderId);
+
+      await loadNotifications();
+    } catch (e) {
+      _recordError(
+        e,
+        operation: 'Prepared order notification resolution failed',
+      );
+      notifyListeners();
+    }
+  }
+
+  Future<void> notifyLowStock({
+    required String locationId,
+    required String itemId,
+    required String itemName,
+    required String quantity,
+    required String unit,
+    required String triggeredByName,
+    required DateTime triggeredAt,
+  }) async {
+    try {
+      _errorMessage = null;
+
+      await _service.notifyLowStock(
+        locationId: locationId,
+        itemId: itemId,
+        itemName: itemName,
+        quantity: quantity,
+        unit: unit,
+        triggeredByName: triggeredByName,
+        triggeredAt: triggeredAt,
+      );
+
+      await loadNotifications();
+    } catch (e) {
+      _recordError(e, operation: 'Low stock notification failed');
+      notifyListeners();
+    }
+  }
+
+  Future<void> notifyCriticalStock({
+    required String locationId,
+    required String itemId,
+    required String itemName,
+    required String quantity,
+    required String unit,
+    required String triggeredByName,
+    required DateTime triggeredAt,
+  }) async {
+    try {
+      _errorMessage = null;
+
+      await _service.notifyCriticalStock(
+        locationId: locationId,
+        itemId: itemId,
+        itemName: itemName,
+        quantity: quantity,
+        unit: unit,
+        triggeredByName: triggeredByName,
+        triggeredAt: triggeredAt,
+      );
+
+      await loadNotifications();
+    } catch (e) {
+      _recordError(e, operation: 'Critical stock notification failed');
+      notifyListeners();
+    }
+  }
+
+  Future<void> notifyDeadStock({
+    required String locationId,
+    required String itemId,
+    required String itemName,
+    required String unit,
+    required String triggeredByName,
+    required DateTime triggeredAt,
+  }) async {
+    try {
+      _errorMessage = null;
+
+      await _service.notifyDeadStock(
+        locationId: locationId,
+        itemId: itemId,
+        itemName: itemName,
+        unit: unit,
+        triggeredByName: triggeredByName,
+        triggeredAt: triggeredAt,
+      );
+
+      await loadNotifications();
+    } catch (e) {
+      _recordError(e, operation: 'Dead stock notification failed');
+      notifyListeners();
+    }
+  }
+
+  Future<void> resolveAllStockNotifications({required String itemId}) async {
+    try {
+      _errorMessage = null;
+
+      await _service.resolveAllStockNotifications(itemId: itemId);
+
+      await loadNotifications();
+    } catch (e) {
+      _recordError(e, operation: 'Stock notification resolution failed');
+      notifyListeners();
+    }
+  }
+
+  Future<void> notifyStockAlert({
+    required String locationId,
+    required List<Map<String, dynamic>> items,
+    required String triggeredByName,
+    required DateTime triggeredAt,
+  }) async {
+    try {
+      _errorMessage = null;
+
+      await _service.notifyStockAlert(
+        locationId: locationId,
+        items: items,
+        triggeredByName: triggeredByName,
+        triggeredAt: triggeredAt,
+      );
+
+      await loadNotifications();
+    } catch (e) {
+      _recordError(e, operation: 'Stock alert notification failed');
+      notifyListeners();
+    }
+  }
+
+  Future<void> resolveStockAlertNotifications() async {
+    try {
+      _errorMessage = null;
+
+      await _service.resolveStockAlertNotifications();
+
+      await loadNotifications();
+    } catch (e) {
+      _recordError(e, operation: 'Stock alert notification resolution failed');
+      notifyListeners();
+    }
+  }
+
+  Future<Map<String, String>> fetchStockNotificationStates() {
+    return _service.fetchStockNotificationStates();
+  }
+
+  Future<void> upsertStockNotificationStates(
+    List<Map<String, dynamic>> states,
+  ) {
+    return _service.upsertStockNotificationStates(states);
+  }
+
+  Future<void> notifyExportReminder({
+    required String locationId,
+    required String reportType,
+    required String periodType,
+    required String periodKey,
+  }) async {
+    try {
+      _errorMessage = null;
+
+      await _service.notifyExportReminder(
+        locationId: locationId,
+        reportType: reportType,
+        periodType: periodType,
+        periodKey: periodKey,
+      );
+
+      await loadNotifications();
+    } catch (e) {
+      _recordError(e, operation: 'Export reminder notification failed');
+      notifyListeners();
+    }
+  }
+
+  Future<void> notifyOrderAssigned({
+    required String locationId,
+    required String orderId,
+    required String helperId,
+    required String helperName,
+    required String assignedByName,
+    required DateTime assignedAt,
+  }) async {
+    try {
+      _errorMessage = null;
+
+      await _service.notifyOrderAssigned(
+        locationId: locationId,
+        orderId: orderId,
+        helperId: helperId,
+        helperName: helperName,
+        assignedByName: assignedByName,
+        assignedAt: assignedAt,
+      );
+
+      await loadNotifications();
+    } catch (e) {
+      _recordError(e, operation: 'Assigned order notification failed');
+      notifyListeners();
+    }
+  }
+
+  Future<void> notifyInventoryRestocked({
+    required String locationId,
+    required String transactionId,
+    required String productId,
+    required String productName,
+    required String staffId,
+    required String staffName,
+    required double quantityAdded,
+    required double newQuantity,
+  }) async {
+    _errorMessage = null;
+
+    try {
+      await _service.notifyInventoryRestocked(
+        locationId: locationId,
+        transactionId: transactionId,
+        productId: productId,
+        productName: productName,
+        staffId: staffId,
+        staffName: staffName,
+        quantityAdded: quantityAdded,
+        newQuantity: newQuantity,
+      );
+
+      await loadNotifications();
+    } catch (e) {
+      _recordError(e, operation: 'Restock notification failed');
+      notifyListeners();
+      rethrow;
+    }
+  }
+
+  Future<void> notifyInventoryApproval(
+    InventoryApprovalRequest request,
+  ) async {
+    _errorMessage = null;
+    try {
+      await _service.notifyInventoryApproval(request);
+      await loadNotifications();
+    } catch (e) {
+      _recordError(e, operation: 'Approval notification update failed');
+      notifyListeners();
+      rethrow;
+    }
+  }
+
+  Future<void> resolveOrderWorkflowNotification({
+    required String orderId,
+  }) async {
+    try {
+      _errorMessage = null;
+      await _service.resolveOrderWorkflowNotification(orderId: orderId);
+      await _refreshNotifications();
+    } catch (e) {
+      _recordError(e, operation: 'Order notification resolution failed');
+      notifyListeners();
+    }
+  }
+
+  Future<void> resolveExportReminder({
+    required String reportType,
+    required String periodType,
+    required String periodKey,
+  }) async {
+    try {
+      _errorMessage = null;
+      await _service.resolveExportReminder(
+        reportType: reportType,
+        periodType: periodType,
+        periodKey: periodKey,
+      );
+      await _refreshNotifications();
+    } catch (e) {
+      _recordError(e, operation: 'Export reminder resolution failed');
+      notifyListeners();
+    }
+  }
+
+  Future<void> notifyStoreAccessLifecycle({
+    required String locationId,
+    required List<String> targetRoles,
+    required String lifecycleKind,
+    required String windowKey,
+    required String stage,
+    required String title,
+    required String body,
+    required DateTime openingAt,
+    required DateTime shiftEndAt,
+    required DateTime accessEndAt,
+  }) async {
+    try {
+      _errorMessage = null;
+      await _service.notifyStoreAccessLifecycle(
+        locationId: locationId,
+        targetRoles: targetRoles,
+        lifecycleKind: lifecycleKind,
+        windowKey: windowKey,
+        stage: stage,
+        title: title,
+        body: body,
+        openingAt: openingAt,
+        shiftEndAt: shiftEndAt,
+        accessEndAt: accessEndAt,
+      );
+      await _refreshNotifications();
+    } catch (e) {
+      if (_disposed) return;
+      _recordError(e, operation: 'Store access notification update failed');
+      notifyListeners();
+    }
+  }
+
+  Future<void> resolveStoreAccessLifecycle({
+    required String lifecycleKind,
+    required String windowKey,
+  }) async {
+    try {
+      _errorMessage = null;
+      await _service.resolveStoreAccessLifecycle(
+        lifecycleKind: lifecycleKind,
+        windowKey: windowKey,
+      );
+      await _refreshNotifications();
+    } catch (e) {
+      if (_disposed) return;
+      _recordError(e, operation: 'Store access notification resolution failed');
+      notifyListeners();
+    }
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    unawaited(_notificationChangesSubscription?.cancel());
+    unawaited(_orderChangesSubscription?.cancel());
+    super.dispose();
+  }
+}

@@ -1,7 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import '../logic/inventory_controller.dart';
+import 'widgets/app_dialog.dart';
+import 'widgets/app_toast.dart';
+import 'widgets/change_password_dialog.dart';
+import 'dart:async';
+import '../services/app_error_mapper.dart';
+import '../services/app_logger.dart';
 
 class ProfileInfoPage extends StatefulWidget {
   final InventoryController controller;
@@ -26,13 +31,16 @@ class ProfileInfoPage extends StatefulWidget {
 class _ProfileInfoPageState extends State<ProfileInfoPage> {
   late TextEditingController _nameController;
   late TextEditingController _emailController;
-late TextEditingController _locationController; 
+  late TextEditingController _locationController; 
   late TextEditingController _phoneController;
   bool _isLoading = false;
   bool _isFetching = true;
 
   // ADD STATE VARIABLE FOR EDIT MODE
   bool _isEditing = false;
+  StreamSubscription<CurrentUserProfileSnapshot?>? _profileSubscription;
+  CurrentUserProfileSnapshot? _pendingRemoteProfile;
+  bool _conflictNotified = false;
 
   @override
   void initState() {
@@ -41,34 +49,39 @@ late TextEditingController _locationController;
     _emailController = TextEditingController(text: widget.currentEmail ?? "");
     _locationController = TextEditingController(); 
     _phoneController = TextEditingController();
-    // Fetch latest data from database immediately on load
-    _loadLatestDataFromDatabase();
+    final cachedProfile = widget.controller.currentUserProfileSnapshot;
+    if (cachedProfile != null && cachedProfile.id == widget.userId) {
+      _applyProfileSnapshot(cachedProfile);
+      _isFetching = false;
+    }
+    _profileSubscription = widget.controller.currentUserProfileSnapshots.listen(
+      _handleProfileSnapshot,
+    );
+    if (cachedProfile == null) {
+      unawaited(_loadLatestDataFromDatabase());
+    }
   }
 
   Future<void> _loadLatestDataFromDatabase() async {
     try {
-      // ADD 'location' and 'phone' to the select statement
-      final data = await Supabase.instance.client
-          .from('profiles')
-          .select('email, name, address, phone')
-          .eq('id', widget.userId)
-          .maybeSingle();
+      final snapshot = await widget.controller.refreshCurrentUserProfile();
 
-      if (data != null && mounted) {
+      if (snapshot != null && mounted) {
         setState(() {
-  _emailController.text = data['email'] ?? "";
-  _nameController.text = data['name'] ?? widget.currentName;
-  _locationController.text = data['address'] ?? ""; // Use controller
-  _phoneController.text = data['phone'] ?? "";       // Use controller
-  _isFetching = false;
-});
+          _applyProfileSnapshot(snapshot);
+          _isFetching = false;
+        });
       } else if (mounted) {
         setState(() {
           _isFetching = false;
         });
       }
-    } catch (e) {
-      debugPrint("Error fetching latest profile data: $e");
+    } catch (e, stackTrace) {
+      AppLogger.error(
+        'Profile refresh failed',
+        error: e,
+        stackTrace: stackTrace,
+      );
       if (mounted) {
         setState(() {
           _isFetching = false;
@@ -79,53 +92,54 @@ late TextEditingController _locationController;
 
   @override
   void dispose() {
+    unawaited(_profileSubscription?.cancel());
     _nameController.dispose();
     _emailController.dispose();
-    _locationController.dispose(); // Dispose
+    _locationController.dispose(); 
     _phoneController.dispose();
     super.dispose();
   }
 
   Future<void> _saveProfile() async {
+    if (_pendingRemoteProfile != null) {
+      await _showProfileConflict();
+      return;
+    }
     setState(() => _isLoading = true);
 
     try {
       final newName = _nameController.text.trim();
       final newEmail = _emailController.text.trim();
-      
-      // FIX: Use the controllers instead of the old variables
       final newAddress = _locationController.text.trim(); 
       final newPhone = _phoneController.text.trim();
 
       if (newName.isEmpty) {
-        throw Exception("Name cannot be empty.");
+        AppToast.error(context, 'Name cannot be empty.');
+        return;
       }
 
       await widget.controller.updateProfile(
         userId: widget.userId,
         name: newName,
         email: newEmail,
-        location: newAddress, // Use new variable
-        phone: newPhone,      // Use new variable
+        location: newAddress, 
+        phone: newPhone,      
       );
 
-
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text("Profile updated successfully!"),
-            backgroundColor: Colors.green,
-          ),
-        );
-        Navigator.pop(context, newName);
+        setState(() {
+          _isEditing = false;
+          _pendingRemoteProfile = null;
+          _conflictNotified = false;
+        });
+        AppToast.success(context, 'Profile updated successfully!');
       }
-    } catch (e) {
+    } catch (e, stackTrace) {
+      AppLogger.error('Profile update failed', error: e, stackTrace: stackTrace);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text("Error updating profile: $e"),
-            backgroundColor: Colors.redAccent,
-          ),
+        AppToast.error(
+          context,
+          AppErrorMapper.message(e, fallback: AppErrorCategory.dataSave),
         );
       }
     } finally {
@@ -135,165 +149,76 @@ late TextEditingController _locationController;
     }
   }
 
-  void _showChangePasswordDialog(BuildContext context) {
-    final currentPasswordController = TextEditingController();
-    final newPasswordController = TextEditingController();
-    final confirmPasswordController = TextEditingController();
-    bool obscureText = true;
-    bool isSaving = false;
-    String? errorMessage;
-
-    showDialog(
-      context: context,
-      builder: (dialogContext) {
-        return StatefulBuilder(
-          builder: (stateContext, setState) {
-            return AlertDialog(
-              title: const Text("Change Password"),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-              content: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (errorMessage != null)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 12),
-                        child: Text(
-                          errorMessage!,
-                          style: const TextStyle(
-                            color: Colors.redAccent,
-                            fontSize: 13,
-                          ),
-                        ),
-                      ),
-                    TextField(
-                      controller: currentPasswordController,
-                      obscureText: obscureText,
-                      decoration: const InputDecoration(
-                        labelText: "Current Password",
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: newPasswordController,
-                      obscureText: obscureText,
-                      decoration: const InputDecoration(
-                        labelText: "New Password",
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: confirmPasswordController,
-                      obscureText: obscureText,
-                      decoration: InputDecoration(
-                        labelText: "Confirm Password",
-                        border: const OutlineInputBorder(),
-                        suffixIcon: IconButton(
-                          icon: Icon(
-                            obscureText ? LucideIcons.eye : LucideIcons.eyeOff,
-                            color: Colors.grey,
-                          ),
-                          onPressed: () {
-                            setState(() {
-                              obscureText = !obscureText;
-                            });
-                          },
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text("Cancel"),
-                ),
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.blue,
-                    foregroundColor: Colors.white,
-                  ),
-                  onPressed: isSaving
-                      ? null
-                      : () async {
-                          if (currentPasswordController.text.isEmpty ||
-                              newPasswordController.text.isEmpty ||
-                              confirmPasswordController.text.isEmpty) {
-                            setState(
-                              () => errorMessage = "Please fill in all fields.",
-                            );
-                            return;
-                          }
-                          if (newPasswordController.text.trim().length <= 6) {
-                            setState(
-                              () => errorMessage =
-                                  "Password must be more than 6 characters.",
-                            );
-                            return;
-                          }
-                          if (newPasswordController.text !=
-                              confirmPasswordController.text) {
-                            setState(
-                              () =>
-                                  errorMessage = "New passwords do not match.",
-                            );
-                            return;
-                          }
-
-                          setState(() {
-                            isSaving = true;
-                            errorMessage = null;
-                          });
-
-                          final error = await widget.controller.changePassword(
-                            currentPasswordController.text,
-                            newPasswordController.text,
-                          );
-
-                          if (error != null) {
-                            setState(() {
-                              errorMessage = error;
-                              isSaving = false;
-                            });
-                          } else {
-                            if (context.mounted) {
-                              Navigator.pop(context);
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text(
-                                    "Password changed successfully!",
-                                  ),
-                                  backgroundColor: Colors.green,
-                                ),
-                              );
-                            }
-                          }
-                        },
-                  child: isSaving
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(
-                            color: Colors.white,
-                            strokeWidth: 2,
-                          ),
-                        )
-                      : const Text("Save"),
-                ),
-              ],
-            );
-          },
+  void _handleProfileSnapshot(CurrentUserProfileSnapshot? snapshot) {
+    if (!mounted || snapshot == null || snapshot.id != widget.userId) return;
+    final matchesDraft =
+        _nameController.text.trim() == snapshot.name &&
+        _emailController.text.trim() == (snapshot.email ?? '') &&
+        _locationController.text.trim() == (snapshot.address ?? '') &&
+        _phoneController.text.trim() == (snapshot.phone ?? '');
+    if (_isEditing && !_isLoading && !matchesDraft) {
+      _pendingRemoteProfile = snapshot;
+      if (!_conflictNotified) {
+        _conflictNotified = true;
+        AppToast.error(
+          context,
+          'Your profile changed elsewhere. Your unsaved edits were kept.',
         );
-      },
-    );
+      }
+      return;
+    }
+    setState(() => _applyProfileSnapshot(snapshot));
   }
 
-  // ... inside _ProfileInfoPageState class ...
+  void _applyProfileSnapshot(CurrentUserProfileSnapshot snapshot) {
+    _nameController.text = snapshot.name;
+    _emailController.text = snapshot.email ?? '';
+    _locationController.text = snapshot.address ?? '';
+    _phoneController.text = snapshot.phone ?? '';
+    _pendingRemoteProfile = null;
+    _conflictNotified = false;
+  }
+
+  Future<void> _showProfileConflict() async {
+    final latest = _pendingRemoteProfile;
+    if (latest == null) return;
+    final reload = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AppDialog(
+        icon: LucideIcons.triangleAlert,
+        color: Colors.orange,
+        title: 'Profile changed',
+        subtitle: 'A newer saved profile is available.',
+        child: const Text(
+          'Your unsaved fields have not been overwritten. Reload the latest '
+          'saved profile, or keep editing.',
+        ),
+        actions: [
+          OutlinedButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Keep Editing'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Reload Latest'),
+          ),
+        ],
+      ),
+    );
+    if (reload == true && mounted) {
+      setState(() {
+        _applyProfileSnapshot(latest);
+        _isEditing = false;
+      });
+    }
+  }
+
+  Future<void> _showChangePasswordDialog(BuildContext context) async {
+    await showChangePasswordDialog(
+      context: context,
+      controller: widget.controller,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -316,25 +241,33 @@ late TextEditingController _locationController;
         ),
         actions: [
           TextButton(
-            onPressed: () {
-              if (_isEditing) {
-                _saveProfile();
-              } else {
-                setState(() => _isEditing = true);
-              }
-            },
-            child: Text(
-              _isEditing ? "Save" : "Edit",
-              style: const TextStyle(
-                color: Colors.orange,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
+            onPressed: _isLoading
+                ? null
+                : () {
+                    if (_isEditing) {
+                      _saveProfile();
+                    } else {
+                      setState(() => _isEditing = true);
+                    }
+                  },
+            child: _isLoading
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.blue),
+                  )
+                : Text(
+                    _isEditing ? "Save" : "Edit",
+                    style: TextStyle(
+                      color: Colors.blue.shade600,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
           ),
         ],
       ),
       body: _isFetching
-          ? const Center(child: CircularProgressIndicator(color: Colors.orange))
+          ? const Center(child: CircularProgressIndicator(color: Colors.blue))
           : SingleChildScrollView(
               padding: const EdgeInsets.all(24),
               child: Column(
@@ -343,10 +276,10 @@ late TextEditingController _locationController;
                   Center(
                     child: CircleAvatar(
                       radius: 40,
-                      backgroundColor: Colors.orange.withOpacity(0.1),
-                      child: const Icon(
+                      backgroundColor: Colors.blue.shade50,
+                      child: Icon(
                         LucideIcons.user,
-                        color: Colors.orange,
+                        color: Colors.blue.shade600,
                         size: 40,
                       ),
                     ),
@@ -355,48 +288,49 @@ late TextEditingController _locationController;
 
                   _buildField(
                     "Role",
-                    widget.role.toUpperCase(),
                     null,
+                    TextEditingController(text: widget.role.toUpperCase()),
                     readOnly: true,
                   ),
                   _buildField(
                     "Full Name",
-                    "",
+                    null,
                     _nameController,
                     icon: LucideIcons.user,
                   ),
                   _buildField(
                     "Email Address",
-                    "",
+                    null,
                     _emailController,
                     icon: LucideIcons.mail,
                     type: TextInputType.emailAddress,
                   ),
                   _buildField(
                     "Location",
-                    "",
                     null,
+                    _locationController,
                     icon: LucideIcons.mapPin,
                   ),
                   _buildField(
                     "Phone Number",
-                    "",
                     null,
+                    _phoneController,
                     icon: LucideIcons.phone,
+                    type: TextInputType.phone,
                   ),
-                  const SizedBox(height: 40),
+                  const SizedBox(height: 20),
                   SizedBox(
                     width: double.infinity,
                     height: 50,
                     child: OutlinedButton.icon(
                       onPressed: () => _showChangePasswordDialog(context),
-                      icon: const Icon(LucideIcons.lock, size: 18),
-                      label: const Text("Change Password"),
+                      icon: Icon(LucideIcons.lock, size: 18, color: Colors.blue.shade700),
+                      label: Text("Change Password", style: TextStyle(color: Colors.blue.shade700, fontWeight: FontWeight.w600)),
                       style: OutlinedButton.styleFrom(
-                        foregroundColor: Colors.black87,
-                        side: const BorderSide(color: Colors.black12),
+                        backgroundColor: Colors.blue.shade50.withOpacity(0.3),
+                        side: BorderSide(color: Colors.blue.shade200),
                         shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
+                          borderRadius: BorderRadius.circular(12),
                         ),
                       ),
                     ),
@@ -407,7 +341,7 @@ late TextEditingController _locationController;
     );
   }
 
-  // Helper to build consistent fields
+  // Helper to build consistent fields with clean blue/white styling
   Widget _buildField(
     String label,
     String? staticValue,
@@ -421,36 +355,38 @@ late TextEditingController _locationController;
       children: [
         Text(
           label,
-          style: const TextStyle(
-            color: Colors.grey,
+          style: TextStyle(
+            color: Colors.grey.shade700,
             fontSize: 12,
             fontWeight: FontWeight.bold,
           ),
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 6),
         TextField(
           controller: controller,
           readOnly: readOnly || !_isEditing,
           keyboardType: type,
           decoration: InputDecoration(
-            // SAFE NULL CHECK HERE
-            hintText: (staticValue != null && staticValue.isNotEmpty)
-                ? staticValue
-                : "Enter $label",
+            hintText: "Enter $label",
+            hintStyle: const TextStyle(color: Colors.grey, fontSize: 14),
             filled: true,
-            fillColor: _isEditing && controller != null
-                ? Colors.white
+            fillColor: _isEditing && !readOnly
+                ? Colors.blue.shade50.withOpacity(0.3)
                 : Colors.grey.withOpacity(0.05),
             border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.circular(12),
               borderSide: BorderSide.none,
             ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: Colors.blue.shade400, width: 1),
+            ),
             prefixIcon: icon != null
-                ? Icon(icon, size: 18, color: Colors.grey)
+                ? Icon(icon, size: 18, color: Colors.blue.shade300)
                 : null,
           ),
         ),
-        const SizedBox(height: 24),
+        const SizedBox(height: 20),
       ],
     );
   }

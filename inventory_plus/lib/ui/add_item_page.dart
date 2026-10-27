@@ -2,11 +2,16 @@ import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../data/inventory.dart';
 import '../logic/inventory_controller.dart';
-import 'store_map.dart';
 import 'package:image_picker/image_picker.dart';
 import 'dart:io';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'dart:math' as math;
+import 'widgets/app_toast.dart';
+import 'widgets/app_dialog.dart';
+import 'dart:async';
+import 'package:inventory_plus/services/app_error_mapper.dart';
+import 'package:inventory_plus/services/app_logger.dart';
 
 class AddItemPage extends StatefulWidget {
   final InventoryController controller;
@@ -23,171 +28,330 @@ class _AddItemPageState extends State<AddItemPage> {
   bool _isLoading = false;
 
   final _nameController = TextEditingController();
-  final _skuController = TextEditingController();
   final _priceController = TextEditingController();
   final _quantityController = TextEditingController();
-  final _maxQuantityController = TextEditingController(); // ADDED
   final _categoryController = TextEditingController();
   final _descController = TextEditingController();
 
   final _manufacturerController = TextEditingController();
   final _modelController = TextEditingController();
   final _sizeController = TextEditingController();
-  final _shelfLevelController = TextEditingController();
-  final _binNumberController = TextEditingController();
 
-  MapElement? _selectedMapElement;
   String? _imageUrl;
   XFile? _selectedImage;
   final ImagePicker _picker = ImagePicker();
 
-  // State to hold the selected unit of measurement
+  // Selected unit symbol (comes from the `measurements` table)
   String _selectedUnit = 'pcs';
+  static const String _addNewValue = '__add_new_unit__';
+  int _unitFieldVersion = 0; // forces the dropdown to rebuild after the modal
+  StreamSubscription<InventoryRuntimeSettingsSnapshot>?
+  _runtimeSettingsSubscription;
+
+  @override
+  void initState() {
+    super.initState();
+    _runtimeSettingsSubscription = widget.controller
+        .streamRuntimeSettings()
+        .listen((_) {
+          if (mounted) setState(() => _unitFieldVersion++);
+        });
+    _ensureUnitsLoaded();
+  }
+
+  Future<void> _ensureUnitsLoaded() async {
+    if (widget.controller.availableMeasurements.isNotEmpty) return;
+    try {
+      await widget.controller.loadSystemSettings();
+    } catch (_) {
+      // Keep the fallback unit; the user can still add a unit manually.
+    }
+    if (mounted) setState(() {});
+  }
 
   @override
   void dispose() {
+    unawaited(_runtimeSettingsSubscription?.cancel());
     _nameController.dispose();
-    _skuController.dispose();
     _priceController.dispose();
     _quantityController.dispose();
-    _maxQuantityController.dispose(); // ADDED
     _categoryController.dispose();
     _descController.dispose();
     _manufacturerController.dispose();
     _modelController.dispose();
     _sizeController.dispose();
-    _shelfLevelController.dispose();
-    _binNumberController.dispose();
     super.dispose();
   }
 
   Future<void> _pickImage() async {
-    showModalBottomSheet(
+    // Camera only makes sense on phones/tablets, not web or desktop.
+    final bool cameraAvailable =
+        !kIsWeb && (Platform.isAndroid || Platform.isIOS);
+
+    final String? choice = await showDialog<String>(
       context: context,
-      builder: (context) => SafeArea(
-        child: Wrap(
+      builder: (dialogContext) => AppDialog(
+        icon: LucideIcons.imagePlus,
+        color: Colors.orange,
+        title: "Product Photo",
+        subtitle: "Choose how to add an image",
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            ListTile(
-              leading: const Icon(LucideIcons.camera),
-              title: const Text('Take Photo'),
-              onTap: () async {
-                Navigator.pop(context);
-                final XFile? photo = await _picker.pickImage(
-                  source: ImageSource.camera,
-                );
-                if (photo != null) {
-                  setState(() {
-                    _selectedImage = photo;
-                    _imageUrl = photo.path;
-                  });
-                }
-              },
+            if (cameraAvailable) ...[
+              _buildSourceOption(
+                icon: LucideIcons.camera,
+                title: "Take Photo",
+                description: "Use your device camera",
+                onTap: () => Navigator.pop(dialogContext, 'camera'),
+              ),
+              const SizedBox(height: 10),
+            ],
+            _buildSourceOption(
+              icon: LucideIcons.image,
+              title: "Choose from Gallery",
+              description: "Pick an existing photo",
+              onTap: () => Navigator.pop(dialogContext, 'gallery'),
             ),
-            ListTile(
-              leading: const Icon(LucideIcons.image),
-              title: const Text('Choose from Gallery'),
-              onTap: () async {
-                Navigator.pop(context);
-                final XFile? image = await _picker.pickImage(
-                  source: ImageSource.gallery,
-                );
-                if (image != null) {
-                  setState(() {
-                    _selectedImage = image;
-                    _imageUrl = image.path;
-                  });
-                }
-              },
+            const SizedBox(height: 10),
+            _buildSourceOption(
+              icon: LucideIcons.link,
+              title: "Enter Image URL",
+              description: "Use an image hosted online",
+              onTap: () => Navigator.pop(dialogContext, 'url'),
             ),
-            ListTile(
-              leading: const Icon(LucideIcons.link),
-              title: const Text('Enter Image URL'),
-              onTap: () {
-                Navigator.pop(context);
-                _showUrlInputDialog();
-              },
-            ),
+            if (_imageUrl != null) ...[
+              const SizedBox(height: 10),
+              _buildSourceOption(
+                icon: LucideIcons.trash2,
+                title: "Remove Photo",
+                description: "Clear the current image",
+                color: Colors.red.shade600,
+                onTap: () => Navigator.pop(dialogContext, 'remove'),
+              ),
+            ],
           ],
+        ),
+        actions: [
+          OutlinedButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: Colors.black87,
+              side: BorderSide(color: Colors.grey.shade300),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+              padding: const EdgeInsets.symmetric(vertical: 14),
+            ),
+            child: const Text("Cancel"),
+          ),
+        ],
+      ),
+    );
+
+    if (!mounted || choice == null) return;
+
+    switch (choice) {
+      case 'camera':
+        await _pickFromSource(ImageSource.camera);
+        break;
+      case 'gallery':
+        await _pickFromSource(ImageSource.gallery);
+        break;
+      case 'url':
+        _showUrlInputDialog();
+        break;
+      case 'remove':
+        setState(() {
+          _imageUrl = null;
+          _selectedImage = null;
+        });
+        AppToast.success(context, "Photo removed");
+        break;
+    }
+  }
+
+  Future<void> _pickFromSource(ImageSource source) async {
+    try {
+      final XFile? file = await _picker.pickImage(source: source);
+      if (file == null || !mounted) return; // user cancelled
+      setState(() {
+        _selectedImage = file;
+        _imageUrl = file.path;
+      });
+      AppToast.success(context, "Photo added");
+    } catch (e, stackTrace) {
+      AppLogger.error(
+        'Item image selection failed',
+        error: e,
+        stackTrace: stackTrace,
+      );
+      if (mounted) {
+        AppToast.error(
+          context,
+          AppErrorMapper.message(e, fallback: AppErrorCategory.upload),
+        );
+      }
+    }
+  }
+
+  Widget _buildSourceOption({
+    required IconData icon,
+    required String title,
+    required String description,
+    required VoidCallback onTap,
+    Color color = Colors.orange,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Colors.grey.shade200),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: color.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(icon, color: color, size: 18),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: color == Colors.orange
+                            ? const Color(0xFF0F172A)
+                            : color,
+                      ),
+                    ),
+                    Text(
+                      description,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey.shade600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(
+                LucideIcons.chevronRight,
+                size: 16,
+                color: Colors.grey.shade400,
+              ),
+            ],
+          ),
         ),
       ),
     );
+  }
+
+  String _generateAutoSKU() {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    final math.Random rnd = math.Random();
+    return 'SKU-' +
+        String.fromCharCodes(
+          Iterable.generate(
+            8,
+            (_) => chars.codeUnitAt(rnd.nextInt(chars.length)),
+          ),
+        );
   }
 
   void _showUrlInputDialog() {
     final urlController = TextEditingController();
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text("Image URL"),
-        content: TextField(
+      builder: (dialogContext) => AppDialog(
+        icon: LucideIcons.link,
+        color: Colors.orange,
+        title: "Image URL",
+        subtitle: "Use an image hosted online",
+        child: TextField(
           controller: urlController,
-          decoration: const InputDecoration(hintText: "Paste link here"),
+          autofocus: true,
+          keyboardType: TextInputType.url,
+          decoration: InputDecoration(
+            hintText: "Paste link here (https://...)",
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+          ),
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
+          OutlinedButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: Colors.black87,
+              side: BorderSide(color: Colors.grey.shade300),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+              padding: const EdgeInsets.symmetric(vertical: 14),
+            ),
             child: const Text("Cancel"),
           ),
-          TextButton(
+          ElevatedButton(
             onPressed: () {
+              final url = urlController.text.trim();
+              final uri = Uri.tryParse(url);
+              final valid =
+                  uri != null &&
+                  (uri.scheme == 'http' || uri.scheme == 'https') &&
+                  uri.host.isNotEmpty;
+
+              if (!valid) {
+                AppToast.error(
+                  context,
+                  "Please enter a valid image link starting with http(s)://",
+                );
+                return; // keep the dialog open so they can fix it
+              }
+
               setState(() {
-                _imageUrl = urlController.text;
+                _imageUrl = url;
                 _selectedImage = null;
               });
-              Navigator.pop(context);
+              Navigator.pop(dialogContext);
+              AppToast.success(context, "Image URL added");
             },
-            child: const Text("OK"),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.orange,
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+              padding: const EdgeInsets.symmetric(vertical: 14),
+            ),
+            child: const Text(
+              "OK",
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
           ),
         ],
       ),
     );
   }
 
-  void _showLocationPicker() async {
-    final MapElement? result = await showDialog<MapElement>(
-      context: context,
-      builder: (context) {
-        return Dialog(
-          insetPadding: const EdgeInsets.all(16),
-          clipBehavior: Clip.antiAlias,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Column(
-            children: [
-              AppBar(
-                title: const Text("Select Store Location"),
-                backgroundColor: const Color(0xFF0F172A),
-                foregroundColor: Colors.white,
-                leading: IconButton(
-                  icon: const Icon(LucideIcons.x),
-                  onPressed: () => Navigator.pop(context),
-                ),
-              ),
-              Expanded(
-                child: StoreMap(
-                  controller: widget.controller,
-                  mode: MapMode.pick,
-                  onElementSelected: (element) =>
-                      Navigator.pop(context, element),
-                ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-    if (result != null) setState(() => _selectedMapElement = result);
-  }
-
   void _submitData() async {
     if (!_formKey.currentState!.validate()) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Please fix the errors before saving."),
-          backgroundColor: Colors.redAccent,
-        ),
-      );
+      AppToast.error(context, "Please fix the errors before saving.");
       return;
     }
 
@@ -216,21 +380,21 @@ class _AddItemPageState extends State<AddItemPage> {
         }
         if (uploadedUrl != null) finalImageUrl = uploadedUrl;
       }
+      final String autoGeneratedSku = _generateAutoSKU();
 
       final newItem = widget.controller.createNewItem(
         name: _nameController.text.trim(),
-        sku: _skuController.text.trim(),
+        sku: autoGeneratedSku,
         price: _priceController.text.trim(),
         quantity: _quantityController.text.trim(),
-        maxQuantity: _maxQuantityController.text.trim(), // ADDED THIS LINE
+        maxQuantity: '0', // Default empty value
         category: _categoryController.text.trim(),
         description: _descController.text.trim(),
         manufacturer: _manufacturerController.text.trim(),
         model: _modelController.text.trim(),
         productSize: _sizeController.text.trim(),
-        shelfLevel: _shelfLevelController.text.trim(),
-        binNumber: _binNumberController.text.trim(),
-        mapLocationId: _selectedMapElement?.id,
+        shelfLevel: '', // Default empty value
+        binNumber: '', // Default empty value
         imageUrl: finalImageUrl ?? '',
         unit: _selectedUnit,
       );
@@ -240,17 +404,17 @@ class _AddItemPageState extends State<AddItemPage> {
         widget.onAdd(newItem);
         Navigator.pop(context);
       }
-    } catch (e) {
-      String errorMessage = "Error: $e";
+    } catch (e, stackTrace) {
+      AppLogger.error('Add item failed', error: e, stackTrace: stackTrace);
+      String errorMessage = AppErrorMapper.message(
+        e,
+        fallback: AppErrorCategory.dataSave,
+      );
       if (e is PostgrestException && e.code == '23505') {
         errorMessage =
             "An item with this SKU already exists! Please enter a unique SKU.";
       }
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(errorMessage), backgroundColor: Colors.red),
-        );
-      }
+      if (mounted) AppToast.error(context, errorMessage);
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -295,47 +459,6 @@ class _AddItemPageState extends State<AddItemPage> {
                                 ? 'Enter a valid name (min 2 chars)'
                                 : null,
                           ),
-                          const SizedBox(height: 16),
-                          _buildTextField(
-                            _skuController,
-                            "SKU / Barcode",
-                            LucideIcons.hash,
-                            customValidator: (v) {
-                              if (v == null || v.trim().isEmpty) {
-                                return 'SKU is required';
-                              }
-                              if (v.contains(' ')) {
-                                return 'SKU cannot contain spaces';
-                              }
-                              return null;
-                            },
-                          ),
-
-                          const SizedBox(height: 24),
-                          _buildSectionTitle("Store Placement"),
-                          _buildLocationSelector(),
-                          const SizedBox(height: 16),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: _buildTextField(
-                                  _shelfLevelController,
-                                  "Shelf (e.g. L3)",
-                                  LucideIcons.layers,
-                                  isRequired: false,
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: _buildTextField(
-                                  _binNumberController,
-                                  "Bin (e.g. B12)",
-                                  LucideIcons.box,
-                                  isRequired: false,
-                                ),
-                              ),
-                            ],
-                          ),
 
                           const SizedBox(height: 24),
                           _buildSectionTitle("Technical Specifications"),
@@ -371,7 +494,6 @@ class _AddItemPageState extends State<AddItemPage> {
                           const SizedBox(height: 24),
                           _buildSectionTitle("Pricing & Inventory"),
 
-                          // Rearranged so Category and Price share a row
                           Row(
                             children: [
                               Expanded(
@@ -394,31 +516,14 @@ class _AddItemPageState extends State<AddItemPage> {
                           ),
                           const SizedBox(height: 16),
 
-                          // Initial Stock and Max Capacity side-by-side
-                          Row(
-                            children: [
-                              Expanded(
-                                child: _buildTextField(
-                                  _quantityController,
-                                  "Initial Stock",
-                                  LucideIcons.archive,
-                                  isNumber: true,
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: _buildTextField(
-                                  _maxQuantityController,
-                                  "Ideal Max Capacity",
-                                  LucideIcons.target,
-                                  isNumber: true,
-                                ),
-                              ),
-                            ],
+                          _buildTextField(
+                            _quantityController,
+                            "Initial Stock",
+                            LucideIcons.archive,
+                            isNumber: true,
                           ),
-                          const SizedBox(height: 16),
 
-                          // Unit Dropdown takes full width to show the helper text nicely
+                          const SizedBox(height: 16),
                           _buildUnitDropdown(),
 
                           const SizedBox(height: 16),
@@ -443,25 +548,59 @@ class _AddItemPageState extends State<AddItemPage> {
     );
   }
 
-  // Widget builder for the Unit Dropdown with descriptions
+  // ─── UNIT DROPDOWN (reads from the `measurements` table) ──────────────────
   Widget _buildUnitDropdown() {
-    // Map the short database values to user-friendly display labels
-    final Map<String, String> unitLabels = {
-      'pcs': 'Pieces (pcs)',
-      'box': 'Boxes (box)',
-      'pack': 'Packs (pack)',
-      'kl': 'Kilos (kl)',
-      'g': 'Grams (g)',
-      'L': 'Liters (L)',
-      'm': 'Meters (m)',
-    };
+    final seen = <String>{};
+    final items = <DropdownMenuItem<String>>[];
+
+    for (final m in widget.controller.availableMeasurements) {
+      final symbol = m['symbol'].toString();
+      if (!seen.add(symbol)) continue; // dropdown asserts on duplicate values
+      items.add(
+        DropdownMenuItem(
+          value: symbol,
+          child: Text(
+            '${m['name']} ($symbol)',
+            style: const TextStyle(fontSize: 14),
+          ),
+        ),
+      );
+    }
+
+    // Make sure the current value always exists in the list (e.g. 'pcs' before load)
+    if (!seen.contains(_selectedUnit)) {
+      items.insert(
+        0,
+        DropdownMenuItem(value: _selectedUnit, child: Text(_selectedUnit)),
+      );
+    }
+
+    items.add(
+      const DropdownMenuItem(
+        value: _addNewValue,
+        child: Row(
+          children: [
+            Icon(LucideIcons.plus, size: 16, color: Colors.orange),
+            SizedBox(width: 8),
+            Text(
+              'Add new unit...',
+              style: TextStyle(
+                fontSize: 14,
+                color: Colors.orange,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
 
     return DropdownButtonFormField<String>(
+      key: ValueKey('$_selectedUnit-$_unitFieldVersion'),
       initialValue: _selectedUnit,
-      isExpanded: true, // Prevents text overflow
+      isExpanded: true,
       decoration: InputDecoration(
         labelText: "Unit of Measure",
-        // This is the description telling them WHY they need to pick this
         helperText:
             "Sets POS rules: Whole numbers (Pieces) vs. Decimals (Kilos).",
         helperMaxLines: 2,
@@ -491,21 +630,157 @@ class _AddItemPageState extends State<AddItemPage> {
           borderSide: const BorderSide(color: Colors.orange, width: 2),
         ),
       ),
-      items: unitLabels.entries.map((entry) {
-        return DropdownMenuItem(
-          value: entry.key, // Saves 'pcs' or 'kl' to the database
-          child: Text(
-            entry.value,
-            style: const TextStyle(fontSize: 14),
-          ), // Shows 'Pieces (pcs)' to the user
-        );
-      }).toList(),
+      items: items,
       onChanged: (val) {
-        if (val != null) {
+        if (val == null) return;
+        if (val == _addNewValue) {
+          _showNewUnitModal();
+        } else {
           setState(() => _selectedUnit = val);
         }
       },
     );
+  }
+
+  // ─── "ADD NEW UNIT" MODAL (inserts into DB, then auto-selects) ────────────
+  Future<void> _showNewUnitModal() async {
+    // Not disposed on purpose: disposing right after pop can throw while the
+    // dialog's close animation is still building the TextFields.
+    final nameCtrl = TextEditingController();
+    final symbolCtrl = TextEditingController();
+    String? nameError;
+    String? symbolError;
+    bool saving = false;
+
+    final String? newSymbol = await showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (ctx, setModalState) {
+          Future<void> save() async {
+            final name = nameCtrl.text.trim();
+            final symbol = symbolCtrl.text.trim();
+
+            setModalState(() {
+              nameError = name.isEmpty ? "Measurement name is required" : null;
+              symbolError = symbol.isEmpty ? "Symbol/Unit is required" : null;
+            });
+            if (name.isEmpty || symbol.isEmpty) return;
+
+            // Already exists? Just select it instead of inserting a duplicate.
+            final existing = widget.controller.availableMeasurements.where(
+              (m) =>
+                  m['symbol'].toString().toLowerCase() == symbol.toLowerCase(),
+            );
+            if (existing.isNotEmpty) {
+              Navigator.pop(dialogContext, existing.first['symbol'].toString());
+              return;
+            }
+
+            setModalState(() => saving = true);
+            try {
+              await widget.controller.addMeasurement(name, symbol);
+              if (dialogContext.mounted) Navigator.pop(dialogContext, symbol);
+            } catch (e, stackTrace) {
+              AppLogger.error(
+                'Measurement creation failed',
+                error: e,
+                stackTrace: stackTrace,
+              );
+              setModalState(() {
+                saving = false;
+                symbolError = AppErrorMapper.message(
+                  e,
+                  fallback: AppErrorCategory.dataSave,
+                );
+              });
+            }
+          }
+
+          return AppDialog(
+            icon: LucideIcons.scale,
+            color: Colors.orange,
+            title: "Add New Unit",
+            subtitle: "Saved to your measurement units",
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: nameCtrl,
+                  decoration: InputDecoration(
+                    labelText: "Measurement Name (e.g. Pair)",
+                    errorText: nameError,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: symbolCtrl,
+                  decoration: InputDecoration(
+                    labelText: "Symbol / Unit (e.g. pr)",
+                    errorText: symbolError,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              OutlinedButton(
+                onPressed: saving ? null : () => Navigator.pop(dialogContext),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.black87,
+                  side: BorderSide(color: Colors.grey.shade300),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                ),
+                child: const Text("Cancel"),
+              ),
+              ElevatedButton(
+                onPressed: saving ? null : save,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.orange,
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                ),
+                child: saving
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          color: Colors.white,
+                          strokeWidth: 2,
+                        ),
+                      )
+                    : const Text(
+                        "Save",
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+
+    if (!mounted) return;
+    setState(() {
+      if (newSymbol != null) _selectedUnit = newSymbol;
+      _unitFieldVersion++; // resets dropdown, also on Cancel
+    });
+
+    if (newSymbol != null) AppToast.success(context, "Unit added");
   }
 
   Widget _buildSectionTitle(String title) {
@@ -525,51 +800,6 @@ class _AddItemPageState extends State<AddItemPage> {
             child: Divider(indent: 10, color: Colors.orange, thickness: 0.5),
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _buildLocationSelector() {
-    return InkWell(
-      onTap: _showLocationPicker,
-      borderRadius: BorderRadius.circular(12),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.grey.shade200),
-        ),
-        child: Row(
-          children: [
-            const Icon(LucideIcons.mapPin, color: Colors.orange, size: 20),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                _selectedMapElement != null
-                    ? "Assign location to ${_selectedMapElement!.label}"
-                    : "Assign Location",
-                style: TextStyle(
-                  color: _selectedMapElement != null
-                      ? Colors.black87
-                      : Colors.grey[500],
-                  fontSize: 14,
-                ),
-              ),
-            ),
-            if (_selectedMapElement != null)
-              GestureDetector(
-                onTap: () => setState(() => _selectedMapElement = null),
-                child: const Icon(Icons.cancel, color: Colors.red, size: 20),
-              )
-            else
-              const Icon(
-                LucideIcons.chevronRight,
-                color: Colors.grey,
-                size: 16,
-              ),
-          ],
-        ),
       ),
     );
   }
