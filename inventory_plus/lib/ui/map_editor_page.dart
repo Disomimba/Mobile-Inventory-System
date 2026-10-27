@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../data/inventory.dart';
@@ -392,7 +393,7 @@ class _MapEditorPageState extends State<MapEditorPage> {
       onPopInvokedWithResult: (bool didPop, Object? result) {
         if (!didPop) unawaited(_confirmDiscardAndLeave());
       },
-      child: Scaffold(
+      child: screenWidth < 600 ? _buildMobileScaffold() : Scaffold(
         backgroundColor: _lightBg,
         appBar: AppBar(
         automaticallyImplyLeading: false, // Hidden back button as requested
@@ -644,6 +645,400 @@ class _MapEditorPageState extends State<MapEditorPage> {
           ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildMobileScaffold() {
+    final progress = _totalCount == 0
+        ? 0.0
+        : (_assignedCount / _totalCount).clamp(0.0, 1.0).toDouble();
+
+    return Scaffold(
+      backgroundColor: Colors.white,
+      appBar: AppBar(
+        automaticallyImplyLeading: false,
+        backgroundColor: Colors.white,
+        surfaceTintColor: Colors.transparent,
+        toolbarHeight: 66,
+        titleSpacing: 9,
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'Store Layout Designer',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontFamily: _fontFam,
+                fontSize: 16,
+                fontWeight: FontWeight.w800,
+                color: Color(0xFF0F172A),
+              ),
+            ),
+            const SizedBox(height: 4),
+            Row(
+              children: [
+                Flexible(
+                  child: Text(
+                    '$_assignedCount of $_totalCount items assigned',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontFamily: _fontFam,
+                      fontSize: 10,
+                      color: Color(0xFF64748B),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 7),
+                SizedBox(
+                  width: 48,
+                  height: 3,
+                  child: LinearProgressIndicator(
+                    value: progress,
+                    backgroundColor: const Color(0xFFE2E8F0),
+                    color: _primaryBlue,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+        actions: [
+          PopupMenuButton<String>(
+            tooltip: 'More layout actions',
+            icon: const Icon(Icons.more_vert, size: 18),
+            onSelected: (value) {
+              if (value == 'clear') _showMobileClearDialog();
+            },
+            itemBuilder: (context) => const [
+              PopupMenuItem(value: 'clear', child: Text('Clear map')),
+            ],
+          ),
+          Padding(
+            padding: const EdgeInsets.only(right: 9),
+            child: Center(
+              child: SizedBox(
+                height: 39,
+                child: ElevatedButton(
+                  onPressed: _isSaving ? null : _showMobileSaveDialog,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _primaryBlue,
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(9),
+                    ),
+                  ),
+                  child: const Text(
+                    'Save layout',
+                    style: TextStyle(
+                      fontFamily: _fontFam,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 11,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+      body: SafeArea(
+        top: false,
+        child: Column(
+          children: [
+            _buildModeTabs(compact: true),
+            if (_remoteChangePending) _buildRemoteChangeBanner(),
+            Expanded(
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final showManagePanel =
+                      _mode == MapMode.manage && _manageSelected != null;
+                  final showAssignPanel = _mode == MapMode.selection;
+                  final panelHeight = showManagePanel
+                      ? math.min(270.0, constraints.maxHeight * 0.44)
+                      : math.min(320.0, constraints.maxHeight * 0.48);
+                  return Column(
+                    children: [
+                      Expanded(child: _buildMobileMapCanvas()),
+                      if (showManagePanel)
+                        SizedBox(
+                          height: panelHeight,
+                          child: _buildMobileSelectionControls(_manageSelected!),
+                        ),
+                      if (showAssignPanel)
+                        SizedBox(
+                          height: panelHeight,
+                          child: _buildAssignSidebar(),
+                        ),
+                    ],
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMobileMapCanvas() {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(5, 4, 5, 5),
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        color: kMapContainerBg,
+        borderRadius: BorderRadius.circular(15),
+      ),
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: StoreMap(
+              key: _storeMapKey,
+              layout: _draftLayout,
+              controller: widget.controller,
+              mode: _mode,
+              viewStyle: _viewStyle,
+              canvasMargin: EdgeInsets.zero,
+              compactMobileControls: true,
+              showMobileSelectionBar: false,
+              showMobileToolbar: true,
+              itemAssignmentEnabled: !_hasDirtyDraft && !_remoteChangePending,
+              selectedItemId: _selectedItemId,
+              onManageSelectionChanged: (element) {
+                if (mounted) setState(() => _manageSelected = element);
+              },
+              onSelectionAssigned: () {
+                if (mounted) setState(() => _selectedItemId = null);
+              },
+            ),
+          ),
+          Positioned(
+            top: 8,
+            left: 8,
+            child: Material(
+              color: const Color(0xFF0F172A),
+              borderRadius: BorderRadius.circular(10),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(10),
+                onTap: () => setState(() {
+                  _viewStyle = _viewStyle == MapViewStyle.threeD
+                      ? MapViewStyle.twoD
+                      : MapViewStyle.threeD;
+                }),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
+                  child: Text(
+                    'View: ${_viewStyle == MapViewStyle.threeD ? '3D' : '2D'}',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontFamily: _fontFam,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMobileSelectionControls(MapElement element) {
+    final label = element.type.name;
+    final sameType = _draftLayout.where((e) => e.type == element.type).toList();
+    final number = sameType.indexWhere((e) => e.id == element.id) + 1;
+    final heading = '${label[0].toUpperCase()}${label.substring(1)} #$number';
+
+    return Container(
+      width: double.infinity,
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+        boxShadow: [BoxShadow(color: Color(0x140F172A), blurRadius: 10)],
+      ),
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(9, 8, 9, 10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    heading,
+                    style: const TextStyle(
+                      fontFamily: _fontFam,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w800,
+                      color: Color(0xFF0F172A),
+                    ),
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Deselect object',
+                  visualDensity: VisualDensity.compact,
+                  onPressed: () => _storeMapKey.currentState?.clearManageSelection(),
+                  icon: const Icon(Icons.close, size: 19),
+                ),
+              ],
+            ),
+            Row(
+              children: [
+                Expanded(child: _mobileEditorButton('Rotate 90°', MapSidebarAction.rotate)),
+                const SizedBox(width: 10),
+                SizedBox(
+                  width: 132,
+                  child: Center(
+                    child: SizedBox(
+                      width: 40,
+                      child: _mobileEditorButton('▲', MapSidebarAction.up),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                Expanded(child: _mobileEditorButton('Duplicate', MapSidebarAction.duplicate)),
+                const SizedBox(width: 10),
+                SizedBox(
+                  width: 132,
+                  child: Row(
+                    children: [
+                      SizedBox(width: 40, child: _mobileEditorButton('◀', MapSidebarAction.left)),
+                      const Expanded(
+                        child: Center(
+                          child: Text('NUDGE', style: TextStyle(fontSize: 9, color: Color(0xFF64748B))),
+                        ),
+                      ),
+                      SizedBox(width: 40, child: _mobileEditorButton('▶', MapSidebarAction.right)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                Expanded(child: _mobileEditorButton('Delete', MapSidebarAction.delete, destructive: true)),
+                const SizedBox(width: 10),
+                SizedBox(
+                  width: 132,
+                  child: Center(
+                    child: SizedBox(
+                      width: 40,
+                      child: _mobileEditorButton('▼', MapSidebarAction.down),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            _manageSectionLabel('ADJUST WIDTH'),
+            const SizedBox(height: 4),
+            Row(
+              children: [
+                Expanded(child: _mobileEditorButton('◀ Left −', MapSidebarAction.widthLeftMinus)),
+                const SizedBox(width: 5),
+                Expanded(child: _mobileEditorButton('◀ Left +', MapSidebarAction.widthLeftPlus)),
+                const SizedBox(width: 5),
+                Expanded(child: _mobileEditorButton('Right − ▶', MapSidebarAction.widthRightMinus)),
+                const SizedBox(width: 5),
+                Expanded(child: _mobileEditorButton('Right + ▶', MapSidebarAction.widthRightPlus)),
+              ],
+            ),
+            if (element.type == ElementType.wall) ...[
+              const SizedBox(height: 8),
+              _mobileEditorButton('Auto-align corners', MapSidebarAction.autoAlignWall),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _mobileEditorButton(
+    String label,
+    MapSidebarAction action, {
+    bool destructive = false,
+  }) {
+    final color = destructive ? const Color(0xFFDC2626) : _primaryBlue;
+    return SizedBox(
+      height: 39,
+      child: OutlinedButton(
+        onPressed: () => _storeMapKey.currentState?.applySidebarAction(action),
+        style: OutlinedButton.styleFrom(
+          foregroundColor: color,
+          backgroundColor: destructive
+              ? const Color(0xFFFEECEC)
+              : const Color(0xFFEBF0FF),
+          side: BorderSide(
+            color: destructive
+                ? const Color(0xFFFECACA)
+                : const Color(0xFFD2DFFF),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 2),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          textStyle: const TextStyle(
+            fontFamily: _fontFam,
+            fontSize: 10,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        child: FittedBox(fit: BoxFit.scaleDown, child: Text(label)),
+      ),
+    );
+  }
+
+  void _showMobileSaveDialog() {
+    showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Save map layout?'),
+        content: const Text('Apply the current layout and item locations?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(dialogContext);
+              unawaited(_saveDraft());
+            },
+            child: const Text('Save layout'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showMobileClearDialog() {
+    showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Clear map?'),
+        content: const Text('Delete the entire map layout? Item assignments will not change.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Cancel')),
+          TextButton(
+            onPressed: _isSaving
+                ? null
+                : () {
+                    Navigator.pop(dialogContext);
+                    unawaited(_saveDraft(clear: true));
+                  },
+            child: const Text('Delete', style: TextStyle(color: Colors.red)),
+          ),
+        ],
       ),
     );
   }
@@ -1008,10 +1403,12 @@ class _MapEditorPageState extends State<MapEditorPage> {
     );
   }
 
-  Widget _buildModeTabs({bool inHeader = false}) {
+  Widget _buildModeTabs({bool inHeader = false, bool compact = false}) {
     return Container(
       color: Colors.white,
-      padding: inHeader
+      padding: compact
+          ? const EdgeInsets.fromLTRB(6, 4, 6, 4)
+          : inHeader
           ? EdgeInsets.zero
           : const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
       child: Container(
@@ -1023,16 +1420,16 @@ class _MapEditorPageState extends State<MapEditorPage> {
         ),
         child: Row(
           children: [
-            Expanded(child: _buildTabButton(MapMode.manage, LucideIcons.pencil, "Manage Layout")),
-            Expanded(child: _buildTabButton(MapMode.selection, LucideIcons.link, "Assign Items")),
-            Expanded(child: _buildTabButton(MapMode.view, LucideIcons.eye, "Preview")),
+            Expanded(child: _buildTabButton(MapMode.manage, LucideIcons.pencil, "Manage Layout", compact: compact)),
+            Expanded(child: _buildTabButton(MapMode.selection, LucideIcons.link, "Assign Items", compact: compact)),
+            Expanded(child: _buildTabButton(MapMode.view, LucideIcons.eye, "Preview", compact: compact)),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildTabButton(MapMode mode, IconData icon, String label) {
+  Widget _buildTabButton(MapMode mode, IconData icon, String label, {bool compact = false}) {
     final isSelected = _mode == mode;
     return GestureDetector(
       onTap: () {
@@ -1045,20 +1442,36 @@ class _MapEditorPageState extends State<MapEditorPage> {
       behavior: HitTestBehavior.opaque,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.symmetric(vertical: 12),
+        padding: EdgeInsets.symmetric(vertical: compact ? 11 : 12),
         decoration: BoxDecoration(
           color: isSelected ? _primaryBlue : Colors.transparent,
           borderRadius: BorderRadius.circular(8),
         ),
-        child: Row(
+        child: compact
+            ? Center(
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    label,
+                    maxLines: 1,
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontFamily: _fontFam,
+                      fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
+                      color: isSelected ? Colors.white : Colors.grey.shade700,
+                    ),
+                  ),
+                ),
+              )
+            : Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(
-              icon,
-              size: 16,
-              color: isSelected ? Colors.white : Colors.grey.shade600,
-            ),
-            const SizedBox(width: 8),
+              Icon(
+                icon,
+                size: 16,
+                color: isSelected ? Colors.white : Colors.grey.shade600,
+              ),
+              const SizedBox(width: 8),
             Text(
               label,
               style: TextStyle(

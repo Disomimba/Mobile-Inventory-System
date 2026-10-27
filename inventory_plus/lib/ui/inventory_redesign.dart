@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:image_picker/image_picker.dart';
@@ -105,9 +106,12 @@ class _InventoryRedesignState extends State<InventoryRedesign> {
 
     // Counts reflect the search, category, and disabled toggle outside
     // this modal, so the Apply button previews the actual result total.
+    final disabledItems = widget.controller.disabledItems;
+    final disabledIds = disabledItems.map((item) => item.id).toSet();
     final matchingItems = <InventoryItem>[
-      ...widget.controller.currentInventory,
-      if (_showDisabled) ...widget.controller.disabledItems,
+      ...widget.controller.currentInventory
+          .where((item) => !disabledIds.contains(item.id)),
+      if (_showDisabled) ...disabledItems,
     ].where((item) {
       final query = _search.text.trim().toLowerCase();
       return (_category == 'All' || item.category == _category) &&
@@ -331,11 +335,11 @@ class _InventoryRedesignState extends State<InventoryRedesign> {
   }
 
 
-  bool _matchesStockFilter(InventoryItem item) {
-    if (_stockFilter == 'all') return true;
+  bool _matchesStatusFilter(InventoryItem item, String filter) {
+    if (filter == 'all') return true;
     if (widget.controller.isDisabled(item.id)) return false;
     final status = widget.controller.stockStatusFor(item);
-    switch (_stockFilter) {
+    switch (filter) {
       case 'ok':
         return status == StockStatus.ok;
       case 'low':
@@ -348,6 +352,9 @@ class _InventoryRedesignState extends State<InventoryRedesign> {
         return true;
     }
   }
+
+  bool _matchesStockFilter(InventoryItem item) =>
+      _matchesStatusFilter(item, _stockFilter);
 
   int _compareItems(InventoryItem a, InventoryItem b) {
     int comparison;
@@ -379,8 +386,11 @@ class _InventoryRedesignState extends State<InventoryRedesign> {
 
   @override
   Widget build(BuildContext context) {
-    final active = widget.controller.currentInventory;
     final disabled = widget.controller.disabledItems;
+    final disabledIds = disabled.map((item) => item.id).toSet();
+    final active = widget.controller.currentInventory
+        .where((item) => !disabledIds.contains(item.id))
+        .toList();
     final categoryNames = <String>{
       ...active.map((item) => item.category),
       ...disabled.map((item) => item.category),
@@ -418,7 +428,16 @@ class _InventoryRedesignState extends State<InventoryRedesign> {
     return Scaffold(
       backgroundColor: const Color(0xFFF5F7FB),
       body: LayoutBuilder(
-        builder: (context, constraints) => SingleChildScrollView(
+        builder: (context, constraints) {
+          if (constraints.maxWidth < 600) {
+            return _buildMobileView(
+              items: filtered,
+              source: source,
+              categories: categories,
+              selectedCategory: selectedCategory,
+            );
+          }
+          return SingleChildScrollView(
           padding: const EdgeInsets.all(20),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -693,6 +712,671 @@ class _InventoryRedesignState extends State<InventoryRedesign> {
               ),
             ],
           ),
+        );
+        },
+      ),
+    );
+  }
+
+  Widget _buildMobileView({
+    required List<InventoryItem> items,
+    required List<InventoryItem> source,
+    required List<String> categories,
+    required String selectedCategory,
+  }) {
+    const statusLabels = <String, String>{
+      'ok': 'In stock',
+      'low': 'Low stock',
+      'critical': 'Critical',
+      'out': 'Out of stock',
+    };
+    final hasActiveFilters = _stockFilter != 'all' || selectedCategory != 'All';
+    final activeFilters = [
+      if (_stockFilter != 'all') statusLabels[_stockFilter] ?? _stockFilter,
+      if (selectedCategory != 'All') selectedCategory,
+    ].join(' · ');
+
+    return SafeArea(
+      top: false,
+      child: CustomScrollView(
+        key: const PageStorageKey('mobile-inventory-list'),
+        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+        slivers: [
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 18, 16, 10),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Expanded(
+                        child: Text(
+                          'Inventory',
+                          style: TextStyle(
+                            fontFamily: _font,
+                            color: _ink,
+                            fontSize: 24,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: 'Inventory actions',
+                        icon: const Icon(LucideIcons.ellipsis, color: _ink),
+                        onPressed: _openMobileActionsSheet,
+                      ),
+                      if (widget.controller.isAdmin) ...[
+                        const SizedBox(width: 4),
+                        SizedBox(
+                          height: 40,
+                          child: FilledButton.icon(
+                            onPressed: widget.onNewItem,
+                            icon: const Icon(LucideIcons.plus, size: 16),
+                            label: const Text('Add item'),
+                            style: FilledButton.styleFrom(
+                              backgroundColor: _blue,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                              ),
+                              textStyle: const TextStyle(
+                                fontFamily: _font,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '${source.length} items in this store',
+                    style: const TextStyle(
+                      fontFamily: _font,
+                      color: _slate,
+                      fontSize: 12,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: SizedBox(
+                          height: 46,
+                          child: TextField(
+                            controller: _search,
+                            onChanged: (_) => setState(() => _page = 0),
+                            textInputAction: TextInputAction.search,
+                            decoration: InputDecoration(
+                              hintText: 'Search name or SKU',
+                              prefixIcon: const Icon(
+                                LucideIcons.search,
+                                size: 19,
+                              ),
+                              filled: true,
+                              fillColor: Colors.white,
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 10,
+                              ),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(10),
+                                borderSide: const BorderSide(color: _border),
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(10),
+                                borderSide: const BorderSide(color: _border),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      SizedBox(
+                        height: 46,
+                        child: OutlinedButton.icon(
+                          onPressed: () => _openMobileFilterSheet(
+                            source: source,
+                            categories: categories,
+                            selectedCategory: selectedCategory,
+                          ),
+                          icon: const Icon(Icons.tune, size: 17),
+                          label: const Text('Filter'),
+                          style: OutlinedButton.styleFrom(
+                            backgroundColor: hasActiveFilters
+                                ? const Color(0xFFEFF6FF)
+                                : Colors.white,
+                            foregroundColor: hasActiveFilters ? _blue : _ink,
+                            padding: const EdgeInsets.symmetric(horizontal: 9),
+                            side: BorderSide(
+                              color: hasActiveFilters ? _blue : _border,
+                            ),
+                            textStyle: const TextStyle(
+                              fontFamily: _font,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      SizedBox(
+                        width: 46,
+                        height: 46,
+                        child: OutlinedButton(
+                          onPressed: _openMobileSortSheet,
+                          style: OutlinedButton.styleFrom(
+                            backgroundColor: Colors.white,
+                            foregroundColor: _ink,
+                            padding: EdgeInsets.zero,
+                            side: const BorderSide(color: _border),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                          ),
+                          child: const Icon(Icons.sort, size: 20),
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (hasActiveFilters) ...[
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            activeFilters,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontFamily: _font,
+                              color: _blue,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: () => setState(() {
+                            _stockFilter = 'all';
+                            _category = 'All';
+                            _page = 0;
+                          }),
+                          child: const Text('Clear'),
+                        ),
+                      ],
+                    ),
+                  ],
+                  SizedBox(height: hasActiveFilters ? 4 : 14),
+                  Text(
+                    '${items.length} ${items.length == 1 ? 'item' : 'items'}',
+                    style: const TextStyle(
+                      fontFamily: _font,
+                      color: _slate,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          if (items.isEmpty)
+            const SliverToBoxAdapter(
+              child: Padding(
+                padding: EdgeInsets.symmetric(horizontal: 24, vertical: 44),
+                child: Center(
+                  child: Text(
+                    'No items match your filters.',
+                    style: TextStyle(fontFamily: _font, color: _slate),
+                  ),
+                ),
+              ),
+            )
+          else
+            SliverList.builder(
+              itemCount: items.length,
+              itemBuilder: (context, index) => _mobileItemCard(items[index]),
+            ),
+          const SliverToBoxAdapter(child: SizedBox(height: 24)),
+        ],
+      ),
+    );
+  }
+
+  Widget _mobileItemCard(InventoryItem item) {
+    final disabled = widget.controller.isDisabled(item.id);
+    final status = widget.controller.stockStatusFor(item);
+    final statusColor = disabled ? _slate : _statusColor(status);
+    final statusText = disabled ? 'Disabled' : _statusLabel(status);
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 6),
+      child: Material(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        child: InkWell(
+          onTap: () => _openDetails(item),
+          borderRadius: BorderRadius.circular(12),
+          child: Container(
+            padding: const EdgeInsets.all(11),
+            decoration: BoxDecoration(
+              border: Border.all(color: _border),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(9),
+                  child: SizedBox(
+                    width: 56,
+                    height: 56,
+                    child: item.imageUrl.trim().isEmpty
+                        ? const ColoredBox(
+                            color: Color(0xFFEFF6FF),
+                            child: Icon(LucideIcons.package, color: _blue),
+                          )
+                        : Image.network(
+                            item.imageUrl,
+                            fit: BoxFit.cover,
+                            errorBuilder: (context, error, stackTrace) =>
+                                const ColoredBox(
+                                  color: Color(0xFFEFF6FF),
+                                  child: Icon(
+                                    LucideIcons.package,
+                                    color: _blue,
+                                  ),
+                                ),
+                          ),
+                  ),
+                ),
+                const SizedBox(width: 11),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            child: Text(
+                              item.name,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontFamily: _font,
+                                fontSize: 13,
+                                color: _ink,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 5),
+                          _badge(statusText, statusColor),
+                        ],
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        item.sku,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontFamily: _font,
+                          fontSize: 10,
+                          color: _slate,
+                        ),
+                      ),
+                      const SizedBox(height: 7),
+                      Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              _money(item.price),
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontFamily: _font,
+                                fontSize: 12,
+                                color: _ink,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Flexible(
+                            child: Text(
+                              '${_qty(item.quantity)} ${item.unit}',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontFamily: _font,
+                                fontSize: 11,
+                                color: status == StockStatus.ok
+                                    ? _slate
+                                    : statusColor,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openMobileFilterSheet({
+    required List<InventoryItem> source,
+    required List<String> categories,
+    required String selectedCategory,
+  }) async {
+    var draftStatus = _stockFilter;
+    var draftCategory = selectedCategory;
+    final query = _search.text.trim().toLowerCase();
+    const statuses = <(String, String)>[
+      ('all', 'All statuses'),
+      ('ok', 'In stock'),
+      ('low', 'Low stock'),
+      ('critical', 'Critical'),
+      ('out', 'Out of stock'),
+    ];
+
+    int matchingCount(String status, String category) => source.where((item) {
+      final matchesCategory = category == 'All' || item.category == category;
+      final matchesSearch =
+          query.isEmpty ||
+          item.name.toLowerCase().contains(query) ||
+          item.sku.toLowerCase().contains(query) ||
+          item.category.toLowerCase().contains(query);
+      return matchesCategory &&
+          matchesSearch &&
+          _matchesStatusFilter(item, status);
+    }).length;
+
+    final result = await showModalBottomSheet<(String, String)>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      useSafeArea: true,
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (context, updateSheet) => SizedBox(
+          height: math.min(
+            600.0,
+            MediaQuery.sizeOf(sheetContext).height * 0.82,
+          ),
+          child: Column(
+            children: [
+              const Padding(
+                padding: EdgeInsets.fromLTRB(20, 0, 20, 12),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    'Filter inventory',
+                    style: TextStyle(
+                      fontFamily: _font,
+                      fontSize: 18,
+                      color: _ink,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+              ),
+              const Divider(height: 1, color: _border),
+              Expanded(
+                child: ListView(
+                  children: [
+                    const Padding(
+                      padding: EdgeInsets.fromLTRB(20, 18, 20, 6),
+                      child: Text(
+                        'STOCK STATUS',
+                        style: TextStyle(
+                          fontFamily: _font,
+                          fontSize: 11,
+                          color: _slate,
+                          letterSpacing: 1,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                    for (final (value, label) in statuses)
+                      ListTile(
+                        key: Key('mobile-filter-status-$value'),
+                        dense: true,
+                        title: Text(
+                          label,
+                          style: const TextStyle(
+                            fontFamily: _font,
+                            fontSize: 14,
+                          ),
+                        ),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              '${matchingCount(value, draftCategory)}',
+                              style: const TextStyle(
+                                fontFamily: _font,
+                                color: _slate,
+                                fontSize: 12,
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Icon(
+                              value == draftStatus
+                                  ? Icons.radio_button_checked
+                                  : Icons.radio_button_unchecked,
+                              color: value == draftStatus ? _blue : _slate,
+                              size: 20,
+                            ),
+                          ],
+                        ),
+                        onTap: () => updateSheet(() => draftStatus = value),
+                      ),
+                    const Divider(height: 18, color: _border),
+                    const Padding(
+                      padding: EdgeInsets.fromLTRB(20, 12, 20, 6),
+                      child: Text(
+                        'CATEGORY',
+                        style: TextStyle(
+                          fontFamily: _font,
+                          fontSize: 11,
+                          color: _slate,
+                          letterSpacing: 1,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                    for (final category in categories)
+                      ListTile(
+                        key: Key('mobile-filter-category-$category'),
+                        dense: true,
+                        title: Text(
+                          category == 'All' ? 'All categories' : category,
+                          style: const TextStyle(
+                            fontFamily: _font,
+                            fontSize: 14,
+                          ),
+                        ),
+                        trailing: Icon(
+                          category == draftCategory
+                              ? Icons.radio_button_checked
+                              : Icons.radio_button_unchecked,
+                          color: category == draftCategory ? _blue : _slate,
+                          size: 20,
+                        ),
+                        onTap: () =>
+                            updateSheet(() => draftCategory = category),
+                      ),
+                  ],
+                ),
+              ),
+              const Divider(height: 1, color: _border),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+                child: Row(
+                  children: [
+                    TextButton(
+                      onPressed: () => updateSheet(() {
+                        draftStatus = 'all';
+                        draftCategory = 'All';
+                      }),
+                      child: const Text('Reset'),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: FilledButton(
+                        onPressed: () => Navigator.pop(sheetContext, (
+                          draftStatus,
+                          draftCategory,
+                        )),
+                        style: FilledButton.styleFrom(backgroundColor: _blue),
+                        child: Text(
+                    'Show ${matchingCount(draftStatus, draftCategory)} '
+                    '${matchingCount(draftStatus, draftCategory) == 1 ? 'item' : 'items'}',
+                          style: const TextStyle(
+                            fontFamily: _font,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (!mounted || result == null) return;
+    setState(() {
+      _stockFilter = result.$1;
+      _category = result.$2;
+      _page = 0;
+    });
+  }
+
+  Future<void> _openMobileSortSheet() async {
+    const options = <(String, String)>[
+      ('nameAsc', 'Name: A to Z'),
+      ('nameDesc', 'Name: Z to A'),
+      ('priceAsc', 'Price: low to high'),
+      ('priceDesc', 'Price: high to low'),
+      ('stockAsc', 'Stock: low to high'),
+      ('stockDesc', 'Stock: high to low'),
+      ('none', 'Default order'),
+    ];
+    final selected = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: SizedBox(
+          height: math.min(440, MediaQuery.sizeOf(sheetContext).height * 0.7),
+          child: Column(
+            children: [
+              const Padding(
+                padding: EdgeInsets.fromLTRB(20, 0, 20, 12),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    'Sort inventory',
+                    style: TextStyle(
+                      fontFamily: _font,
+                      fontSize: 18,
+                      color: _ink,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+              ),
+              Expanded(
+                child: ListView.builder(
+                  itemCount: options.length,
+                  itemBuilder: (context, index) {
+                    final (value, label) = options[index];
+                    return ListTile(
+                      title: Text(
+                        label,
+                        style: const TextStyle(fontFamily: _font, fontSize: 14),
+                      ),
+                      trailing: _sortBy == value
+                          ? const Icon(Icons.check, color: _blue)
+                          : null,
+                      onTap: () => Navigator.pop(sheetContext, value),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (!mounted || selected == null) return;
+    setState(() {
+      _sortBy = selected;
+      _page = 0;
+    });
+  }
+
+  void _openMobileActionsSheet() {
+    FocusManager.instance.primaryFocus?.unfocus();
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (widget.controller.isAdmin) ...[
+              ListTile(
+                leading: const Icon(LucideIcons.download),
+                title: const Text('Export report'),
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (mounted) widget.onExport();
+                  });
+                },
+              ),
+              ListTile(
+                leading: const Icon(LucideIcons.qrCode),
+                title: const Text('QR labels'),
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (mounted) widget.onQrLabels();
+                  });
+                },
+              ),
+            ],
+            ListTile(
+              leading: Icon(
+                _showDisabled ? LucideIcons.eyeOff : LucideIcons.eye,
+              ),
+              title: Text(
+                _showDisabled ? 'Hide disabled items' : 'Show disabled items',
+              ),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                setState(() {
+                  _showDisabled = !_showDisabled;
+                  _page = 0;
+                });
+              },
+            ),
+          ],
         ),
       ),
     );

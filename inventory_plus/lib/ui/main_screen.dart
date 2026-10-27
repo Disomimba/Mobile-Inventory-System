@@ -40,6 +40,7 @@ import 'widgets/app_dialog.dart';
 import 'widgets/app_toast.dart';
 import 'widgets/change_password_dialog.dart';
 import 'widgets/startup_restoration_surface.dart';
+import 'widgets/mobile_main_drawer.dart';
 import '../services/staff_presence_service.dart';
 import '../services/order_auto_assignment_service.dart';
 import 'widgets/active_staff_button.dart';
@@ -2548,14 +2549,15 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
             transactionIndex: transactionIndex,
             inventoryIndex: inventoryIndex,
           ),
+          drawer: MobileMainDrawer(
+            sections: _mainSections,
+            selectedIndex: _currentIndex ?? 0,
+            role: role,
+            onSelectIndex: _selectMainIndex,
+          ),
           body: IndexedStack(
             index: _currentIndex,
             children: _lazyPageChildren(pages),
-          ),
-          bottomNavigationBar: _buildMobileNavigationBar(
-            isAdmin: isAdmin,
-            isHelper: isHelper,
-            isCashier: isCashier,
           ),
         );
       },
@@ -2643,11 +2645,16 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   }) {
     return AppBar(
       automaticallyImplyLeading: false,
+      leading: Builder(builder: (context) => IconButton(
+        tooltip: 'Open navigation menu',
+        icon: const Icon(LucideIcons.menu, color: _darkText),
+        onPressed: () => Scaffold.of(context).openDrawer(),
+      )),
       backgroundColor: Colors.white,
       toolbarHeight: 64,
       elevation: 0,
       surfaceTintColor: Colors.transparent,
-      titleSpacing: 16,
+      titleSpacing: 0,
       title: Row(
         children: [
           Container(
@@ -2692,117 +2699,6 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       bottom: PreferredSize(
         preferredSize: const Size.fromHeight(1.0),
         child: Container(color: Colors.grey.shade200, height: 1.0),
-      ),
-    );
-  }
-
-  Widget _buildMobileNavigationBar({
-    required bool isAdmin,
-    required bool isHelper,
-    required bool isCashier,
-  }) {
-    return NavigationBarTheme(
-      data: NavigationBarThemeData(
-        indicatorColor: _primaryBlue.withOpacity(0.1),
-        labelTextStyle: WidgetStateProperty.resolveWith<TextStyle>((
-          Set<WidgetState> states,
-        ) {
-          if (states.contains(WidgetState.selected)) {
-            return const TextStyle(
-              color: _primaryBlue,
-              fontWeight: FontWeight.bold,
-              fontSize: 11,
-              fontFamily: _fontFam,
-            );
-          }
-
-          return const TextStyle(
-            color: _inactiveText,
-            fontSize: 11,
-            fontFamily: _fontFam,
-          );
-        }),
-      ),
-      child: NavigationBar(
-        height: 66,
-        backgroundColor: Colors.white,
-        surfaceTintColor: Colors.white,
-        selectedIndex: _currentIndex!,
-        labelBehavior: NavigationDestinationLabelBehavior.onlyShowSelected,
-        onDestinationSelected: _selectMainIndex,
-        destinations: [
-          if (isAdmin)
-            const NavigationDestination(
-              icon: Icon(LucideIcons.layoutDashboard, color: _inactiveText),
-              selectedIcon: Icon(
-                LucideIcons.layoutDashboard,
-                color: _primaryBlue,
-              ),
-              label: 'Home',
-            ),
-          if (isAdmin)
-            const NavigationDestination(
-              icon: Icon(LucideIcons.trendingUp, color: _inactiveText),
-              selectedIcon: Icon(LucideIcons.trendingUp, color: _primaryBlue),
-              label: 'Forecast',
-            ),
-          if (isCashier || isAdmin)
-            const NavigationDestination(
-              icon: Icon(LucideIcons.shoppingCart, color: _inactiveText),
-              selectedIcon: Icon(LucideIcons.shoppingCart, color: _primaryBlue),
-              label: 'POS',
-            ),
-          if (isHelper || isAdmin)
-            const NavigationDestination(
-              icon: Icon(LucideIcons.fileText, color: _inactiveText),
-              selectedIcon: Icon(LucideIcons.fileText, color: _primaryBlue),
-              label: 'Queue',
-            ),
-          const NavigationDestination(
-            icon: Icon(LucideIcons.box, color: _inactiveText),
-            selectedIcon: Icon(LucideIcons.box, color: _primaryBlue),
-            label: 'Inventory',
-          ),
-          if (isAdmin)
-            const NavigationDestination(
-              icon: Icon(LucideIcons.clipboardCheck, color: _inactiveText),
-              selectedIcon: Icon(
-                LucideIcons.clipboardCheck,
-                color: _primaryBlue,
-              ),
-              label: 'Approvals',
-            ),
-          if (isHelper || isCashier)
-            const NavigationDestination(
-              icon: Icon(LucideIcons.history, color: _inactiveText),
-              selectedIcon: Icon(LucideIcons.history, color: _primaryBlue),
-              label: 'History',
-            ),
-          if (isAdmin)
-            const NavigationDestination(
-              icon: Icon(LucideIcons.barChart2, color: _inactiveText),
-              selectedIcon: Icon(LucideIcons.barChart2, color: _primaryBlue),
-              label: 'Performance',
-            ),
-          if (isAdmin)
-            const NavigationDestination(
-              icon: Icon(LucideIcons.history, color: _inactiveText),
-              selectedIcon: Icon(LucideIcons.history, color: _primaryBlue),
-              label: 'Logs',
-            ),
-          if (isAdmin)
-            const NavigationDestination(
-              icon: Icon(LucideIcons.map, color: _inactiveText),
-              selectedIcon: Icon(LucideIcons.map, color: _primaryBlue),
-              label: 'Map',
-            ),
-          if (isAdmin)
-            const NavigationDestination(
-              icon: Icon(LucideIcons.settings, color: _inactiveText),
-              selectedIcon: Icon(LucideIcons.settings, color: _primaryBlue),
-              label: 'Settings',
-            ),
-        ],
       ),
     );
   }

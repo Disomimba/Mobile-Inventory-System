@@ -552,7 +552,17 @@ class _DashboardPageState extends State<DashboardPage> {
     final criticalStockItems = _criticalStockItems;
     final deadStockItems = _deadStockItems;
 
-    return Scaffold(
+    return LayoutBuilder(builder: (context, constraints) {
+      if (constraints.maxWidth < 600) {
+        return _buildMobileDashboard(
+          metrics: metrics,
+          allItems: allItems,
+          criticalStockItems: criticalStockItems,
+          deadStockItems: deadStockItems,
+        );
+      }
+
+      return Scaffold(
       backgroundColor: bgColor,
       body: SingleChildScrollView(
             padding: const EdgeInsets.all(32.0),
@@ -781,6 +791,413 @@ class _DashboardPageState extends State<DashboardPage> {
               ],
             ),
           ),
+      );
+    });
+  }
+
+  Widget _buildMobileDashboard({
+    required Map<String, dynamic> metrics,
+    required List<InventoryItem> allItems,
+    required List<InventoryItem> criticalStockItems,
+    required List<InventoryItem> deadStockItems,
+  }) {
+    final metricCards = <Widget>[
+      _mobileMetricCard(
+        'Revenue',
+        '₱${(metrics['currentRevenue'] as double).toStringAsFixed(0)}',
+        '${(metrics['revGrowth'] as double).abs().toStringAsFixed(0)}% vs last period',
+        LucideIcons.dollarSign,
+        primaryBlue,
+      ),
+      _mobileMetricCard(
+        'Orders completed',
+        '${metrics['currentOrders']}',
+        '${(metrics['orderDiff'] as int).abs()} vs last period',
+        LucideIcons.shoppingBag,
+        primaryBlue,
+      ),
+      _mobileMetricCard(
+        'Stock alerts',
+        '${criticalStockItems.length}',
+        '${deadStockItems.length} out of stock',
+        LucideIcons.triangleAlert,
+        Colors.orange.shade700,
+      ),
+      _mobileMetricCard(
+        'Pending orders',
+        '${metrics['pendingCount']}',
+        '${metrics['waitingLongCount']} waiting 60+ mins',
+        LucideIcons.clock,
+        primaryBlue,
+      ),
+    ];
+
+    return Scaffold(
+      backgroundColor: bgColor,
+      body: SafeArea(
+        top: false,
+        child: SingleChildScrollView(
+          key: const PageStorageKey('mobile-dashboard-scroll'),
+          padding: const EdgeInsets.fromLTRB(16, 20, 16, 32),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Dashboard', style: TextStyle(
+                fontFamily: fontFam, fontSize: 26,
+                fontWeight: FontWeight.w800, color: darkColor,
+              )),
+              const SizedBox(height: 4),
+              Text(
+                _formatCurrentDate().replaceFirst(' - Store overview', ''),
+                style: TextStyle(
+                  fontFamily: fontFam, fontSize: 12,
+                  color: Colors.grey.shade600,
+                ),
+              ),
+              const SizedBox(height: 18),
+              Container(
+                padding: const EdgeInsets.all(4),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(children: [
+                  for (final filter in ['Today', '7 Days', '30 Days'])
+                    Expanded(child: InkWell(
+                      onTap: () => setState(() {
+                        _selectedFilter = filter;
+                        _metrics = _calculateMetrics(_orders);
+                      }),
+                      borderRadius: BorderRadius.circular(9),
+                      child: Container(
+                        height: 40,
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          color: _selectedFilter == filter
+                              ? primaryBlue : Colors.transparent,
+                          borderRadius: BorderRadius.circular(9),
+                        ),
+                        child: Text(filter, style: TextStyle(
+                          fontFamily: fontFam, fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          color: _selectedFilter == filter
+                              ? Colors.white : Colors.grey.shade600,
+                        )),
+                      ),
+                    )),
+                ]),
+              ),
+              const SizedBox(height: 16),
+              LayoutBuilder(builder: (context, constraints) {
+                final columns = constraints.maxWidth < 290 ? 1 : 2;
+                return GridView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: metricCards.length,
+                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: columns,
+                    crossAxisSpacing: 12,
+                    mainAxisSpacing: 12,
+                    mainAxisExtent: columns == 1 ? 126 : 152,
+                  ),
+                  itemBuilder: (context, index) => metricCards[index],
+                );
+              }),
+              const SizedBox(height: 16),
+              _buildMobileSalesChart(metrics),
+              const SizedBox(height: 16),
+              _buildRestockPriority(criticalStockItems, mobile: true),
+              const SizedBox(height: 16),
+              _buildOrderPipeline(metrics, mobile: true),
+              const SizedBox(height: 16),
+              _buildMobileForecastCard(),
+              const SizedBox(height: 16),
+              _buildMobileRecommendationCard(),
+              const SizedBox(height: 16),
+              _buildTopSellers(allItems, mobile: true),
+              const SizedBox(height: 16),
+              _buildRecentActivity(mobile: true),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _mobileMetricCard(
+    String title,
+    String value,
+    String detail,
+    IconData icon,
+    Color accent,
+  ) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: _cardDecoration(),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            Expanded(child: Text(title, maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontFamily: fontFam, fontSize: 12,
+                fontWeight: FontWeight.w700, color: Colors.grey.shade600,
+              ),
+            )),
+            const SizedBox(width: 4),
+            Container(
+              width: 32, height: 32,
+              decoration: BoxDecoration(
+                color: accent.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(9),
+              ),
+              child: Icon(icon, size: 17, color: accent),
+            ),
+          ]),
+          const Spacer(),
+          Text(value, maxLines: 1, overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              fontFamily: fontFam, fontSize: 24,
+              fontWeight: FontWeight.w800, color: darkColor,
+            ),
+          ),
+          const SizedBox(height: 3),
+          Text(detail, maxLines: 2, overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontFamily: fontFam, fontSize: 10,
+              fontWeight: FontWeight.w600, color: accent,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMobileSalesChart(Map<String, dynamic> metrics) {
+    final dailyRevenue = metrics['dailyRevenue'] as List<double>;
+    final maxRevenue = metrics['maxDailyRevenue'] as double;
+    final now = DateTime.now();
+    const weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    final days = List.generate(7, (index) {
+      if (index == 6) return 'Today';
+      return weekdays[now.subtract(Duration(days: 6 - index)).weekday - 1];
+    });
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: _cardDecoration(),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            const Icon(LucideIcons.barChart2, size: 18, color: darkColor),
+            const SizedBox(width: 8),
+            const Expanded(child: Text('Sales · Last 7 days', style: TextStyle(
+              fontFamily: fontFam, fontSize: 15,
+              fontWeight: FontWeight.w800, color: darkColor,
+            ))),
+            IconButton(
+              tooltip: 'View transactions',
+              onPressed: widget.onViewTransactions,
+              icon: const Icon(LucideIcons.arrowUpRight,
+                size: 18, color: primaryBlue),
+            ),
+          ]),
+          const SizedBox(height: 8),
+          Text(
+            '₱${(metrics['totalWeekRevenue'] as double).toStringAsFixed(0)}',
+            style: const TextStyle(
+              fontFamily: fontFam, fontSize: 23,
+              fontWeight: FontWeight.w800, color: darkColor,
+            ),
+          ),
+          Text('Total this week', style: TextStyle(
+            fontFamily: fontFam, fontSize: 11, color: Colors.grey.shade600,
+          )),
+          const SizedBox(height: 20),
+          SizedBox(
+            height: 150,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: List.generate(7, (index) {
+                final value = dailyRevenue[index];
+                final barHeight = maxRevenue <= 0
+                    ? 4.0 : (value / maxRevenue * 108).clamp(4.0, 108.0);
+                return Expanded(child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 3),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      Expanded(child: Align(
+                        alignment: Alignment.bottomCenter,
+                        child: Container(
+                          height: barHeight,
+                          decoration: BoxDecoration(
+                            color: index == 6 ? primaryBlue
+                                : primaryBlue.withOpacity(0.18),
+                            borderRadius: const BorderRadius.vertical(
+                              top: Radius.circular(5)),
+                          ),
+                        ),
+                      )),
+                      const SizedBox(height: 8),
+                      Text(days[index], maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontFamily: fontFam, fontSize: 10,
+                          fontWeight: index == 6
+                              ? FontWeight.w800 : FontWeight.w500,
+                          color: index == 6 ? darkColor : Colors.grey.shade600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ));
+              }),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMobileForecastCard() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: _cardDecoration(),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            const Icon(LucideIcons.trendingUp, size: 18, color: darkColor),
+            const SizedBox(width: 8),
+            const Expanded(child: Text('AI Demand Forecasting',
+              maxLines: 2,
+              style: TextStyle(
+                fontFamily: fontFam, fontSize: 15,
+                fontWeight: FontWeight.w800, color: darkColor,
+              ),
+            )),
+            IconButton(
+              tooltip: 'Refresh forecast',
+              onPressed: _isFetchingForecast
+                  ? null : () => _fetchForecast(forceRefresh: true),
+              icon: Icon(LucideIcons.refreshCw, size: 18,
+                color: _forecastInsightStale
+                    ? Colors.orange.shade700 : darkColor),
+            ),
+          ]),
+          const SizedBox(height: 8),
+          Row(children: [
+            Text('Period', style: TextStyle(
+              fontFamily: fontFam, fontSize: 12,
+              color: Colors.grey.shade600,
+            )),
+            const SizedBox(width: 12),
+            DropdownButton<String>(
+              value: _forecastingFilter,
+              isDense: true,
+              items: const ['Season', 'Month'].map((value) =>
+                DropdownMenuItem(value: value, child: Text(value))).toList(),
+              onChanged: (value) {
+                if (value == null || value == _forecastingFilter) return;
+                setState(() => _forecastingFilter = value);
+                _fetchForecast();
+              },
+            ),
+          ]),
+          if (_forecastInsightStale)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Text('Inventory changed — refresh this insight.',
+                style: TextStyle(
+                  fontFamily: fontFam, fontSize: 11,
+                  color: Colors.orange.shade700,
+                ),
+              ),
+            ),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: primaryBlue.withOpacity(0.05),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: _isFetchingForecast
+                ? const Center(child: CircularProgressIndicator(
+                    strokeWidth: 2, color: primaryBlue))
+                : Text(_forecastInsightText, style: const TextStyle(
+                    fontFamily: fontFam, fontSize: 13,
+                    height: 1.5, color: darkColor,
+                  )),
+          ),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton(
+              onPressed: widget.onOpenForecasting,
+              child: const Text('Open forecasting →'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMobileRecommendationCard() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1E293B),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            const Icon(LucideIcons.sparkles, size: 18, color: Colors.white),
+            const SizedBox(width: 8),
+            const Expanded(child: Text('AI Restocking Plan', style: TextStyle(
+              fontFamily: fontFam, fontSize: 15,
+              fontWeight: FontWeight.w800, color: Colors.white,
+            ))),
+            IconButton(
+              tooltip: 'Refresh recommendations',
+              onPressed: _isLoadingAI
+                  ? null : () => _fetchAIRecommendations(forceRefresh: true),
+              icon: Icon(LucideIcons.refreshCw, size: 18,
+                color: _aiRecommendationStale
+                    ? Colors.orange : Colors.white),
+            ),
+          ]),
+          if (_aiRecommendationStale)
+            const Padding(
+              padding: EdgeInsets.only(bottom: 8),
+              child: Text('Inventory changed — refresh this plan.',
+                style: TextStyle(
+                  fontFamily: fontFam, fontSize: 11,
+                  color: Colors.orange,
+                ),
+              ),
+            ),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.07),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: _isLoadingAI
+                ? const Center(child: CircularProgressIndicator(
+                    color: Colors.white))
+                : Text(_aiRecommendation, style: const TextStyle(
+                    fontFamily: fontFam, fontSize: 13,
+                    height: 1.5, color: Colors.white,
+                  )),
+          ),
+        ],
+      ),
     );
   }
 
@@ -1623,10 +2040,11 @@ class _DashboardPageState extends State<DashboardPage> {
     qtyCtrl.dispose();
   }
 
-  Widget _buildRestockPriority(List<InventoryItem> criticalItems) {
+  Widget _buildRestockPriority(List<InventoryItem> criticalItems,
+      {bool mobile = false}) {
     return Container(
-      height: 380,
-      padding: const EdgeInsets.all(24),
+      height: mobile ? 280 : 380,
+      padding: EdgeInsets.all(mobile ? 16 : 24),
       decoration: _cardDecoration(),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1635,15 +2053,17 @@ class _DashboardPageState extends State<DashboardPage> {
             children: [
               Icon(LucideIcons.triangleAlert, size: 20, color: Colors.red.shade600),
               const SizedBox(width: 10),
-              Text(
+              Expanded(child: Text(
                 "Restock Priority",
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                   fontFamily: fontFam,
                   fontSize: 16,
                   fontWeight: FontWeight.w800,
                   color: Colors.red.shade700,
                 ),
-              ),
+              )),
             ],
           ),
           const SizedBox(height: 24),
@@ -1764,7 +2184,8 @@ class _DashboardPageState extends State<DashboardPage> {
 
   // ─── BOTTOM 3 PANELS ───────────────────────────────────────────────────────
 
-  Widget _buildTopSellers(List<InventoryItem> allItems) {
+  Widget _buildTopSellers(List<InventoryItem> allItems,
+      {bool mobile = false}) {
     Map<String, double> sales = {};
     for (var tx in _recentTransactions) {
       if (tx['transaction_type'] == 'checkout') {
@@ -1779,8 +2200,8 @@ class _DashboardPageState extends State<DashboardPage> {
     var top3 = sortedSales.take(3).toList();
 
     return Container(
-      height: 320,
-      padding: const EdgeInsets.all(24),
+      height: mobile ? 240 : 320,
+      padding: EdgeInsets.all(mobile ? 16 : 24),
       decoration: _cardDecoration(),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1877,10 +2298,11 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
-  Widget _buildOrderPipeline(Map<String, dynamic> metrics) {
+  Widget _buildOrderPipeline(Map<String, dynamic> metrics,
+      {bool mobile = false}) {
     return Container(
-      height: 320,
-      padding: const EdgeInsets.all(24),
+      height: mobile ? 240 : 320,
+      padding: EdgeInsets.all(mobile ? 16 : 24),
       decoration: _cardDecoration(),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1888,22 +2310,31 @@ class _DashboardPageState extends State<DashboardPage> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Row(
+              const Expanded(child: Row(
                 children: [
                   Icon(LucideIcons.listOrdered, size: 20, color: darkColor),
                   SizedBox(width: 10),
-                  Text(
+                  Expanded(child: Text(
                     "Order Pipeline",
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       fontFamily: fontFam,
                       fontSize: 16,
                       fontWeight: FontWeight.w800,
                       color: darkColor,
                     ),
-                  ),
+                  )),
                 ],
-              ),
-              TextButton(
+              )),
+              if (mobile)
+                IconButton(
+                  tooltip: 'Open queue',
+                  onPressed: widget.onOpenQueue,
+                  icon: const Icon(LucideIcons.arrowUpRight,
+                    size: 18, color: primaryBlue),
+                )
+              else TextButton(
                 onPressed: widget.onOpenQueue,
                 child: const Text(
                   "Open queue →",
@@ -1961,10 +2392,10 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
-  Widget _buildRecentActivity() {
+  Widget _buildRecentActivity({bool mobile = false}) {
     return Container(
-      height: 320,
-      padding: const EdgeInsets.all(24),
+      height: mobile ? 260 : 320,
+      padding: EdgeInsets.all(mobile ? 16 : 24),
       decoration: _cardDecoration(),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1972,22 +2403,31 @@ class _DashboardPageState extends State<DashboardPage> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Row(
+              const Expanded(child: Row(
                 children: [
                   Icon(LucideIcons.history, size: 20, color: darkColor),
                   SizedBox(width: 10),
-                  Text(
+                  Expanded(child: Text(
                     "Recent Activity",
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       fontFamily: fontFam,
                       fontSize: 16,
                       fontWeight: FontWeight.w800,
                       color: darkColor,
                     ),
-                  ),
+                  )),
                 ],
-              ),
-              TextButton(
+              )),
+              if (mobile)
+                IconButton(
+                  tooltip: 'View all activity',
+                  onPressed: widget.onViewActivity,
+                  icon: const Icon(LucideIcons.arrowUpRight,
+                    size: 18, color: primaryBlue),
+                )
+              else TextButton(
                 onPressed: widget.onViewActivity,
                 child: const Text(
                   "All →",

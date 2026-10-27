@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../data/inventory.dart';
 import '../logic/inventory_controller.dart';
+import '../logic/map_placement.dart';
 import 'models_3d.dart';
 import 'widgets/app_toast.dart';
 
@@ -17,6 +18,15 @@ enum MapSidebarAction { rotate, up, down, left, right, widthLeftMinus, widthLeft
 // Updated to the soft light-blue background
 const Color kMapContainerBg = Color.fromARGB(255, 214, 235, 255); 
 
+// 3D-only dimensions. Keep these separate from MapElement.size, which defines
+// the editable 2D footprint and collision geometry.
+const double _rack3DHeight = 6.0;
+const double _shelf3DHeight = 5.25;
+const double _door3DHeight = 5.2;
+const double _wall3DHeight = 6.5;
+// Each model's baseY and nudgeX below compensate for its height change so its
+// painted base stays on the same map tile.
+
 class StoreMap extends StatefulWidget {
   final InventoryController controller;
   final String? highlightId;
@@ -25,6 +35,9 @@ class StoreMap extends StatefulWidget {
   final MapMode mode;
   final MapViewStyle viewStyle;
   final bool showMobileToolbar;
+  final bool showMobileSelectionBar;
+  final bool compactMobileControls;
+  final EdgeInsets canvasMargin;
   final String? selectedItemId;
   final List<MapElement>? layout;
   final bool itemAssignmentEnabled;
@@ -41,6 +54,9 @@ class StoreMap extends StatefulWidget {
     this.mode = MapMode.view,
     this.viewStyle = MapViewStyle.threeD,
     this.showMobileToolbar = true,
+    this.showMobileSelectionBar = true,
+    this.compactMobileControls = false,
+    this.canvasMargin = const EdgeInsets.all(12),
     this.selectedItemId,
     this.layout,
     this.itemAssignmentEnabled = true,
@@ -270,24 +286,19 @@ class StoreMapState extends State<StoreMap>
     return const Size(80, 80); // Fallback
   }
 
-  Offset _snapToGrid(Offset position, Size size, ElementType type) {
-    const double step = 40.0;
-
-    if (type == ElementType.wall) {
-      // WALL: Center snaps to the grid lines (0, 40, 80...)
-      final Offset center = position + Offset(size.width / 2, size.height / 2);
-      final double snappedCenterX = (center.dx / step).round() * step;
-      final double snappedCenterY = (center.dy / step).round() * step;
-      return Offset(
-        snappedCenterX - size.width / 2,
-        snappedCenterY - size.height / 2,
-      );
-    } else {
-      // OBJECTS: Top-Left corner snaps to the grid lines.
-      final double snappedX = (position.dx / step).round() * step;
-      final double snappedY = (position.dy / step).round() * step;
-      return Offset(snappedX, snappedY);
-    }
+  Offset _snapToGrid(
+    Offset position,
+    Size size,
+    ElementType type, {
+    double rotation = 0,
+  }) {
+    return snapMapPosition(
+      position,
+      size,
+      type,
+      _layout,
+      rotation: rotation,
+    );
   }
 
   List<Offset> _getCorners(Offset pos, Size size, double rotation) {
@@ -369,9 +380,11 @@ class StoreMapState extends State<StoreMap>
   // NEW: Build the left expandable toolbar
   // ==========================================
   Widget _buildLeftToolbar() {
+    final compact = widget.compactMobileControls;
+    final buttonSize = compact ? 44.0 : 56.0;
     return Positioned(
-      bottom: 20,
-      left: 20,
+      bottom: compact ? 8 : 20,
+      left: compact ? 8 : 20,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -413,36 +426,36 @@ class StoreMapState extends State<StoreMap>
                           LucideIcons.doorOpen,
                           Colors.green,
                         ),
-                        const SizedBox(height: 8),
+                        SizedBox(height: compact ? 5 : 8),
                         _buildDraggableToolbarItem(
                           ElementType.wall,
                           Icons.line_weight,
                           Colors.blue,
                         ),
-                        const SizedBox(height: 8),
+                        SizedBox(height: compact ? 5 : 8),
                         _buildDraggableToolbarItem(
                           ElementType.shelf,
                           Icons.shelves,
                           Colors.orange,
                         ),
-                        const SizedBox(height: 8),
+                        SizedBox(height: compact ? 5 : 8),
                         _buildDraggableToolbarItem(
                           ElementType.rack,
                           Icons.view_headline,
                           Colors.purple,
                         ),
-                        const SizedBox(height: 8),
+                        SizedBox(height: compact ? 5 : 8),
                         _buildDraggableToolbarItem(
                           ElementType.cashier,
                           Icons.point_of_sale,
                           Colors.blueGrey,
                         ),
-                        const SizedBox(height: 16),
+                        SizedBox(height: compact ? 8 : 16),
                       ],
                     )
-                  : const SizedBox(
+                  : SizedBox(
                       key: ValueKey('toolbar_collapsed'),
-                      width: 56,
+                      width: buttonSize,
                       height: 0,
                     ),
             ),
@@ -454,11 +467,12 @@ class StoreMapState extends State<StoreMap>
               });
             },
             child: Container(
-              width: 56,
-              height: 56,
+              key: const ValueKey('map-add-elements'),
+              width: buttonSize,
+              height: buttonSize,
               decoration: BoxDecoration(
                 color: Colors.blue.shade600, // Updated to blue theme
-                borderRadius: BorderRadius.circular(16),
+                borderRadius: BorderRadius.circular(compact ? 12 : 16),
                 boxShadow: const [
                   BoxShadow(
                     color: Colors.black45,
@@ -471,7 +485,11 @@ class StoreMapState extends State<StoreMap>
                 turns: _isToolbarExpanded ? 0.125 : 0.0,
                 duration: const Duration(milliseconds: 250),
                 curve: Curves.easeInOut,
-                child: const Icon(Icons.add, color: Colors.white, size: 32),
+                child: Icon(
+                  Icons.add,
+                  color: Colors.white,
+                  size: compact ? 24 : 32,
+                ),
               ),
             ),
           ),
@@ -488,6 +506,8 @@ class StoreMapState extends State<StoreMap>
     IconData icon,
     Color color,
   ) {
+    final compact = widget.compactMobileControls;
+    final buttonSize = compact ? 44.0 : 56.0;
     final String labelName =
         type.name[0].toUpperCase() + type.name.substring(1);
     bool isHovered = false; // Local state for hover tracking
@@ -506,22 +526,23 @@ class StoreMapState extends State<StoreMap>
                 feedback: Material(
                   color: Colors.transparent,
                   child: Container(
-                    width: 56,
-                    height: 56,
+                    width: buttonSize,
+                    height: buttonSize,
                     decoration: BoxDecoration(
                       color: const Color(0xFF1E293B),
-                      borderRadius: BorderRadius.circular(16),
+                      borderRadius: BorderRadius.circular(compact ? 12 : 16),
                       border: Border.all(color: color, width: 2),
                     ),
-                    child: Icon(icon, color: color, size: 28),
+                    child: Icon(icon, color: color, size: compact ? 20 : 28),
                   ),
                 ),
                 child: Container(
-                  width: 56,
-                  height: 56,
+                  key: ValueKey('map-palette-${type.name}'),
+                  width: buttonSize,
+                  height: buttonSize,
                   decoration: BoxDecoration(
                     color: const Color(0xFF1E293B),
-                    borderRadius: BorderRadius.circular(16),
+                    borderRadius: BorderRadius.circular(compact ? 12 : 16),
                     border: Border.all(
                       // Change border to blue when hovered
                       color: isHovered
@@ -532,13 +553,15 @@ class StoreMapState extends State<StoreMap>
                   ),
                   child: Stack(
                     children: [
-                      Center(child: Icon(icon, color: color, size: 24)),
+                      Center(
+                        child: Icon(icon, color: color, size: compact ? 19 : 24),
+                      ),
                       Positioned(
-                        top: 6,
-                        right: 6,
+                        top: compact ? 4 : 6,
+                        right: compact ? 4 : 6,
                         child: Container(
-                          width: 6,
-                          height: 6,
+                          width: compact ? 5 : 6,
+                          height: compact ? 5 : 6,
                           decoration: BoxDecoration(
                             color: color,
                             shape: BoxShape.circle,
@@ -592,8 +615,8 @@ class StoreMapState extends State<StoreMap>
   // ==========================================
   Widget _buildZoomControls() {
     return Positioned(
-      bottom: 20,
-      right: 20,
+      bottom: widget.compactMobileControls ? 8 : 20,
+      right: widget.compactMobileControls ? 8 : 20,
       child: Container(
         decoration: BoxDecoration(
           color: const Color(0xFF1E293B),
@@ -615,6 +638,13 @@ class StoreMapState extends State<StoreMap>
           children: [
             IconButton(
               icon: const Icon(Icons.add, color: Colors.white),
+              iconSize: widget.compactMobileControls ? 20 : 24,
+              constraints: widget.compactMobileControls
+                  ? const BoxConstraints(minWidth: 38, minHeight: 38)
+                  : null,
+              padding: widget.compactMobileControls
+                  ? const EdgeInsets.all(7)
+                  : null,
               onPressed: () => _zoom(1.2), // Zoom in
             ),
             Container(
@@ -624,8 +654,16 @@ class StoreMapState extends State<StoreMap>
             ),
             IconButton(
               icon: const Icon(Icons.remove, color: Colors.white),
+              iconSize: widget.compactMobileControls ? 20 : 24,
+              constraints: widget.compactMobileControls
+                  ? const BoxConstraints(minWidth: 38, minHeight: 38)
+                  : null,
+              padding: widget.compactMobileControls
+                  ? const EdgeInsets.all(7)
+                  : null,
               onPressed: () => _zoom(0.8), // Zoom out
             ),
+            if (!widget.compactMobileControls) ...[
             Container(
               height: 1,
               width: 40,
@@ -640,6 +678,7 @@ class StoreMapState extends State<StoreMap>
               },
               tooltip: 'Recenter Map',
             ),
+            ],
           ],
         ),
       ),
@@ -670,7 +709,7 @@ class StoreMapState extends State<StoreMap>
 
     return Container(
       // Margin on all sides so the map doesn't touch the sidebar
-      margin: const EdgeInsets.all(12),
+      margin: widget.canvasMargin,
       decoration: BoxDecoration(
         color: kMapContainerBg,
         borderRadius: BorderRadius.circular(16),
@@ -757,6 +796,7 @@ class StoreMapState extends State<StoreMap>
             original.position + Offset(dx * step, dy * step),
             clone.size,
             clone.type,
+            rotation: clone.rotation,
           );
           if (!_hasCollision(clone, candidate, clone.size, clone.rotation)) {
             freePosition = candidate;
@@ -1762,7 +1802,10 @@ class StoreMapState extends State<StoreMap>
     Widget mapDisplay = Stack(
       children: [
         map,
-        if (widget.mode == MapMode.manage && widget.showMobileToolbar && _activeElementId != null)
+        if (widget.mode == MapMode.manage &&
+            widget.showMobileToolbar &&
+            widget.showMobileSelectionBar &&
+            _activeElementId != null)
           Positioned(
             bottom: 20,
             left: 0,
@@ -1772,7 +1815,9 @@ class StoreMapState extends State<StoreMap>
         // ==========================================
         // NEW: Left Toolbar & Right Zoom Controls injected here
         // ==========================================
-        if (widget.mode == MapMode.manage && widget.showMobileToolbar) ...[
+        if (widget.mode == MapMode.manage &&
+            widget.showMobileToolbar &&
+            (widget.showMobileSelectionBar || _activeElementId == null)) ...[
           _buildLeftToolbar(),
         ],
         
@@ -1908,22 +1953,30 @@ class StoreMapState extends State<StoreMap>
     switch (type) {
       case ElementType.rack:
         modelPainter = RackPainter(
-          rack: Rack3D(width: modelWidth, depth: modelDepth, height: 8.0),
+          rack: Rack3D(
+            width: modelWidth,
+            depth: modelDepth,
+            height: _rack3DHeight,
+          ),
           rotationX: mapRotX,
           rotationY: true3DRotationY,
         );
-        baseY = -5.0;
-        nudgeX = -26.0;
+        baseY = -3.0;
+        nudgeX = -2.0;
         nudgeY = -3.0;
         break;
       case ElementType.shelf:
         modelPainter = ShelfPainter(
-          shelf: Shelf3D(width: modelWidth, depth: modelDepth, height: 7.0),
+          shelf: Shelf3D(
+            width: modelWidth,
+            depth: modelDepth,
+            height: _shelf3DHeight,
+          ),
           rotationX: mapRotX,
           rotationY: true3DRotationY,
         );
-        baseY = -3.5;
-        nudgeX = -10.0;
+        baseY = -1.75;
+        nudgeX = 11.0;
         nudgeY = -9.0;
         break;
       case ElementType.cashier:
@@ -1936,19 +1989,29 @@ class StoreMapState extends State<StoreMap>
         break;
       case ElementType.door:
         modelPainter = DoorPainter(
-          door: Door3D(width: modelWidth, depth: modelDepth, height: 6.0),
+          door: Door3D(
+            width: modelWidth,
+            depth: modelDepth,
+            height: _door3DHeight,
+          ),
           rotationX: mapRotX,
           rotationY: true3DRotationY,
         );
-        baseY = -3.0;
+        baseY = -2.2;
+        nudgeX = 9.6;
         break;
       case ElementType.wall:
         modelPainter = WallPainter(
-          wall: Wall3D(width: modelWidth, depth: modelDepth, height: 6.0),
+          wall: Wall3D(
+            width: modelWidth,
+            depth: modelDepth,
+            height: _wall3DHeight,
+          ),
           rotationX: mapRotX,
           rotationY: true3DRotationY,
         );
-        baseY = -3.0;
+        baseY = -3.5;
+        nudgeX = -6.0;
         break;
       default:
         modelPainter = null;
@@ -2035,28 +2098,36 @@ class StoreMapState extends State<StoreMap>
       switch (el.type) {
       case ElementType.rack:
         modelPainter = RackPainter(
-          rack: Rack3D(width: modelWidth, depth: modelDepth, height: 8.0),
+          rack: Rack3D(
+            width: modelWidth,
+            depth: modelDepth,
+            height: _rack3DHeight,
+          ),
           rotationX: mapRotX,
           rotationY: true3DRotationY,
         );
-        baseY = -5.0;
-        modelHeight = 8.0;
+        baseY = -3.0;
+        modelHeight = _rack3DHeight;
         footprintScale = 40.0;
         footprintCameraDistance = null;
-        nudgeX = -26.0;
+        nudgeX = -2.0;
         nudgeY = -3.0;
         break;
       case ElementType.shelf:
         modelPainter = ShelfPainter(
-          shelf: Shelf3D(width: modelWidth, depth: modelDepth, height: 7.0),
+          shelf: Shelf3D(
+            width: modelWidth,
+            depth: modelDepth,
+            height: _shelf3DHeight,
+          ),
           rotationX: mapRotX,
           rotationY: true3DRotationY,
         );
-        baseY = -3.5;
-        modelHeight = 7.0;
+        baseY = -1.75;
+        modelHeight = _shelf3DHeight;
         footprintScale = 40.0;
         footprintCameraDistance = null;
-        nudgeX = -10.0;
+        nudgeX = 11.0;
         nudgeY = -9.0;
         break;
       case ElementType.cashier:
@@ -2074,30 +2145,38 @@ class StoreMapState extends State<StoreMap>
         break;
       case ElementType.door:
         modelPainter = DoorPainter(
-          door: Door3D(width: modelWidth, depth: modelDepth, height: 6.0),
+          door: Door3D(
+            width: modelWidth,
+            depth: modelDepth,
+            height: _door3DHeight,
+          ),
           rotationX: mapRotX,
           rotationY: true3DRotationY,
         );
-        baseY = -3.0;
-        modelHeight = 6.0;
+        baseY = -2.2;
+        modelHeight = _door3DHeight;
         footprintScale = 40.0;
         footprintCameraDistance = null;
 
-        nudgeX = 0;
+        nudgeX = 9.6;
         nudgeY = 0;
         break;
       case ElementType.wall:
         modelPainter = WallPainter(
-          wall: Wall3D(width: modelWidth, depth: modelDepth, height: 6.0),
+          wall: Wall3D(
+            width: modelWidth,
+            depth: modelDepth,
+            height: _wall3DHeight,
+          ),
           rotationX: mapRotX,
           rotationY: true3DRotationY,
         );
-        baseY = -3.0;
-        modelHeight = 6.0;
+        baseY = -3.5;
+        modelHeight = _wall3DHeight;
         footprintScale = 40.0;
         footprintCameraDistance = null;
 
-        nudgeX = 0;
+        nudgeX = -6.0;
         nudgeY = 0;
         break;
       default:
@@ -2326,6 +2405,7 @@ class StoreMapState extends State<StoreMap>
                               _rawDragPosition!,
                               interactiveEl.size,
                               interactiveEl.type,
+                              rotation: interactiveEl.rotation,
                             );
 
                             final bool isValid = !_hasCollision(
