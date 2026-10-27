@@ -9,6 +9,9 @@ import 'widgets/app_toast.dart';
 
 enum MapMode { view, manage, selection, pick }
 
+/// Controls only how the existing floor plan is drawn, not the saved layout.
+enum MapViewStyle { twoD, threeD }
+
 enum MapSidebarAction { rotate, up, down, left, right, widthLeftMinus, widthLeftPlus, widthRightMinus, widthRightPlus, duplicate, autoAlignWall, delete }
 
 // Updated to the soft light-blue background
@@ -20,6 +23,7 @@ class StoreMap extends StatefulWidget {
   final ItemLocation? location;
   final String? itemName;
   final MapMode mode;
+  final MapViewStyle viewStyle;
   final bool showMobileToolbar;
   final String? selectedItemId;
   final List<MapElement>? layout;
@@ -35,6 +39,7 @@ class StoreMap extends StatefulWidget {
     this.location,
     this.itemName,
     this.mode = MapMode.view,
+    this.viewStyle = MapViewStyle.threeD,
     this.showMobileToolbar = true,
     this.selectedItemId,
     this.layout,
@@ -157,6 +162,13 @@ class StoreMapState extends State<StoreMap>
     }
     if (!identical(oldWidget.layout, widget.layout)) {
       _resolveCurrentPopupSelection();
+    }
+    if (oldWidget.viewStyle != widget.viewStyle) {
+      // Switching projection changes the visible footprint. Fit it again
+      // without changing any object coordinates or saved map data.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _recenterMap();
+      });
     }
     // Each mode starts with a clean selection. In particular, an object
     // highlighted in Preview must not remain glowing in Manage Layout when
@@ -1491,7 +1503,14 @@ class StoreMapState extends State<StoreMap>
       return elements;
     }
 
-    final sortedLayout = _buildRenderOrder();
+    // Flat plans should show unbroken walls. The segment splitting and depth
+    // sorting above are needed only for overlapping isometric 3D models.
+    final sortedLayout = widget.viewStyle == MapViewStyle.twoD
+        ? <MapElement>[
+            ..._layout.where((el) => el.type == ElementType.wall),
+            ..._layout.where((el) => el.type != ElementType.wall),
+          ]
+        : _buildRenderOrder();
 
     Widget map = LayoutBuilder(
       builder: (context, constraints) {
@@ -1652,9 +1671,11 @@ class StoreMapState extends State<StoreMap>
                     },
                     child: Transform(
                       alignment: FractionalOffset.center,
-                      transform: Matrix4.identity()
-                        ..rotateX(-0.95)
-                        ..rotateZ(0.785),
+                      transform: widget.viewStyle == MapViewStyle.twoD
+                          ? Matrix4.identity()
+                          : (Matrix4.identity()
+                            ..rotateX(-0.95)
+                            ..rotateZ(0.785)),
                       child: Container(
                         key: _mapKey,
                         width: mapWidth,
@@ -1666,7 +1687,9 @@ class StoreMapState extends State<StoreMap>
                           clipBehavior: Clip.none,
                           children: [
                             CustomPaint(
-                              painter: GridPainter(),
+                              painter: GridPainter(
+                                flat: widget.viewStyle == MapViewStyle.twoD,
+                              ),
                               size: Size(mapWidth, mapHeight),
                             ),
                             if (_dragPreviewPos != null &&
@@ -1782,9 +1805,95 @@ class StoreMapState extends State<StoreMap>
         return Colors.grey;
     }
   }
+
+  /// Simple top-down footprints for the 2D floor-plan view. Keeping these
+  /// inside the same element hit target preserves selecting, moving and
+  /// resizing through the existing StoreMap interactions.
+  Widget _buildFlatElement(
+    ElementType type,
+    Size size, {
+    bool selected = false,
+    bool highlighted = false,
+  }) {
+    final Color fill;
+    final Color edge;
+    final String name;
+    switch (type) {
+      case ElementType.wall:
+        fill = const Color(0xFF64748B);
+        edge = const Color(0xFF475569);
+        name = '';
+        break;
+      case ElementType.door:
+        fill = const Color(0xFFF59E0B);
+        edge = const Color(0xFFB45309);
+        name = '';
+        break;
+      case ElementType.rack:
+        fill = const Color(0xFFBFDBFE);
+        edge = const Color(0xFF3B82F6);
+        name = 'RACK';
+        break;
+      case ElementType.shelf:
+        fill = const Color(0xFFA7F3D0);
+        edge = const Color(0xFF059669);
+        name = 'SHELF';
+        break;
+      case ElementType.cashier:
+        fill = const Color(0xFFC4B5FD);
+        edge = const Color(0xFF7C3AED);
+        name = 'CASHIER';
+        break;
+    }
+
+    final bool emphasized = selected || highlighted;
+    return Container(
+      width: size.width,
+      height: size.height,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: fill,
+        borderRadius: BorderRadius.circular(
+          type == ElementType.wall || type == ElementType.door ? 2 : 5,
+        ),
+        border: Border.all(
+          color: emphasized ? const Color(0xFF1D4ED8) : edge,
+          width: emphasized ? 3 : 1.5,
+        ),
+        boxShadow: emphasized
+            ? [BoxShadow(
+                color: const Color(0xFF2563EB).withOpacity(0.25),
+                blurRadius: 8,
+                spreadRadius: 2,
+              )]
+            : null,
+      ),
+      child: name.isNotEmpty && size.width >= 65 && size.height >= 33
+          ? Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              child: Text(
+                name,
+                textAlign: TextAlign.center,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: Color(0xFF1E293B),
+                  fontWeight: FontWeight.w800,
+                  fontSize: 10,
+                  letterSpacing: 0.6,
+                ),
+              ),
+            )
+          : null,
+    );
+  }
+
   /// Renders just the 3D model for a given type/size/rotation, with no
   /// interaction wrapper — used for the drag/move ghost preview.
   Widget _buildElementVisual(ElementType type, Size size, double rotation) {
+    if (widget.viewStyle == MapViewStyle.twoD) {
+      return _buildFlatElement(type, size);
+    }
     final double modelWidth = size.width / 40.0;
     final double modelDepth = size.height / 40.0;
     const double mapRotX = 0.95;
@@ -1922,7 +2031,8 @@ class StoreMapState extends State<StoreMap>
     double nudgeX = 0.0;
     double nudgeY = 0.0;
 
-    switch (el.type) {
+    if (widget.viewStyle == MapViewStyle.threeD) {
+      switch (el.type) {
       case ElementType.rack:
         modelPainter = RackPainter(
           rack: Rack3D(width: modelWidth, depth: modelDepth, height: 8.0),
@@ -1992,6 +2102,7 @@ class StoreMapState extends State<StoreMap>
         break;
       default:
         modelPainter = null;
+      }
     }
 
     final bool useFootprintOutline = false;
@@ -2003,7 +2114,14 @@ class StoreMapState extends State<StoreMap>
         ? 12.0
         : 0.0;
 
-    Widget shelf = Container(
+    Widget shelf = widget.viewStyle == MapViewStyle.twoD
+        ? _buildFlatElement(
+            el.type,
+            el.size,
+            selected: showObjectGlow,
+            highlighted: isHighlighted,
+          )
+        : Container(
       width: el.size.width,
       height: el.size.height,
       decoration: BoxDecoration(
@@ -2298,7 +2416,9 @@ class StoreMapState extends State<StoreMap>
       px = el.position.dx - 215 - minX;
     }
 
-    final Matrix4 billboard = _billboardTransform();
+    final Matrix4 billboard = widget.viewStyle == MapViewStyle.twoD
+        ? Matrix4.identity()
+        : _billboardTransform();
 
     return Stack(
       clipBehavior: Clip.none,
@@ -2617,30 +2737,37 @@ class StoreMapState extends State<StoreMap>
 //   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 // }
 class GridPainter extends CustomPainter {
+  final bool flat;
+
+  const GridPainter({this.flat = false});
+
   @override
   void paint(Canvas canvas, Size size) {
-    // 1. DRAW THE FLOOR BACKGROUND COLOR
-    // Change this hex code to whatever color you want the grid area to be
-    final floorPaint = Paint()..color = const Color.fromARGB(255, 165, 205, 245); 
+    final floorPaint = Paint()
+      ..color = flat
+          ? const Color(0xFFEFF6FF)
+          : const Color.fromARGB(255, 165, 205, 245);
     canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), floorPaint);
 
-    // 2. DRAW THE GRID LINES
     final linePaint = Paint()
-      ..color = Colors.white
-      ..strokeWidth = 1.5;
+      ..color = flat ? const Color(0xFFC3DBF8) : Colors.white
+      ..strokeWidth = flat ? 1.0 : 1.5;
 
-    const double step = 40;
+    final double step = flat ? 20.0 : 40.0;
 
     for (double i = 0; i <= size.width; i += step) {
+      if (flat) linePaint.strokeWidth = i % 40.0 == 0 ? 1.3 : 0.7;
       canvas.drawLine(Offset(i, 0), Offset(i, size.height), linePaint);
     }
     for (double i = 0; i <= size.height; i += step) {
+      if (flat) linePaint.strokeWidth = i % 40.0 == 0 ? 1.3 : 0.7;
       canvas.drawLine(Offset(0, i), Offset(size.width, i), linePaint);
     }
   }
 
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+  bool shouldRepaint(covariant GridPainter oldDelegate) =>
+      oldDelegate.flat != flat;
 }
 class CADBlockPainter extends CustomPainter {
   final Color baseColor;
