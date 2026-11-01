@@ -81,24 +81,29 @@ class _InventoryPageState extends State<InventoryPage> {
     );
   }
 
-  Widget _buildInventoryView(BuildContext context) => InventoryRedesign(
-    controller: widget.controller,
-    onSelectItem: widget.onSelectItem,
-    onUpdateItem: widget.onUpdateItem ?? widget.controller.updateItem,
-    exportDue: widget.exportDue,
-    onExport: () {
-      showReportPeriodDialog(
-        context,
-        title: 'Generate Inventory Report',
-        note: 'Past reports use current unit costs.',
-        onGenerate: (range) => _generateAndPrintInventoryReport(context, range),
-      );
-    },
-    onQrLabels: () {
-      _generateAndPrintQRLabels(context);
-    },
-    onNewItem: () => _openNewItem(context),
-  );
+  Widget _buildInventoryView(BuildContext context) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) widget.onInventoryChanged?.call();
+    });
+    return InventoryRedesign(
+      controller: widget.controller,
+      onSelectItem: widget.onSelectItem,
+      onUpdateItem: widget.onUpdateItem ?? widget.controller.updateItem,
+      exportDue: widget.exportDue,
+      onExport: () {
+        showReportPeriodDialog(
+          context,
+          title: 'Generate Inventory Report',
+          note: 'Past reports use current unit costs.',
+          onGenerate: (range) => _generateAndPrintInventoryReport(context, range),
+        );
+      },
+      onQrLabels: () {
+        _generateAndPrintQRLabels(context);
+      },
+      onNewItem: () => _openNewItem(context),
+    );
+  }
 
   void _openNewItem(BuildContext context) {
     void onAdd(InventoryItem newItem) {

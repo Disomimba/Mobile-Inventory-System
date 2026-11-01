@@ -8,9 +8,7 @@ import '../services/store_access_service.dart';
 import 'widgets/app_toast.dart';
 import 'widgets/app_dialog.dart';
 import 'package:image_picker/image_picker.dart';
-import 'dart:io';
-import 'package:flutter/foundation.dart'
-    show debugPrint, debugPrintStack, kIsWeb;
+import 'package:flutter/foundation.dart' show debugPrint, debugPrintStack;
 import '../services/app_error_mapper.dart';
 import '../services/app_logger.dart';
 
@@ -40,6 +38,39 @@ class SystemSettingsPage extends StatefulWidget {
 }
 
 class _SystemSettingsPageState extends State<SystemSettingsPage> {
+  bool _storeAccessExpanded = true;
+  bool _staffExpanded = true;
+  bool _thresholdsExpanded = true;
+  bool _unitsExpanded = true;
+  bool _paymentExpanded = true;
+
+  Widget _collapsibleHeader(
+    String section,
+    bool expanded,
+    VoidCallback onTap,
+    Widget child,
+  ) {
+    return Semantics(
+      button: true,
+      label: '${expanded ? 'Collapse' : 'Expand'} $section',
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          child: child,
+        ),
+      ),
+    );
+  }
+
+  Widget _collapseIcon(bool expanded) => Padding(
+        padding: const EdgeInsets.all(12),
+        child: Icon(
+          expanded ? LucideIcons.chevronUp : LucideIcons.chevronDown,
+          color: const Color(0xFF64748B),
+        ),
+      );
+
   // Global Settings State
   bool _isLoadingSettings = true;
   List<MeasurementUnit> _measurements = [];
@@ -87,6 +118,8 @@ class _SystemSettingsPageState extends State<SystemSettingsPage> {
 
   //QR Uploader
   bool _isUploadingQr = false;
+  String? _pendingGcashQrOperationId;
+  String? _pendingGcashQrFingerprint;
 
   @override
   void initState() {
@@ -334,43 +367,30 @@ class _SystemSettingsPageState extends State<SystemSettingsPage> {
   }
 
   Future<void> _uploadGcashQr() async {
-    final picker = ImagePicker();
-    final XFile? file = await picker.pickImage(source: ImageSource.gallery);
-
-    if (file == null) return;
-
+    if (_isUploadingQr) return;
     setState(() => _isUploadingQr = true);
 
     try {
-      String? uploadedUrl;
-      final String fileName =
-          'gcash_qr_${DateTime.now().millisecondsSinceEpoch}.jpg';
-      final path = 'public/$fileName';
+      final picker = ImagePicker();
+      final XFile? file = await picker.pickImage(source: ImageSource.gallery);
+      if (file == null) return;
 
-      // --- NEW: Upload explicitly to the 'store_assets' bucket ---
-      if (kIsWeb) {
-        final bytes = await file.readAsBytes();
-        await widget.controller.supabase.storage
-            .from(
-              'store_assets',
-            ) // Change to 'store_asset' if you didn't add the 's'
-            .uploadBinary(path, bytes);
-      } else {
-        await widget.controller.supabase.storage
-            .from(
-              'store_assets',
-            ) // Change to 'store_asset' if you didn't add the 's'
-            .upload(path, File(file.path));
-      }
-
-      // Fetch the public URL from the bucket
-      uploadedUrl = widget.controller.supabase.storage
-          .from('store_assets')
-          .getPublicUrl(path);
-      // -----------------------------------------------------------
+      final bytes = await file.readAsBytes();
+      final fingerprint = widget.controller.gcashQrAssetFingerprint(bytes);
+      final operationId = _pendingGcashQrFingerprint == fingerprint &&
+              _pendingGcashQrOperationId != null
+          ? _pendingGcashQrOperationId!
+          : widget.controller.newOperationId('gcash-qr');
+      _pendingGcashQrFingerprint = fingerprint;
+      _pendingGcashQrOperationId = operationId;
+      final uploadedUrl = await widget.controller.replaceGcashQrAsset(
+        bytes,
+        operationId: operationId,
+      );
 
       if (uploadedUrl.isNotEmpty) {
-        await widget.controller.updateGcashQrUrl(uploadedUrl);
+        _pendingGcashQrFingerprint = null;
+        _pendingGcashQrOperationId = null;
         if (mounted) {
           AppToast.success(context, "GCash QR Code updated successfully!");
         }
@@ -462,25 +482,60 @@ class _SystemSettingsPageState extends State<SystemSettingsPage> {
   Widget _buildPaymentSettings() {
     final qrUrl = widget.controller.gcashQrUrl;
 
-    return Container(
-      padding: const EdgeInsets.all(20),
+    return AnimatedSize(
+      duration: const Duration(milliseconds: 220),
+      alignment: Alignment.topCenter,
+      child: Container(
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: Colors.grey.shade200),
       ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Text(
-            "Payment Settings",
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
-              color: Color(0xFF0F172A),
-              fontFamily: 'Hellix',
+          _collapsibleHeader(
+            'Payment Settings',
+            _paymentExpanded,
+            () => setState(() => _paymentExpanded = !_paymentExpanded),
+            Padding(
+            padding: const EdgeInsets.all(20),
+            child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.teal.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(
+                  LucideIcons.creditCard,
+                  color: Colors.teal.shade600,
+                  size: 20,
+                ),
+              ),
+              const SizedBox(width: 16),
+              const Expanded(
+                child: Text(
+                  "Payment Settings",
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFF0F172A),
+                    fontFamily: 'Hellix',
+                  ),
+                ),
+              ),
+              _collapseIcon(_paymentExpanded),
+            ],
+            ),
             ),
           ),
+          if (_paymentExpanded) Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
           const SizedBox(height: 16),
           Text(
             "Cashier auto-approved discount limit",
@@ -631,7 +686,11 @@ class _SystemSettingsPageState extends State<SystemSettingsPage> {
               ),
             ),
           ),
+              ],
+            ),
+          ),
         ],
+      ),
       ),
     );
   }
@@ -912,17 +971,25 @@ class _SystemSettingsPageState extends State<SystemSettingsPage> {
   }
 
   Widget _buildStoreAccessSection() {
-    return Container(
+    return AnimatedSize(
+      duration: const Duration(milliseconds: 220),
+      alignment: Alignment.topCenter,
+      child: Container(
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: Colors.grey.shade200),
       ),
-      padding: const EdgeInsets.all(24.0),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
+          _collapsibleHeader(
+            'Store Hours & Staff Access',
+            _storeAccessExpanded,
+            () => setState(() => _storeAccessExpanded = !_storeAccessExpanded),
+            Padding(
+            padding: const EdgeInsets.all(24.0),
+            child: Row(
             children: [
               Container(
                 padding: const EdgeInsets.all(10),
@@ -962,8 +1029,16 @@ class _SystemSettingsPageState extends State<SystemSettingsPage> {
                   ],
                 ),
               ),
+              _collapseIcon(_storeAccessExpanded),
             ],
+            ),
+            ),
           ),
+          if (_storeAccessExpanded) Padding(
+            padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
           const SizedBox(height: 24),
           if (_isLoadingStoreAccess)
             const Center(
@@ -1164,7 +1239,11 @@ class _SystemSettingsPageState extends State<SystemSettingsPage> {
               ),
             ),
           ],
+              ],
+            ),
+          ),
         ],
+      ),
       ),
     );
   }
@@ -2865,7 +2944,10 @@ class _SystemSettingsPageState extends State<SystemSettingsPage> {
                   const SizedBox(height: 24),
 
                   // ─── SECTION 2: STAFF MANAGEMENT ───────────────────────────────
-                  Container(
+                  AnimatedSize(
+                    duration: const Duration(milliseconds: 220),
+                    alignment: Alignment.topCenter,
+                    child: Container(
                     decoration: BoxDecoration(
                       color: Colors.white,
                       borderRadius: BorderRadius.circular(12),
@@ -2874,12 +2956,16 @@ class _SystemSettingsPageState extends State<SystemSettingsPage> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Padding(
+                        _collapsibleHeader(
+                          'Staff Management',
+                          _staffExpanded,
+                          () => setState(() => _staffExpanded = !_staffExpanded),
+                          Padding(
                           padding: const EdgeInsets.all(24.0),
                           child: Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
-                              Row(
+                              Expanded(child: Row(
                                 children: [
                                   Container(
                                     padding: const EdgeInsets.all(10),
@@ -2894,7 +2980,7 @@ class _SystemSettingsPageState extends State<SystemSettingsPage> {
                                     ),
                                   ),
                                   const SizedBox(width: 16),
-                                  const Column(
+                                  const Expanded(child: Column(
                                     crossAxisAlignment:
                                         CrossAxisAlignment.start,
                                     children: [
@@ -2917,10 +3003,20 @@ class _SystemSettingsPageState extends State<SystemSettingsPage> {
                                         ),
                                       ),
                                     ],
-                                  ),
+                                  )),
                                 ],
-                              ),
-                              ElevatedButton.icon(
+                              )),
+                              if (MediaQuery.sizeOf(context).width < 600)
+                                IconButton(
+                                  tooltip: 'Add Staff',
+                                  onPressed: () => _showAddStaffDialog(),
+                                  style: IconButton.styleFrom(
+                                    backgroundColor: _primaryBlue,
+                                    foregroundColor: Colors.white,
+                                  ),
+                                  icon: const Icon(LucideIcons.userPlus, size: 18),
+                                )
+                              else ElevatedButton.icon(
                                 onPressed: () => _showAddStaffDialog(),
                                 icon: const Icon(
                                   LucideIcons.userPlus,
@@ -2947,9 +3043,12 @@ class _SystemSettingsPageState extends State<SystemSettingsPage> {
                                   ),
                                 ),
                               ),
+                              _collapseIcon(_staffExpanded),
                             ],
                           ),
+                          ),
                         ),
+                        if (_staffExpanded) ...[
                         const Divider(height: 1),
                         if (_isLoadingStaff)
                           const Padding(
@@ -3089,23 +3188,34 @@ class _SystemSettingsPageState extends State<SystemSettingsPage> {
                               );
                             },
                           ),
+                        ],
                       ],
+                    ),
                     ),
                   ),
                   const SizedBox(height: 24),
 
                   // ─── SECTION 3: GLOBAL STOCK THRESHOLDS ─────────────────────
-                  Container(
+                  AnimatedSize(
+                    duration: const Duration(milliseconds: 220),
+                    alignment: Alignment.topCenter,
+                    child: Container(
                     decoration: BoxDecoration(
                       color: Colors.white,
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(color: Colors.grey.shade200),
                     ),
-                    padding: const EdgeInsets.all(24.0),
                     child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        Row(
+                        _collapsibleHeader(
+                          'Global Stock Thresholds',
+                          _thresholdsExpanded,
+                          () => setState(() =>
+                              _thresholdsExpanded = !_thresholdsExpanded),
+                          Padding(
+                          padding: const EdgeInsets.all(24.0),
+                          child: Row(
                           children: [
                             Container(
                               padding: const EdgeInsets.all(10),
@@ -3120,7 +3230,7 @@ class _SystemSettingsPageState extends State<SystemSettingsPage> {
                               ),
                             ),
                             const SizedBox(width: 16),
-                            const Column(
+                            const Expanded(child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
@@ -3142,9 +3252,17 @@ class _SystemSettingsPageState extends State<SystemSettingsPage> {
                                   ),
                                 ),
                               ],
-                            ),
+                            )),
+                            _collapseIcon(_thresholdsExpanded),
                           ],
+                          ),
+                          ),
                         ),
+                        if (_thresholdsExpanded) Padding(
+                          padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
                         const SizedBox(height: 24),
                         if (_thresholdError != null)
                           Padding(
@@ -3290,13 +3408,20 @@ class _SystemSettingsPageState extends State<SystemSettingsPage> {
                             ),
                           ],
                         ),
+                            ],
+                          ),
+                        ),
                       ],
+                    ),
                     ),
                   ),
                   const SizedBox(height: 24),
 
                   // ─── SECTION 4: MEASUREMENT UNITS ────────────────────────────
-                  Container(
+                  AnimatedSize(
+                    duration: const Duration(milliseconds: 220),
+                    alignment: Alignment.topCenter,
+                    child: Container(
                     decoration: BoxDecoration(
                       color: Colors.white,
                       borderRadius: BorderRadius.circular(12),
@@ -3305,12 +3430,16 @@ class _SystemSettingsPageState extends State<SystemSettingsPage> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Padding(
+                        _collapsibleHeader(
+                          'Measurement Units',
+                          _unitsExpanded,
+                          () => setState(() => _unitsExpanded = !_unitsExpanded),
+                          Padding(
                           padding: const EdgeInsets.all(24.0),
                           child: Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
-                              Row(
+                              Expanded(child: Row(
                                 children: [
                                   Container(
                                     padding: const EdgeInsets.all(10),
@@ -3325,7 +3454,7 @@ class _SystemSettingsPageState extends State<SystemSettingsPage> {
                                     ),
                                   ),
                                   const SizedBox(width: 16),
-                                  const Column(
+                                  const Expanded(child: Column(
                                     crossAxisAlignment:
                                         CrossAxisAlignment.start,
                                     children: [
@@ -3348,10 +3477,20 @@ class _SystemSettingsPageState extends State<SystemSettingsPage> {
                                         ),
                                       ),
                                     ],
-                                  ),
+                                  )),
                                 ],
-                              ),
-                              ElevatedButton.icon(
+                              )),
+                              if (MediaQuery.sizeOf(context).width < 600)
+                                IconButton(
+                                  tooltip: 'Add Unit',
+                                  onPressed: () => _showMeasurementModal(),
+                                  style: IconButton.styleFrom(
+                                    backgroundColor: _primaryBlue,
+                                    foregroundColor: Colors.white,
+                                  ),
+                                  icon: const Icon(LucideIcons.plus, size: 18),
+                                )
+                              else ElevatedButton.icon(
                                 onPressed: () => _showMeasurementModal(),
                                 icon: const Icon(
                                   LucideIcons.plus,
@@ -3378,9 +3517,12 @@ class _SystemSettingsPageState extends State<SystemSettingsPage> {
                                   ),
                                 ),
                               ),
+                              _collapseIcon(_unitsExpanded),
                             ],
                           ),
+                          ),
                         ),
+                        if (_unitsExpanded) ...[
                         const Divider(height: 1),
                         if (_measurements.isEmpty)
                           const Padding(
@@ -3483,7 +3625,9 @@ class _SystemSettingsPageState extends State<SystemSettingsPage> {
                               );
                             },
                           ),
+                        ],
                       ],
+                    ),
                     ),
                   ),
                   const SizedBox(height: 24),

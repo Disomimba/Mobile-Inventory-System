@@ -126,15 +126,10 @@ class _OrderQueuePageState extends State<OrderQueuePage> {
     });
   }
 
-  void _togglePickedItem(String orderId, String productId, bool isPicked) {
+  void _markPickedItem(String orderId, String productId) {
     setState(() {
       _pickedTracker[orderId] ??= {};
-
-      if (isPicked) {
-        _pickedTracker[orderId]!.add(productId);
-      } else {
-        _pickedTracker[orderId]!.remove(productId);
-      }
+      _pickedTracker[orderId]!.add(productId);
     });
   }
 
@@ -156,6 +151,7 @@ class _OrderQueuePageState extends State<OrderQueuePage> {
 
   @override
   Widget build(BuildContext context) {
+    final isCompact = MediaQuery.sizeOf(context).width < 600;
     return Scaffold(
       backgroundColor: const Color(0xFFF4F6F8),
       body: StreamBuilder<List<CustomerOrder>>(
@@ -244,8 +240,8 @@ class _OrderQueuePageState extends State<OrderQueuePage> {
               order: currentOrder,
               controller: widget.controller,
               pickedItems: _pickedTracker[currentOrder.id] ?? {},
-              onToggleItem: (productId, isPicked) {
-                _togglePickedItem(currentOrder.id, productId, isPicked);
+              onItemVerified: (productId) {
+                _markPickedItem(currentOrder.id, productId);
               },
               onBack: _closeOrderChecklist,
               onFinish: () {
@@ -313,7 +309,9 @@ class _OrderQueuePageState extends State<OrderQueuePage> {
           }
 
           return Padding(
-            padding: const EdgeInsets.all(32.0),
+            padding: isCompact
+                ? const EdgeInsets.fromLTRB(16, 24, 16, 16)
+                : const EdgeInsets.all(32),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -335,23 +333,37 @@ class _OrderQueuePageState extends State<OrderQueuePage> {
                     fontFamily: _fontFam,
                   ),
                 ),
-                const SizedBox(height: 24),
-                Row(
-                  children: [
-                    Expanded(
-                      child: _buildStatCard(
-                        'Waiting',
-                        '$waitingCount',
-                        isActive: true,
+                SizedBox(height: isCompact ? 20 : 24),
+                IntrinsicHeight(
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Expanded(
+                        child: _buildStatCard(
+                          'Waiting',
+                          '$waitingCount',
+                          isActive: true,
+                          isCompact: isCompact,
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: 16),
-                    Expanded(child: _buildStatCard('Picking', '$pickingCount')),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: _buildStatCard('Ready today', '$readyTodayCount'),
-                    ),
-                  ],
+                      SizedBox(width: isCompact ? 8 : 16),
+                      Expanded(
+                        child: _buildStatCard(
+                          'Picking',
+                          '$pickingCount',
+                          isCompact: isCompact,
+                        ),
+                      ),
+                      SizedBox(width: isCompact ? 8 : 16),
+                      Expanded(
+                        child: _buildStatCard(
+                          'Ready today',
+                          '$readyTodayCount',
+                          isCompact: isCompact,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
                 const SizedBox(height: 18),
 
@@ -401,9 +413,14 @@ class _OrderQueuePageState extends State<OrderQueuePage> {
     );
   }
 
-  Widget _buildStatCard(String title, String value, {bool isActive = false}) {
+  Widget _buildStatCard(
+    String title,
+    String value, {
+    bool isActive = false,
+    bool isCompact = false,
+  }) {
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: EdgeInsets.all(isCompact ? 12 : 20),
       decoration: BoxDecoration(
         color: isActive ? Colors.blue.shade50 : Colors.white,
         borderRadius: BorderRadius.circular(12),
@@ -534,6 +551,77 @@ class _OrderCard extends StatelessWidget {
     final String shortId = order.id.toString().substring(0, 8).toUpperCase();
     final bool isPicking = pickedCount > 0;
     const Color assignmentColor = _primaryBlue;
+    final details = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          '#ORD-$shortId',
+          style: const TextStyle(
+            fontWeight: FontWeight.w900,
+            fontSize: 18,
+            color: Color(0xFF0F172A),
+            fontFamily: _fontFam,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          '$totalItems ${totalItems == 1 ? 'item' : 'items'} · $timeAgo'
+          '${isPicking ? ' · $pickedCount/$totalItems picked' : ''}',
+          style: TextStyle(
+            color: Colors.grey.shade600,
+            fontSize: 13,
+            fontFamily: _fontFam,
+          ),
+        ),
+        const SizedBox(height: 10),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+          decoration: BoxDecoration(
+            color: assignmentColor.withOpacity(0.08),
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(color: assignmentColor.withOpacity(0.22)),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(
+                Icons.person_pin_circle_outlined,
+                size: 14,
+                color: assignmentColor,
+              ),
+              const SizedBox(width: 6),
+              Text(
+                'Assigned to you',
+                style: const TextStyle(
+                  color: assignmentColor,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w800,
+                  fontFamily: _fontFam,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+    final action = ElevatedButton(
+      onPressed: onPrepare,
+      style: ElevatedButton.styleFrom(
+        backgroundColor: _primaryBlue,
+        elevation: 0,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+      ),
+      child: Text(
+        isPicking ? 'Continue' : 'Prepare',
+        style: const TextStyle(
+          fontWeight: FontWeight.bold,
+          color: Colors.white,
+          fontFamily: _fontFam,
+          fontSize: 14,
+        ),
+      ),
+    );
 
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
@@ -551,105 +639,37 @@ class _OrderCard extends StatelessWidget {
       ),
       child: Padding(
         padding: const EdgeInsets.all(20),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            if (constraints.maxWidth < 340) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Text(
-                    '#ORD-$shortId',
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w900,
-                      fontSize: 18,
-                      color: Color(0xFF0F172A),
-                      fontFamily: _fontFam,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    '$totalItems items · $timeAgo'
-                    '${isPicking ? ' · $pickedCount/$totalItems picked' : ''}',
-                    style: TextStyle(
-                      color: Colors.grey.shade600,
-                      fontSize: 13,
-                      fontFamily: _fontFam,
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 5,
-                    ),
-                    decoration: BoxDecoration(
-                      color: assignmentColor.withOpacity(0.08),
-                      borderRadius: BorderRadius.circular(999),
-                      border: Border.all(
-                        color: assignmentColor.withOpacity(0.22),
-                      ),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          Icons.person_pin_circle_outlined,
-                          size: 14,
-                          color: assignmentColor,
-                        ),
-                        const SizedBox(width: 6),
-                        Text(
-                          'Assigned to you',
-                          style: TextStyle(
-                            color: assignmentColor,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w800,
-                            fontFamily: _fontFam,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
+                  details,
+                  const SizedBox(height: 16),
+                  action,
                 ],
-              ),
-            ),
-            const SizedBox(width: 16),
-            ElevatedButton(
-              onPressed: onPrepare,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: _primaryBlue,
-                elevation: 0,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 24,
-                  vertical: 16,
-                ),
-              ),
-              child: Text(
-                isPicking ? 'Continue' : 'Prepare',
-                style: const TextStyle(
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white,
-                  fontFamily: _fontFam,
-                  fontSize: 14,
-                ),
-              ),
-            ),
-          ],
+              );
+            }
+            return Row(
+              children: [
+                Expanded(child: details),
+                const SizedBox(width: 16),
+                action,
+              ],
+            );
+          },
         ),
       ),
     );
   }
 }
 
-class OrderChecklistPage extends StatelessWidget {
+class OrderChecklistPage extends StatefulWidget {
   final CustomerOrder order;
   final InventoryController controller;
   final Set<String> pickedItems;
-  final Function(String productId, bool isPicked) onToggleItem;
+  final ValueChanged<String> onItemVerified;
   final VoidCallback onBack;
   final VoidCallback onFinish;
 
@@ -658,32 +678,69 @@ class OrderChecklistPage extends StatelessWidget {
     required this.order,
     required this.controller,
     required this.pickedItems,
-    required this.onToggleItem,
+    required this.onItemVerified,
     required this.onBack,
     required this.onFinish,
   });
 
+  @override
+  State<OrderChecklistPage> createState() => _OrderChecklistPageState();
+}
+
+class _OrderChecklistPageState extends State<OrderChecklistPage> {
+  bool _isSubmittingPreparation = false;
+
+  CustomerOrder get order => widget.order;
+  InventoryController get controller => widget.controller;
+  Set<String> get pickedItems => widget.pickedItems;
+  ValueChanged<String> get onItemVerified => widget.onItemVerified;
+  VoidCallback get onBack => widget.onBack;
+  VoidCallback get onFinish => widget.onFinish;
+
   Future<void> _markPrepared(BuildContext context) async {
-    await controller.updateOrderStatus(order.id, 'prepared');
+    if (_isSubmittingPreparation) return;
+    setState(() => _isSubmittingPreparation = true);
 
-    final notificationController = NotificationProvider.maybeOf(context);
-    final locationId = controller.activeLocationId;
-    final preparedByName = controller.currentUserName ?? 'Unknown User';
-    final preparedAt = DateTime.now();
-
-    if (notificationController != null && locationId != null) {
-      await notificationController.notifyOrderPrepared(
-        locationId: locationId,
-        orderId: order.id,
-        preparedByName: preparedByName,
-        preparedAt: preparedAt,
+    try {
+      await controller.updateOrderStatus(
+        order.id,
+        'prepared',
+        expectedStatus: 'pending',
       );
-    }
 
-    if (context.mounted) {
-      final shortId = order.id.toString().substring(0, 8).toUpperCase();
-      AppToast.success(context, 'Cashier notified for #ORD-$shortId');
-      onFinish();
+      final notificationController = NotificationProvider.maybeOf(context);
+      final locationId = controller.activeLocationId;
+      final preparedByName = controller.currentUserName ?? 'Unknown User';
+      final preparedAt = DateTime.now();
+
+      if (notificationController != null && locationId != null) {
+        await notificationController.notifyOrderPrepared(
+          locationId: locationId,
+          orderId: order.id,
+          preparedByName: preparedByName,
+          preparedAt: preparedAt,
+        );
+      }
+
+      if (context.mounted) {
+        final shortId = order.id.toString().substring(0, 8).toUpperCase();
+        AppToast.success(context, 'Cashier notified for #ORD-$shortId');
+        onFinish();
+      }
+    } catch (error, stackTrace) {
+      AppLogger.error(
+        'Order preparation failed',
+        error: error,
+        stackTrace: stackTrace,
+      );
+      if (context.mounted) {
+        AppToast.error(
+          context,
+          AppErrorMapper.message(error, fallback: AppErrorCategory.dataSave),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isSubmittingPreparation = false);
     }
   }
 
@@ -692,54 +749,88 @@ class OrderChecklistPage extends StatelessWidget {
     String productId,
     String productName,
   ) {
+    MapViewStyle viewStyle = MapViewStyle.twoD;
     showDialog(
       context: context,
-      builder: (dialogContext) => Dialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        clipBehavior: Clip.antiAlias,
-        child: SizedBox(
-          width: 600,
-          height: 500,
-          child: Column(
-            children: [
-              Container(
-                color: const Color(0xFF0F172A),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 12,
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Expanded(
-                      child: Text(
-                        'Location: $productName',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                          fontFamily: _fontFam,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setDialogState) {
+          final screenSize = MediaQuery.sizeOf(dialogContext);
+          return Dialog(
+            backgroundColor: Colors.white,
+            surfaceTintColor: Colors.transparent,
+            insetPadding: const EdgeInsets.all(12),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: SizedBox(
+              width: (screenSize.width - 24).clamp(0.0, 1000.0),
+              height: (screenSize.height - 24).clamp(0.0, 760.0),
+              child: Column(
+                children: [
+                  Container(
+                    color: const Color(0xFFEFF6FF),
+                    padding: const EdgeInsets.fromLTRB(16, 8, 8, 10),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'Location: $productName',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Color(0xFF0F172A),
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              fontFamily: _fontFam,
+                            ),
+                          ),
                         ),
-                      ),
+                        for (final style in MapViewStyle.values)
+                          Padding(
+                            padding: const EdgeInsets.only(left: 8),
+                            child: ChoiceChip(
+                              label: Text(style == MapViewStyle.twoD
+                                  ? '2D'
+                                  : '3D'),
+                              selected: viewStyle == style,
+                              showCheckmark: false,
+                              onSelected: (_) =>
+                                  setDialogState(() => viewStyle = style),
+                              selectedColor: const Color(0xFFDBEAFE),
+                              backgroundColor: Colors.white,
+                              labelStyle: TextStyle(
+                                color: viewStyle == style
+                                    ? const Color(0xFF1D4ED8)
+                                    : const Color(0xFF475569),
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        IconButton(
+                          icon: const Icon(Icons.close,
+                              color: Color(0xFF1D4ED8)),
+                          onPressed: () => Navigator.pop(dialogContext),
+                        ),
+                      ],
                     ),
-                    IconButton(
-                      icon: const Icon(Icons.close, color: Colors.white),
-                      onPressed: () => Navigator.pop(dialogContext),
+                  ),
+                  Expanded(
+                    child: StoreMap(
+                      controller: controller,
+                      mode: MapMode.view,
+                      viewStyle: viewStyle,
+                      fitEntireMap: true,
+                      compactZoomControls: true,
+                      selectedItemId: productId,
+                      onSelectionAssigned: () {},
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
-              Expanded(
-                child: StoreMap(
-                  controller: controller,
-                  mode: MapMode.view,
-                  selectedItemId: productId,
-                  onSelectionAssigned: () {},
-                ),
-              ),
-            ],
-          ),
-        ),
+            ),
+          );
+        },
       ),
     );
   }
@@ -752,20 +843,21 @@ class OrderChecklistPage extends StatelessWidget {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => ScannerSearchPage(
+        builder: (scannerContext) => ScannerSearchPage(
           controller: controller,
           onSelectItem: (scannedItem) {
-            Navigator.pop(context);
+            Navigator.pop(scannerContext);
+            if (!mounted) return;
 
             if (scannedItem.id == expectedProductId) {
+              onItemVerified(expectedProductId);
               showDialog(
                 context: context,
-                builder: (context) => PickConfirmationDialog(
+                builder: (dialogContext) => PickVerificationDialog(
                   item: scannedItem,
                   targetQuantity: targetQuantity,
-                  onConfirm: () {
-                    onToggleItem(expectedProductId, true);
-                    Navigator.pop(context);
+                  onClose: () {
+                    Navigator.pop(dialogContext);
                     AppToast.success(
                       context,
                       '${scannedItem.name} checked off!',
@@ -964,9 +1056,6 @@ class OrderChecklistPage extends StatelessWidget {
                 return _ChecklistItemCard(
                   item: item,
                   isPicked: isPicked,
-                  onToggle: (val) {
-                    onToggleItem(item.productId, val ?? false);
-                  },
                   onMapTap: () {
                     _showItemLocationMap(
                       context,
@@ -996,7 +1085,9 @@ class OrderChecklistPage extends StatelessWidget {
               width: double.infinity,
               height: 56,
               child: ElevatedButton(
-                onPressed: isAllPicked ? () => _markPrepared(context) : null,
+                onPressed: isAllPicked && !_isSubmittingPreparation
+                    ? () => _markPrepared(context)
+                    : null,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: _primaryBlue,
                   disabledBackgroundColor: Colors.blue.shade200,
@@ -1006,7 +1097,9 @@ class OrderChecklistPage extends StatelessWidget {
                   ),
                 ),
                 child: Text(
-                  isAllPicked
+                  _isSubmittingPreparation
+                      ? 'Saving preparation...'
+                      : isAllPicked
                       ? 'Notify Cashier (Prepared)'
                       : 'Pick all items first ($pickedCount/$totalCount)',
                   style: const TextStyle(
@@ -1028,14 +1121,12 @@ class OrderChecklistPage extends StatelessWidget {
 class _ChecklistItemCard extends StatelessWidget {
   final CustomerOrderItem item;
   final bool isPicked;
-  final ValueChanged<bool?> onToggle;
   final VoidCallback onMapTap;
   final VoidCallback onScanTap;
 
   const _ChecklistItemCard({
     required this.item,
     required this.isPicked,
-    required this.onToggle,
     required this.onMapTap,
     required this.onScanTap,
   });
@@ -1043,7 +1134,7 @@ class _ChecklistItemCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: () => onToggle(!isPicked),
+      onTap: onScanTap,
       behavior: HitTestBehavior.opaque,
       child: Container(
         margin: const EdgeInsets.only(bottom: 12),
@@ -1110,6 +1201,15 @@ class _ChecklistItemCard extends StatelessWidget {
                       ),
                     ),
                   ),
+                  const SizedBox(height: 6),
+                  Text(
+                    isPicked ? 'QR verified' : 'Tap item to scan QR',
+                    style: const TextStyle(
+                      color: Color(0xFF64748B),
+                      fontSize: 11,
+                      fontFamily: _fontFam,
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -1151,16 +1251,16 @@ class _ChecklistItemCard extends StatelessWidget {
   }
 }
 
-class PickConfirmationDialog extends StatelessWidget {
+class PickVerificationDialog extends StatelessWidget {
   final InventoryItem item;
   final double targetQuantity;
-  final VoidCallback onConfirm;
+  final VoidCallback onClose;
 
-  const PickConfirmationDialog({
+  const PickVerificationDialog({
     super.key,
     required this.item,
     required this.targetQuantity,
-    required this.onConfirm,
+    required this.onClose,
   });
 
   @override
@@ -1263,29 +1363,11 @@ class PickConfirmationDialog extends StatelessWidget {
         ],
       ),
       actions: [
-        OutlinedButton(
-          onPressed: () => Navigator.pop(context),
-          style: OutlinedButton.styleFrom(
-            padding: const EdgeInsets.symmetric(vertical: 14),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(8),
-            ),
-            side: BorderSide(color: Colors.grey.shade300),
-          ),
-          child: const Text(
-            'Cancel',
-            style: TextStyle(
-              color: Colors.black87,
-              fontWeight: FontWeight.bold,
-              fontFamily: _fontFam,
-            ),
-          ),
-        ),
         ElevatedButton.icon(
-          onPressed: onConfirm,
+          onPressed: onClose,
           icon: const Icon(LucideIcons.check, size: 18),
           label: const Text(
-            'Confirm Pick',
+            'Done',
             style: TextStyle(
               fontSize: 14,
               fontWeight: FontWeight.bold,

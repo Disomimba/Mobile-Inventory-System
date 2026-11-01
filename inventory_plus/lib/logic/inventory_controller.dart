@@ -37,6 +37,7 @@ enum ChangePasswordResult {
 enum CurrentPasswordVerificationResult {
   correct,
   incorrect,
+  rateLimited,
   notAuthenticated,
   unexpectedFailure,
 }
@@ -231,6 +232,8 @@ class InventoryController {
   String? currentUserName;
   String? currentUserId;
   String? _sessionToken;
+
+  String get currentSessionToken => _requireSessionToken();
   String? loggedInUserEmail;
   bool get isAdmin => currentUserRole?.toLowerCase() == 'admin';
   double globalLowStockPct = 20.0;
@@ -295,10 +298,206 @@ class InventoryController {
       gcashQrUrl = newUrl;
       _paymentSettingsLoaded = true;
       _publishRuntimeSettings();
-    } catch (e) {
-      debugPrint("Error updating GCash QR: $e");
-      throw Exception("Failed to save QR URL to database.");
+    } catch (error, stackTrace) {
+      AppLogger.error(
+        'GCash QR settings update failed',
+        error: error,
+        stackTrace: stackTrace,
+      );
+      throw const AppUserFacingException(
+        'Unable to complete the upload. Please try again.',
+      );
     }
+  }
+
+  String gcashQrAssetFingerprint(Uint8List bytes) {
+    return sha256.convert(bytes).toString();
+  }
+
+  Future<String> replaceGcashQrAsset(
+    Uint8List bytes, {
+    required String operationId,
+  }) async {
+    final locationId = activeLocationId;
+    if (locationId == null || locationId.isEmpty) {
+      throw StateError('Payment settings require an active location.');
+    }
+    if (bytes.isEmpty) throw ArgumentError('A QR image is required.');
+    final normalizedOperationId = operationId.trim();
+    if (normalizedOperationId.length < 16) {
+      throw ArgumentError('A QR upload identity is required.');
+    }
+    final objectKey = sha256
+        .convert(utf8.encode(normalizedOperationId))
+        .toString();
+    final path = 'public/$locationId/gcash/$objectKey';
+    final newUrl = supabase.storage.from('store_assets').getPublicUrl(path);
+    String previousUrl = '';
+    var uploaded = false;
+
+    try {
+      final contentType = _imageContentType(bytes);
+      if (contentType == null) {
+        throw const AppUserFacingException(
+          'Unable to complete the upload. Please try again.',
+        );
+      }
+      previousUrl = await _fetchPersistedGcashQrUrl(locationId);
+      await supabase.storage
+          .from('store_assets')
+          .uploadBinary(
+            path,
+            bytes,
+            fileOptions: FileOptions(
+              upsert: true,
+              contentType: contentType,
+              cacheControl: '0',
+            ),
+          );
+      uploaded = true;
+      if (activeLocationId != locationId) {
+        throw StateError('The active location changed during the QR upload.');
+      }
+
+      try {
+        await updateGcashQrUrl(newUrl);
+      } catch (_) {
+        // A lost response may hide a committed settings update. Reconcile the
+        // canonical reference before deciding whether the staged object is an
+        // orphan or the active QR.
+        final persistedUrl = await _tryFetchPersistedGcashQrUrl(locationId);
+        if (persistedUrl != newUrl) rethrow;
+        gcashQrUrl = newUrl;
+        _paymentSettingsLoaded = true;
+        _publishRuntimeSettings();
+      }
+
+      if (previousUrl.isNotEmpty && previousUrl != newUrl) {
+        await _removeManagedGcashObjectIfUnreferenced(
+          locationId: locationId,
+          candidateUrl: previousUrl,
+        );
+      }
+      return newUrl;
+    } catch (error, stackTrace) {
+      if (uploaded) {
+        await _removeManagedGcashObjectIfUnreferenced(
+          locationId: locationId,
+          candidateUrl: newUrl,
+          knownPath: path,
+        );
+      }
+      AppLogger.error(
+        'GCash QR replacement failed',
+        error: error,
+        stackTrace: stackTrace,
+      );
+      throw const AppUserFacingException(
+        'Unable to complete the upload. Please try again.',
+      );
+    }
+  }
+
+  Future<String> _fetchPersistedGcashQrUrl(String locationId) async {
+    final response = await supabase
+        .from('store_settings')
+        .select('gcash_qr_url')
+        .eq('location_id', locationId)
+        .maybeSingle();
+    return response?['gcash_qr_url']?.toString() ?? '';
+  }
+
+  Future<String?> _tryFetchPersistedGcashQrUrl(String locationId) async {
+    try {
+      return await _fetchPersistedGcashQrUrl(locationId);
+    } catch (error, stackTrace) {
+      AppLogger.error(
+        'GCash QR reference verification failed',
+        error: error,
+        stackTrace: stackTrace,
+      );
+      return null;
+    }
+  }
+
+  Future<void> _removeManagedGcashObjectIfUnreferenced({
+    required String locationId,
+    required String candidateUrl,
+    String? knownPath,
+  }) async {
+    final candidatePath =
+        knownPath ??
+        _managedGcashObjectPath(candidateUrl, locationId: locationId);
+    if (candidatePath == null) return;
+
+    final currentUrl = await _tryFetchPersistedGcashQrUrl(locationId);
+    if (currentUrl == null || currentUrl == candidateUrl) return;
+    final currentPath = _managedGcashObjectPath(
+      currentUrl,
+      locationId: locationId,
+    );
+    if (currentPath == candidatePath) return;
+
+    try {
+      await supabase.storage.from('store_assets').remove([candidatePath]);
+    } catch (error, stackTrace) {
+      // Cleanup is best effort. Keeping an unreferenced object is safer than
+      // turning a cleanup failure into a false save failure.
+      AppLogger.error(
+        'GCash QR cleanup failed',
+        error: error,
+        stackTrace: stackTrace,
+      );
+    }
+  }
+
+  String? _managedGcashObjectPath(
+    String publicUrl, {
+    required String locationId,
+  }) {
+    final uri = Uri.tryParse(publicUrl);
+    if (uri == null) return null;
+    final segments = uri.pathSegments;
+    for (var index = 0; index + 2 < segments.length; index++) {
+      if (segments[index] != 'object' ||
+          segments[index + 1] != 'public' ||
+          segments[index + 2] != 'store_assets') {
+        continue;
+      }
+      final path = segments.skip(index + 3).join('/');
+      final locationPrefix = 'public/$locationId/gcash/';
+      return path.startsWith(locationPrefix) ? path : null;
+    }
+    return null;
+  }
+
+  String? _imageContentType(Uint8List bytes) {
+    if (bytes.length >= 3 &&
+        bytes[0] == 0xff &&
+        bytes[1] == 0xd8 &&
+        bytes[2] == 0xff) {
+      return 'image/jpeg';
+    }
+    if (bytes.length >= 8 &&
+        bytes[0] == 0x89 &&
+        bytes[1] == 0x50 &&
+        bytes[2] == 0x4e &&
+        bytes[3] == 0x47) {
+      return 'image/png';
+    }
+    if (bytes.length >= 6) {
+      final header = ascii.decode(bytes.take(6).toList(), allowInvalid: true);
+      if (header == 'GIF87a' || header == 'GIF89a') return 'image/gif';
+    }
+    if (bytes.length >= 12) {
+      final riff = ascii.decode(bytes.take(4).toList(), allowInvalid: true);
+      final webp = ascii.decode(
+        bytes.skip(8).take(4).toList(),
+        allowInvalid: true,
+      );
+      if (riff == 'RIFF' && webp == 'WEBP') return 'image/webp';
+    }
+    return null;
   }
 
   Future<void> updateCashierAutoApprovedDiscountLimit(double value) async {
@@ -740,10 +939,13 @@ class InventoryController {
     }
   }
 
-  Future<void> addItem(InventoryItem newItem) async {
+  Future<InventoryItem> addItem(
+    InventoryItem newItem, {
+    required String operationId,
+  }) async {
     final locId = activeLocationId;
     if (locId == null) {
-      return;
+      throw StateError('Cannot add a product without an active location.');
     }
 
     final skuTaken = _disabledItems.any(
@@ -757,41 +959,48 @@ class InventoryController {
     }
 
     try {
-      final response = await supabase
-          .from('products')
-          .insert({
-            'sku': newItem.sku,
-            'product_name': newItem.name,
-            'category': newItem.category,
-            'product_price': newItem.price,
-            'product_quantity': newItem.quantity,
-            'description': newItem.description,
-            'image_url': newItem.imageUrl,
-            'location_id': locId,
-            'manufacturer': newItem.manufacturer,
-            'model': newItem.model,
-            'product_size': newItem.productSize,
-            'shelf_level': newItem.shelfLevel,
-            'bin_number': newItem.binNumber,
-            'unit': newItem.unit,
-            'max_quantity': newItem.maxQuantity,
-          })
-          .select()
-          .single();
+      final response = await supabase.rpc(
+        'create_product_v1',
+        params: <String, dynamic>{
+          'p_session_token': _requireSessionToken(),
+          'p_operation_id': operationId,
+          'p_sku': newItem.sku,
+          'p_product_name': newItem.name,
+          'p_category': newItem.category,
+          'p_product_price': newItem.price,
+          'p_product_quantity': newItem.quantity,
+          'p_description': newItem.description,
+          'p_image_url': newItem.imageUrl,
+          'p_manufacturer': newItem.manufacturer,
+          'p_model': newItem.model,
+          'p_product_size': newItem.productSize,
+          'p_shelf_level': newItem.shelfLevel,
+          'p_bin_number': newItem.binNumber,
+          'p_unit': newItem.unit,
+          'p_max_quantity': newItem.maxQuantity,
+        },
+      );
 
-      final savedItem = InventoryItem.fromSupabase(response);
-      _items.add(savedItem);
+      final savedItem = InventoryItem.fromSupabase(
+        Map<String, dynamic>.from(response as Map),
+      );
+      final existingIndex = _items.indexWhere(
+        (item) => item.id == savedItem.id,
+      );
+      if (existingIndex == -1) {
+        _items.add(savedItem);
+      } else {
+        _items[existingIndex] = savedItem;
+      }
       _baselineByProduct[savedItem.id] = savedItem.quantity;
       _publishInventorySnapshot();
-
-      await _logTransaction(
-        productId: savedItem.id,
-        type: 'add',
-        quantityChange: savedItem.quantity,
-        newQuantity: savedItem.quantity,
+      return savedItem;
+    } catch (error, stackTrace) {
+      _throwCriticalOperationError(
+        'Transactional product creation failed',
+        error,
+        stackTrace,
       );
-    } catch (e) {
-      rethrow;
     }
   }
 
@@ -830,14 +1039,57 @@ class InventoryController {
     return saved['id']?.toString();
   }
 
-  Future<String?> uploadProductImage(File imageFile, String fileName) async {
+  Future<String> uploadProductImage(
+    File imageFile,
+    String fileName, {
+    required String uploadKey,
+  }) async {
     try {
-      final path = 'public/${DateTime.now().millisecondsSinceEpoch}_$fileName';
-      await supabase.storage.from('product_images').upload(path, imageFile);
+      final path = _productImagePath(uploadKey, fileName);
+      await supabase.storage
+          .from('product_images')
+          .upload(
+            path,
+            imageFile,
+            fileOptions: const FileOptions(upsert: true, cacheControl: '0'),
+          );
       return supabase.storage.from('product_images').getPublicUrl(path);
-    } catch (e) {
-      return null;
+    } catch (error, stackTrace) {
+      AppLogger.error(
+        'Product image upload failed',
+        error: error,
+        stackTrace: stackTrace,
+      );
+      throw const AppUserFacingException(
+        'Unable to complete the upload. Please try again.',
+      );
     }
+  }
+
+  String _productImagePath(String uploadKey, String fileName) {
+    final locationId = activeLocationId;
+    if (locationId == null || locationId.isEmpty) {
+      throw StateError('Product image upload requires an active location.');
+    }
+    final normalizedKey = uploadKey.trim();
+    if (normalizedKey.isEmpty) {
+      throw ArgumentError('A product upload identity is required.');
+    }
+    final rawExtension = fileName.contains('.')
+        ? fileName.split('.').last.toLowerCase()
+        : 'jpg';
+    final extension =
+        const <String>{
+          'jpg',
+          'jpeg',
+          'png',
+          'webp',
+          'gif',
+        }.contains(rawExtension)
+        ? rawExtension
+        : 'jpg';
+    final digest = sha256.convert(utf8.encode(normalizedKey)).toString();
+    return 'public/$locationId/$digest.$extension';
   }
 
   Future<void> writeOffStock(
@@ -988,6 +1240,7 @@ class InventoryController {
   }
 
   Future<InventoryApprovalRequest> submitInventoryApprovalRequest({
+    required String operationId,
     required InventoryApprovalType type,
     required String productId,
     required double quantity,
@@ -1020,20 +1273,30 @@ class InventoryController {
         proofMimeType.trim().isEmpty) {
       throw ArgumentError('Photo evidence is required.');
     }
-    final response = await supabase.rpc(
-      'create_inventory_approval_request_v1',
-      params: <String, dynamic>{
-        'p_session_token': _requireSessionToken(),
-        'p_request_type': type.databaseValue,
-        'p_product_id': productId,
-        'p_quantity': quantity,
-        'p_reason': reason?.trim(),
-        'p_note': note?.trim(),
-        'p_proof_storage_path': proofStoragePath.trim(),
-        'p_proof_file_name': proofFileName.trim(),
-        'p_proof_mime_type': proofMimeType.trim().toLowerCase(),
-      },
-    );
+    late final dynamic response;
+    try {
+      response = await supabase.rpc(
+        'create_inventory_approval_request_v2',
+        params: <String, dynamic>{
+          'p_session_token': _requireSessionToken(),
+          'p_operation_id': operationId,
+          'p_request_type': type.databaseValue,
+          'p_product_id': productId,
+          'p_quantity': quantity,
+          'p_reason': reason?.trim(),
+          'p_note': note?.trim(),
+          'p_proof_storage_path': proofStoragePath.trim(),
+          'p_proof_file_name': proofFileName.trim(),
+          'p_proof_mime_type': proofMimeType.trim().toLowerCase(),
+        },
+      );
+    } catch (error, stackTrace) {
+      _throwCriticalOperationError(
+        'Inventory approval submission failed',
+        error,
+        stackTrace,
+      );
+    }
     final request = InventoryApprovalRequest.fromJson(
       Map<String, dynamic>.from(response as Map),
     );
@@ -1043,6 +1306,7 @@ class InventoryController {
   }
 
   Future<String> uploadApprovalEvidence({
+    required String operationId,
     required Uint8List bytes,
     required String fileName,
     required String mimeType,
@@ -1070,6 +1334,7 @@ class InventoryController {
         'action': 'upload',
         'fileName': fileName,
         'mimeType': normalizedMimeType,
+        'operationId': operationId,
       },
       files: <http.MultipartFile>[
         http.MultipartFile.fromBytes('file', bytes, filename: fileName),
@@ -1301,18 +1566,30 @@ class InventoryController {
     _discountApprovalController.add(null);
   }
 
-  Future<String?> uploadImageBytes(
+  Future<String> uploadImageBytes(
     Uint8List imageBytes,
-    String fileName,
-  ) async {
+    String fileName, {
+    required String uploadKey,
+  }) async {
     try {
-      final path = 'public/${DateTime.now().millisecondsSinceEpoch}_$fileName';
+      final path = _productImagePath(uploadKey, fileName);
       await supabase.storage
           .from('product_images')
-          .uploadBinary(path, imageBytes);
+          .uploadBinary(
+            path,
+            imageBytes,
+            fileOptions: const FileOptions(upsert: true, cacheControl: '0'),
+          );
       return supabase.storage.from('product_images').getPublicUrl(path);
-    } catch (e) {
-      return null;
+    } catch (error, stackTrace) {
+      AppLogger.error(
+        'Product image upload failed',
+        error: error,
+        stackTrace: stackTrace,
+      );
+      throw const AppUserFacingException(
+        'Unable to complete the upload. Please try again.',
+      );
     }
   }
 
@@ -1418,7 +1695,7 @@ class InventoryController {
     final pending = _pendingQuantityOperations[productId];
     final operationId = pending?.signature == signature
         ? pending!.operationId
-        : _newOperationId();
+        : newOperationId('inventory-adjustment');
     _pendingQuantityOperations[productId] = (
       signature: signature,
       operationId: operationId,
@@ -1448,13 +1725,13 @@ class InventoryController {
     }
   }
 
-  String _newOperationId() {
+  String newOperationId(String scope) {
     final random = math.Random.secure();
     final entropy = List<String>.generate(
       4,
       (_) => random.nextInt(0x100000000).toRadixString(16).padLeft(8, '0'),
     ).join();
-    return 'inventory-adjustment:'
+    return '$scope:'
         '${DateTime.now().microsecondsSinceEpoch}-$entropy';
   }
 
@@ -1486,6 +1763,31 @@ class InventoryController {
     if (details.contains('order_not_prepared')) {
       throw const AppUserFacingException(
         'This order is not ready for payment.',
+      );
+    }
+    if (details.contains('order_preparation_conflict')) {
+      throw const AppUserFacingException(
+        'This order was updated by another user. Refresh and try again.',
+      );
+    }
+    if (details.contains('order_assignment_conflict')) {
+      throw const AppUserFacingException(
+        "This order's assignment has already changed.",
+      );
+    }
+    if (details.contains('approval_submission_conflict')) {
+      throw const AppUserFacingException(
+        'This request has already been submitted.',
+      );
+    }
+    if (details.contains('product_submission_conflict')) {
+      throw const AppUserFacingException(
+        'This product submission conflicts with an earlier request. Please refresh and try again.',
+      );
+    }
+    if (details.contains('product_sku_already_exists')) {
+      throw const AppUserFacingException(
+        'An item with this SKU already exists.',
       );
     }
     if (details.contains('inventory_operation_conflict')) {
@@ -2150,6 +2452,9 @@ class InventoryController {
           'p_password': currentPassword,
         },
       );
+      if (response == null) {
+        return CurrentPasswordVerificationResult.rateLimited;
+      }
       return response == true
           ? CurrentPasswordVerificationResult.correct
           : CurrentPasswordVerificationResult.incorrect;
@@ -3395,15 +3700,32 @@ class InventoryController {
     return null;
   }
 
-  Future<void> updateOrderStatus(String orderId, String newStatus) async {
+  Future<void> updateOrderStatus(
+    String orderId,
+    String newStatus, {
+    String? expectedStatus,
+  }) async {
     try {
-      final Map<String, dynamic> updateData = {'status': newStatus};
-
       if (newStatus == 'prepared') {
-        updateData['prepared_by_id'] = currentUserId;
-        updateData['prepared_by_name'] = currentUserName ?? 'Unknown User';
-        updateData['prepared_at'] = DateTime.now().toUtc().toIso8601String();
+        final authoritativeExpectedStatus =
+            expectedStatus ?? orderById(orderId)?.status;
+        if (authoritativeExpectedStatus == null) {
+          throw const AppUserFacingException(
+            'This order was updated by another user. Refresh and try again.',
+          );
+        }
+        await supabase.rpc(
+          'prepare_customer_order_v1',
+          params: <String, dynamic>{
+            'p_session_token': _requireSessionToken(),
+            'p_order_id': orderId,
+            'p_expected_status': authoritativeExpectedStatus,
+          },
+        );
+        return;
       }
+
+      final Map<String, dynamic> updateData = {'status': newStatus};
 
       await supabase
           .from('orders')
@@ -3411,8 +3733,12 @@ class InventoryController {
           .eq('id', orderId)
           .neq('status', 'cancelled')
           .neq('status', 'completed');
-    } catch (e) {
-      rethrow;
+    } catch (error, stackTrace) {
+      _throwCriticalOperationError(
+        'Order status transition failed',
+        error,
+        stackTrace,
+      );
     }
   }
 
@@ -3536,20 +3862,25 @@ class InventoryController {
   Future<void> assignOrderToHelper({
     required String orderId,
     required String helperId,
-    required String helperName,
+    required String? expectedHelperId,
   }) async {
-    await supabase
-        .from('orders')
-        .update({
-          'assigned_helper_id': helperId,
-          'assigned_helper_name': helperName,
-          'assigned_at': DateTime.now().toUtc().toIso8601String(),
-          'assigned_by_admin_id': currentUserId,
-          'assigned_by_admin_name': currentUserName ?? 'Unknown Admin',
-        })
-        .eq('id', orderId)
-        .neq('status', 'cancelled')
-        .neq('status', 'completed');
+    try {
+      await supabase.rpc(
+        'assign_order_helper_v1',
+        params: <String, dynamic>{
+          'p_session_token': _requireSessionToken(),
+          'p_order_id': orderId,
+          'p_helper_id': helperId,
+          'p_expected_helper_id': expectedHelperId,
+        },
+      );
+    } catch (error, stackTrace) {
+      _throwCriticalOperationError(
+        'Manual Helper assignment failed',
+        error,
+        stackTrace,
+      );
+    }
   }
 
   Set<String>? _processingOrders;
@@ -3786,6 +4117,7 @@ class InventoryController {
 
   Future<MapLayoutSaveResult> saveMapLayoutIfUnchanged({
     required List<MapElement> draft,
+    required List<MapElement> baseline,
     required String baselineSignature,
     required String expectedLocationId,
     required String expectedUserId,
@@ -3796,6 +4128,7 @@ class InventoryController {
 
     final Future<MapLayoutSaveResult> save = _performMapLayoutSave(
       draft: _cloneMapLayout(draft),
+      baseline: _cloneMapLayout(baseline),
       baselineSignature: baselineSignature,
       expectedLocationId: expectedLocationId,
       expectedUserId: expectedUserId,
@@ -3815,6 +4148,7 @@ class InventoryController {
 
   Future<MapLayoutSaveResult> _performMapLayoutSave({
     required List<MapElement> draft,
+    required List<MapElement> baseline,
     required String baselineSignature,
     required String expectedLocationId,
     required String expectedUserId,
@@ -3831,47 +4165,43 @@ class InventoryController {
       throw StateError('The map draft belongs to a different user session.');
     }
 
-    final Future<void>? refreshInFlight = _mapLayoutLoadInFlight;
-    if (refreshInFlight != null) await refreshInFlight;
-
-    final List<MapElement> latest = await _readMapLayout(locId);
-    if (activeLocationId != locId || currentUserId != expectedUserId) {
-      throw StateError('The active session changed during the map save.');
-    }
-
-    final String latestSignature = mapLayoutSignature(latest);
-    if (latestSignature != baselineSignature) {
-      _acceptCanonicalMapLayout(locId, latest);
-      return MapLayoutSaveResult(
-        status: MapLayoutSaveStatus.conflict,
-        layout: currentMapLayout,
-        signature: latestSignature,
-      );
+    if (mapLayoutSignature(baseline) != baselineSignature) {
+      throw StateError('The map baseline is inconsistent with this draft.');
     }
 
     final dynamic persistedValue = clear
         ? null
         : draft.map((MapElement element) => element.toJson()).toList();
-    final List<dynamic> response = await supabase
-        .from('locations')
-        .update(<String, dynamic>{'layout_data': persistedValue})
-        .eq('id', locId)
-        .select('layout_data');
-
-    if (response.isEmpty) {
-      throw StateError(
-        "Location '$locId' does not exist or cannot be updated.",
-      );
-    }
+    final dynamic expectedValue = baseline
+        .map((MapElement element) => element.toJson())
+        .toList();
+    final response = Map<String, dynamic>.from(
+      await supabase.rpc(
+            'save_store_map_v1',
+            params: <String, dynamic>{
+              'p_session_token': _requireSessionToken(),
+              'p_expected_layout': expectedValue,
+              'p_new_layout': persistedValue,
+            },
+          )
+          as Map,
+    );
     if (activeLocationId != locId || currentUserId != expectedUserId) {
       throw StateError('The active session changed during the map save.');
     }
 
-    final dynamic returnedValue = (response.first as Map)['layout_data'];
+    final dynamic returnedValue = response['layout_data'];
     final List<MapElement> saved = returnedValue == null
         ? <MapElement>[]
         : _decodeMapLayoutValue(returnedValue);
     _acceptCanonicalMapLayout(locId, saved);
+    if (response['status'] == 'conflict') {
+      return MapLayoutSaveResult(
+        status: MapLayoutSaveStatus.conflict,
+        layout: currentMapLayout,
+        signature: mapLayoutSignature(saved),
+      );
+    }
     return MapLayoutSaveResult(
       status: MapLayoutSaveStatus.saved,
       layout: currentMapLayout,

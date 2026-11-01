@@ -7,6 +7,7 @@ import 'dart:typed_data';
 import '../data/inventory.dart';
 import '../logic/inventory_controller.dart';
 import 'widgets/app_toast.dart';
+import 'widgets/restock_request_dialog.dart';
 import '../services/app_error_mapper.dart';
 import 'store_map.dart';
 
@@ -682,30 +683,61 @@ class _InventoryRedesignState extends State<InventoryRedesign> {
                     ),
                     Padding(
                       padding: const EdgeInsets.all(14),
-                      child: Row(children: [
-                        Expanded(child: Text(
-                          filtered.isEmpty
-                              ? 'Showing 0 items'
-                              : 'Showing ${page * _perPage + 1}–${page * _perPage + visible.length} of ${filtered.length} items',
-                          style: const TextStyle(fontFamily: _font,
-                              color: _slate, fontSize: 11),
-                        )),
-                        OutlinedButton(
-                          onPressed: page > 0
-                              ? () => setState(() => _page = page - 1)
-                              : null,
-                          style: _outlineStyle,
-                          child: const Text('Previous'),
-                        ),
-                        const SizedBox(width: 7),
-                        OutlinedButton(
-                          onPressed: page + 1 < pages
-                              ? () => setState(() => _page = page + 1)
-                              : null,
-                          style: _outlineStyle,
-                          child: const Text('Next'),
-                        ),
-                      ]),
+                      child: SizedBox(
+                        width: double.infinity,
+                        height: 40,
+                        child: Stack(children: [
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              filtered.isEmpty
+                                  ? 'Showing 0 items'
+                                  : 'Showing ${page * _perPage + 1}–${page * _perPage + visible.length} of ${filtered.length} items',
+                              style: const TextStyle(
+                                fontFamily: _font,
+                                color: _slate,
+                                fontSize: 11,
+                              ),
+                            ),
+                          ),
+                          Center(
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                IconButton(
+                                  tooltip: 'Previous page',
+                                  onPressed: page > 0
+                                      ? () => setState(() => _page = page - 1)
+                                      : null,
+                                  icon: const Icon(LucideIcons.chevronLeft, size: 17),
+                                ),
+                                Container(
+                                  width: 38,
+                                  height: 38,
+                                  alignment: Alignment.center,
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFEFF6FF),
+                                    borderRadius: BorderRadius.circular(9),
+                                  ),
+                                  child: Text('${page + 1}', style: const TextStyle(
+                                    fontFamily: _font,
+                                    color: _blue,
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w700,
+                                  )),
+                                ),
+                                IconButton(
+                                  tooltip: 'Next page',
+                                  onPressed: page + 1 < pages
+                                      ? () => setState(() => _page = page + 1)
+                                      : null,
+                                  icon: const Icon(LucideIcons.chevronRight, size: 17),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ]),
+                      ),
                     ),
                   ],
                 ),
@@ -1076,6 +1108,118 @@ class _InventoryRedesignState extends State<InventoryRedesign> {
     );
   }
 
+  Widget _mobileSheetHeader({
+    required String title,
+    required String subtitle,
+    required IconData icon,
+    required VoidCallback onClose,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 4, 12, 16),
+      child: Row(
+        children: [
+          Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              color: const Color(0xFFEFF6FF),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(icon, color: _blue, size: 20),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontFamily: _font,
+                    fontSize: 18,
+                    color: _ink,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                Text(
+                  subtitle,
+                  style: const TextStyle(
+                    fontFamily: _font,
+                    fontSize: 12,
+                    color: _slate,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          IconButton(
+            tooltip: 'Close',
+            onPressed: onClose,
+            icon: const Icon(Icons.close_rounded, color: _slate),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _mobileSheetOption({
+    required String label,
+    required bool selected,
+    required VoidCallback onTap,
+    String? count,
+    Key? key,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+      child: Material(
+        key: key,
+        color: selected ? const Color(0xFFEFF6FF) : Colors.white,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(10),
+          side: BorderSide(color: selected ? const Color(0xFFBFDBFE) : _border),
+        ),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(10),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    label,
+                    style: TextStyle(
+                      fontFamily: _font,
+                      fontSize: 14,
+                      color: selected ? _blue : _ink,
+                      fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                    ),
+                  ),
+                ),
+                if (count != null) ...[
+                  Text(
+                    count,
+                    style: const TextStyle(
+                      fontFamily: _font,
+                      fontSize: 12,
+                      color: _slate,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                ],
+                Icon(
+                  selected ? Icons.check_circle_rounded : Icons.circle_outlined,
+                  color: selected ? _blue : const Color(0xFF94A3B8),
+                  size: 20,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Future<void> _openMobileFilterSheet({
     required List<InventoryItem> source,
     required List<String> categories,
@@ -1108,6 +1252,10 @@ class _InventoryRedesignState extends State<InventoryRedesign> {
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
       useSafeArea: true,
       builder: (sheetContext) => StatefulBuilder(
         builder: (context, updateSheet) => SizedBox(
@@ -1117,20 +1265,11 @@ class _InventoryRedesignState extends State<InventoryRedesign> {
           ),
           child: Column(
             children: [
-              const Padding(
-                padding: EdgeInsets.fromLTRB(20, 0, 20, 12),
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    'Filter inventory',
-                    style: TextStyle(
-                      fontFamily: _font,
-                      fontSize: 18,
-                      color: _ink,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                ),
+              _mobileSheetHeader(
+                title: 'Filter inventory',
+                subtitle: 'Narrow down your inventory',
+                icon: Icons.tune_rounded,
+                onClose: () => Navigator.pop(sheetContext),
               ),
               const Divider(height: 1, color: _border),
               Expanded(
@@ -1150,37 +1289,11 @@ class _InventoryRedesignState extends State<InventoryRedesign> {
                       ),
                     ),
                     for (final (value, label) in statuses)
-                      ListTile(
+                      _mobileSheetOption(
                         key: Key('mobile-filter-status-$value'),
-                        dense: true,
-                        title: Text(
-                          label,
-                          style: const TextStyle(
-                            fontFamily: _font,
-                            fontSize: 14,
-                          ),
-                        ),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              '${matchingCount(value, draftCategory)}',
-                              style: const TextStyle(
-                                fontFamily: _font,
-                                color: _slate,
-                                fontSize: 12,
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Icon(
-                              value == draftStatus
-                                  ? Icons.radio_button_checked
-                                  : Icons.radio_button_unchecked,
-                              color: value == draftStatus ? _blue : _slate,
-                              size: 20,
-                            ),
-                          ],
-                        ),
+                        label: label,
+                        count: '${matchingCount(value, draftCategory)}',
+                        selected: value == draftStatus,
                         onTap: () => updateSheet(() => draftStatus = value),
                       ),
                     const Divider(height: 18, color: _border),
@@ -1198,23 +1311,10 @@ class _InventoryRedesignState extends State<InventoryRedesign> {
                       ),
                     ),
                     for (final category in categories)
-                      ListTile(
+                      _mobileSheetOption(
                         key: Key('mobile-filter-category-$category'),
-                        dense: true,
-                        title: Text(
-                          category == 'All' ? 'All categories' : category,
-                          style: const TextStyle(
-                            fontFamily: _font,
-                            fontSize: 14,
-                          ),
-                        ),
-                        trailing: Icon(
-                          category == draftCategory
-                              ? Icons.radio_button_checked
-                              : Icons.radio_button_unchecked,
-                          color: category == draftCategory ? _blue : _slate,
-                          size: 20,
-                        ),
+                        label: category == 'All' ? 'All categories' : category,
+                        selected: category == draftCategory,
                         onTap: () =>
                             updateSheet(() => draftCategory = category),
                       ),
@@ -1231,7 +1331,8 @@ class _InventoryRedesignState extends State<InventoryRedesign> {
                         draftStatus = 'all';
                         draftCategory = 'All';
                       }),
-                      child: const Text('Reset'),
+                      style: TextButton.styleFrom(foregroundColor: _blue),
+                      child: const Text('Reset', style: TextStyle(fontFamily: _font)),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
@@ -1240,7 +1341,13 @@ class _InventoryRedesignState extends State<InventoryRedesign> {
                           draftStatus,
                           draftCategory,
                         )),
-                        style: FilledButton.styleFrom(backgroundColor: _blue),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: _blue,
+                          minimumSize: const Size.fromHeight(48),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
                         child: Text(
                     'Show ${matchingCount(draftStatus, draftCategory)} '
                     '${matchingCount(draftStatus, draftCategory) == 1 ? 'item' : 'items'}',
@@ -1280,39 +1387,31 @@ class _InventoryRedesignState extends State<InventoryRedesign> {
     final selected = await showModalBottomSheet<String>(
       context: context,
       showDragHandle: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
       builder: (sheetContext) => SafeArea(
         child: SizedBox(
           height: math.min(440, MediaQuery.sizeOf(sheetContext).height * 0.7),
           child: Column(
             children: [
-              const Padding(
-                padding: EdgeInsets.fromLTRB(20, 0, 20, 12),
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    'Sort inventory',
-                    style: TextStyle(
-                      fontFamily: _font,
-                      fontSize: 18,
-                      color: _ink,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                ),
+              _mobileSheetHeader(
+                title: 'Sort inventory',
+                subtitle: 'Choose the order of items',
+                icon: Icons.sort_rounded,
+                onClose: () => Navigator.pop(sheetContext),
               ),
+              const Divider(height: 1, color: _border),
               Expanded(
                 child: ListView.builder(
+                  padding: const EdgeInsets.only(top: 12, bottom: 8),
                   itemCount: options.length,
                   itemBuilder: (context, index) {
                     final (value, label) = options[index];
-                    return ListTile(
-                      title: Text(
-                        label,
-                        style: const TextStyle(fontFamily: _font, fontSize: 14),
-                      ),
-                      trailing: _sortBy == value
-                          ? const Icon(Icons.check, color: _blue)
-                          : null,
+                    return _mobileSheetOption(
+                      label: label,
+                      selected: _sortBy == value,
                       onTap: () => Navigator.pop(sheetContext, value),
                     );
                   },
@@ -1402,34 +1501,48 @@ class _InventoryRedesignState extends State<InventoryRedesign> {
     return SizedBox(
       width: width,
       height: 44,
-      child: DropdownButtonFormField<String>(
-        value: value,
-        items: items,
-        isExpanded: true,
-        icon: const Icon(LucideIcons.chevronDown, size: 16, color: _slate),
-        style: const TextStyle(
-          fontFamily: _font,
-          fontSize: 12,
-          color: _ink,
-          fontWeight: FontWeight.w600,
+      child: Theme(
+        data: Theme.of(context).copyWith(
+          canvasColor: Colors.white,
+          focusColor: const Color(0xFFEFF6FF),
+          hoverColor: const Color(0xFFEFF6FF),
+          highlightColor: const Color(0xFFDBEAFE),
+          splashColor: const Color(0xFFDBEAFE),
         ),
-        decoration: InputDecoration(
-          isDense: true,
-          filled: true,
-          fillColor: const Color(0xFFF8FAFC),
-          contentPadding: const EdgeInsets.symmetric(
-            horizontal: 10, vertical: 11),
-          prefixIcon: Icon(icon, size: 16, color: _slate),
-          prefixIconConstraints: const BoxConstraints(
-            minWidth: 36, minHeight: 36),
-          enabledBorder: OutlineInputBorder(
-            borderSide: const BorderSide(color: _border),
-            borderRadius: BorderRadius.circular(8)),
-          focusedBorder: OutlineInputBorder(
-            borderSide: const BorderSide(color: _blue),
-            borderRadius: BorderRadius.circular(8)),
+        child: DropdownButtonFormField<String>(
+          initialValue: value,
+          items: items,
+          isExpanded: true,
+          dropdownColor: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          menuMaxHeight: math.min(420, MediaQuery.sizeOf(context).height * 0.6),
+          itemHeight: 48,
+          elevation: 4,
+          icon: const Icon(LucideIcons.chevronDown, size: 16, color: _slate),
+          style: const TextStyle(
+            fontFamily: _font,
+            fontSize: 12,
+            color: _ink,
+            fontWeight: FontWeight.w600,
+          ),
+          decoration: InputDecoration(
+            isDense: true,
+            filled: true,
+            fillColor: const Color(0xFFF8FAFC),
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 10, vertical: 11),
+            prefixIcon: Icon(icon, size: 16, color: _slate),
+            prefixIconConstraints: const BoxConstraints(
+              minWidth: 36, minHeight: 36),
+            enabledBorder: OutlineInputBorder(
+              borderSide: const BorderSide(color: _border),
+              borderRadius: BorderRadius.circular(8)),
+            focusedBorder: OutlineInputBorder(
+              borderSide: const BorderSide(color: _blue),
+              borderRadius: BorderRadius.circular(8)),
+          ),
+          onChanged: onChanged,
         ),
-        onChanged: onChanged,
       ),
     );
   }
@@ -1778,8 +1891,8 @@ class _ItemDetailsDrawerState extends State<_ItemDetailsDrawer> {
             .replaceAll(RegExp(r'[^a-zA-Z0-9._-]'), '_');
         final uploaded = await widget.controller.uploadImageBytes(
           _chosenImageBytes!, safeName,
+          uploadKey: 'product:${item.id}:current',
         );
-        if (uploaded == null) throw StateError('Image upload failed.');
         savedImageUrl = uploaded;
       }
 
@@ -1980,7 +2093,11 @@ class _ItemDetailsDrawerState extends State<_ItemDetailsDrawer> {
                   : Row(children: [
                 if (!disabled) ...[
                   Expanded(child: ElevatedButton.icon(
-                    onPressed: widget.onManage,
+                    onPressed: () => unawaited(showRestockRequestDialog(
+                      context: context,
+                      controller: widget.controller,
+                      item: item,
+                    )),
                     icon: const Icon(LucideIcons.plus, size: 14),
                     label: const Text('Restock'),
                     style: ElevatedButton.styleFrom(
@@ -2218,6 +2335,8 @@ class _ItemDetailsDrawerState extends State<_ItemDetailsDrawer> {
                     controller: widget.controller,
                     mode: MapMode.view,
                     selectedItemId: item.id,
+                    centerOnSelectedItem: true,
+                    compactZoomControls: true,
                     showMobileToolbar: false,
                   ),
                 ),
@@ -2264,6 +2383,7 @@ class _ItemDetailsDrawerState extends State<_ItemDetailsDrawer> {
                 controller: widget.controller,
                 mode: MapMode.view,
                 selectedItemId: item.id,
+                centerOnSelectedItem: true,
               )),
             ]),
           ),

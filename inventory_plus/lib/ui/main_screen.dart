@@ -40,7 +40,6 @@ import 'widgets/app_dialog.dart';
 import 'widgets/app_toast.dart';
 import 'widgets/change_password_dialog.dart';
 import 'widgets/startup_restoration_surface.dart';
-import 'widgets/mobile_main_drawer.dart';
 import '../services/staff_presence_service.dart';
 import '../services/order_auto_assignment_service.dart';
 import 'widgets/active_staff_button.dart';
@@ -188,6 +187,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         // Order assignment payloads use profiles.id, which is the same ID
         // stored as currentUserId by the custom login flow.
         recipientId: userId,
+        sessionToken: widget.controller.currentSessionToken,
         realtimeSync: widget.realtimeSync,
       );
 
@@ -1410,79 +1410,19 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       final previousStates = await notificationController
           .fetchStockNotificationStates();
 
-      // Older builds created multi-item aggregate rows that cannot represent
-      // one product lifecycle. Resolve them before publishing per-item state.
-      await notificationController.resolveStockAlertNotifications();
-
-      final statesToSave = <Map<String, dynamic>>[];
-      final now = DateTime.now().toUtc().toIso8601String();
-
       for (final item in items) {
         final stockStatus = widget.controller.stockStatusFor(item);
         final currentStatus = _stockStatusKey(stockStatus);
-        final previousStatus = previousStates[item.id];
-
-        statesToSave.add({
-          'location_id': locationId,
-          'item_id': item.id,
-          'last_status': currentStatus,
-          'updated_at': now,
-        });
-
-        // First scan only records the state. It should not flood notifications.
-        if (previousStatus == null) continue;
-
-        // Healthy items need no lifecycle work. For an ongoing alert, an
-        // idempotent transition updates quantity/content on the same row.
-        if (previousStatus == currentStatus && currentStatus == 'ok') continue;
-
-        if (currentStatus == 'ok') {
-          await notificationController.resolveAllStockNotifications(
-            itemId: item.id,
-          );
-          continue;
-        }
-
-        final triggeredByName =
-            widget.controller.currentUserName ?? 'Unknown User';
-        final triggeredAt = DateTime.now();
-
-        switch (stockStatus) {
-          case StockStatus.low:
-            await notificationController.notifyLowStock(
-              locationId: locationId,
-              itemId: item.id,
-              itemName: item.name,
-              quantity: _formatQty(item.quantity),
-              unit: item.unit,
-              triggeredByName: triggeredByName,
-              triggeredAt: triggeredAt,
-            );
-            break;
-          case StockStatus.critical:
-            await notificationController.notifyCriticalStock(
-              locationId: locationId,
-              itemId: item.id,
-              itemName: item.name,
-              quantity: _formatQty(item.quantity),
-              unit: item.unit,
-              triggeredByName: triggeredByName,
-              triggeredAt: triggeredAt,
-            );
-            break;
-          case StockStatus.out:
-            await notificationController.notifyDeadStock(
-              locationId: locationId,
-              itemId: item.id,
-              itemName: item.name,
-              unit: item.unit,
-              triggeredByName: triggeredByName,
-              triggeredAt: triggeredAt,
-            );
-            break;
-          case StockStatus.ok:
-            break;
-        }
+        await notificationController.reconcileStockNotification(
+          locationId: locationId,
+          itemId: item.id,
+          itemName: item.name,
+          quantity: _formatQty(item.quantity),
+          unit: item.unit,
+          status: currentStatus,
+          triggeredByName: widget.controller.currentUserName ?? 'Unknown User',
+          triggeredAt: DateTime.now(),
+        );
       }
 
       final currentItemIds = items.map((item) => item.id).toSet();
@@ -1493,8 +1433,6 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
           itemId: missingItemId,
         );
       }
-
-      await notificationController.upsertStockNotificationStates(statesToSave);
     } finally {
       _isCheckingStockAlerts = false;
     }
@@ -2549,15 +2487,14 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
             transactionIndex: transactionIndex,
             inventoryIndex: inventoryIndex,
           ),
-          drawer: MobileMainDrawer(
-            sections: _mainSections,
-            selectedIndex: _currentIndex ?? 0,
-            role: role,
-            onSelectIndex: _selectMainIndex,
-          ),
           body: IndexedStack(
             index: _currentIndex,
             children: _lazyPageChildren(pages),
+          ),
+          bottomNavigationBar: _buildMobileNavigationBar(
+            isAdmin: isAdmin,
+            isHelper: isHelper,
+            isCashier: isCashier,
           ),
         );
       },
@@ -2645,16 +2582,11 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   }) {
     return AppBar(
       automaticallyImplyLeading: false,
-      leading: Builder(builder: (context) => IconButton(
-        tooltip: 'Open navigation menu',
-        icon: const Icon(LucideIcons.menu, color: _darkText),
-        onPressed: () => Scaffold.of(context).openDrawer(),
-      )),
       backgroundColor: Colors.white,
       toolbarHeight: 64,
       elevation: 0,
       surfaceTintColor: Colors.transparent,
-      titleSpacing: 0,
+      titleSpacing: 16,
       title: Row(
         children: [
           Container(
@@ -2699,6 +2631,117 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       bottom: PreferredSize(
         preferredSize: const Size.fromHeight(1.0),
         child: Container(color: Colors.grey.shade200, height: 1.0),
+      ),
+    );
+  }
+
+  Widget _buildMobileNavigationBar({
+    required bool isAdmin,
+    required bool isHelper,
+    required bool isCashier,
+  }) {
+    return NavigationBarTheme(
+      data: NavigationBarThemeData(
+        indicatorColor: _primaryBlue.withOpacity(0.1),
+        labelTextStyle: WidgetStateProperty.resolveWith<TextStyle>((
+          Set<WidgetState> states,
+        ) {
+          if (states.contains(WidgetState.selected)) {
+            return const TextStyle(
+              color: _primaryBlue,
+              fontWeight: FontWeight.bold,
+              fontSize: 11,
+              fontFamily: _fontFam,
+            );
+          }
+
+          return const TextStyle(
+            color: _inactiveText,
+            fontSize: 11,
+            fontFamily: _fontFam,
+          );
+        }),
+      ),
+      child: NavigationBar(
+        height: 66,
+        backgroundColor: Colors.white,
+        surfaceTintColor: Colors.white,
+        selectedIndex: _currentIndex!,
+        labelBehavior: NavigationDestinationLabelBehavior.onlyShowSelected,
+        onDestinationSelected: _selectMainIndex,
+        destinations: [
+          if (isAdmin)
+            const NavigationDestination(
+              icon: Icon(LucideIcons.layoutDashboard, color: _inactiveText),
+              selectedIcon: Icon(
+                LucideIcons.layoutDashboard,
+                color: _primaryBlue,
+              ),
+              label: 'Home',
+            ),
+          if (isAdmin)
+            const NavigationDestination(
+              icon: Icon(LucideIcons.trendingUp, color: _inactiveText),
+              selectedIcon: Icon(LucideIcons.trendingUp, color: _primaryBlue),
+              label: 'Forecast',
+            ),
+          if (isCashier || isAdmin)
+            const NavigationDestination(
+              icon: Icon(LucideIcons.shoppingCart, color: _inactiveText),
+              selectedIcon: Icon(LucideIcons.shoppingCart, color: _primaryBlue),
+              label: 'POS',
+            ),
+          if (isHelper || isAdmin)
+            const NavigationDestination(
+              icon: Icon(LucideIcons.fileText, color: _inactiveText),
+              selectedIcon: Icon(LucideIcons.fileText, color: _primaryBlue),
+              label: 'Queue',
+            ),
+          const NavigationDestination(
+            icon: Icon(LucideIcons.box, color: _inactiveText),
+            selectedIcon: Icon(LucideIcons.box, color: _primaryBlue),
+            label: 'Inventory',
+          ),
+          if (isAdmin)
+            const NavigationDestination(
+              icon: Icon(LucideIcons.clipboardCheck, color: _inactiveText),
+              selectedIcon: Icon(
+                LucideIcons.clipboardCheck,
+                color: _primaryBlue,
+              ),
+              label: 'Approvals',
+            ),
+          if (isHelper || isCashier)
+            const NavigationDestination(
+              icon: Icon(LucideIcons.history, color: _inactiveText),
+              selectedIcon: Icon(LucideIcons.history, color: _primaryBlue),
+              label: 'History',
+            ),
+          if (isAdmin)
+            const NavigationDestination(
+              icon: Icon(LucideIcons.barChart2, color: _inactiveText),
+              selectedIcon: Icon(LucideIcons.barChart2, color: _primaryBlue),
+              label: 'Performance',
+            ),
+          if (isAdmin)
+            const NavigationDestination(
+              icon: Icon(LucideIcons.history, color: _inactiveText),
+              selectedIcon: Icon(LucideIcons.history, color: _primaryBlue),
+              label: 'Logs',
+            ),
+          if (isAdmin)
+            const NavigationDestination(
+              icon: Icon(LucideIcons.map, color: _inactiveText),
+              selectedIcon: Icon(LucideIcons.map, color: _primaryBlue),
+              label: 'Map',
+            ),
+          if (isAdmin)
+            const NavigationDestination(
+              icon: Icon(LucideIcons.settings, color: _inactiveText),
+              selectedIcon: Icon(LucideIcons.settings, color: _primaryBlue),
+              label: 'Settings',
+            ),
+        ],
       ),
     );
   }
@@ -3023,9 +3066,42 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
 
     return Padding(
       padding: const EdgeInsets.only(left: 2),
-      child: InkWell(
-        onTap: _showProfileDialog,
-        borderRadius: BorderRadius.circular(999),
+      child: PopupMenuButton<String>(
+        tooltip: 'Account menu',
+        color: Colors.white,
+        position: PopupMenuPosition.under,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+        ),
+        onSelected: (action) {
+          if (action == 'profile') {
+            _showProfileDialog();
+          } else if (action == 'logout') {
+            unawaited(_handleLogout());
+          }
+        },
+        itemBuilder: (context) => const [
+          PopupMenuItem<String>(
+            value: 'profile',
+            child: Row(
+              children: [
+                Icon(LucideIcons.user, size: 18, color: _primaryBlue),
+                SizedBox(width: 12),
+                Text('Profile'),
+              ],
+            ),
+          ),
+          PopupMenuItem<String>(
+            value: 'logout',
+            child: Row(
+              children: [
+                Icon(LucideIcons.logOut, size: 18, color: Color(0xFFDC2626)),
+                SizedBox(width: 12),
+                Text('Log out'),
+              ],
+            ),
+          ),
+        ],
         child: CircleAvatar(
           radius: 17,
           backgroundColor: _primaryBlue.withOpacity(0.12),

@@ -8,6 +8,12 @@ import 'dart:convert';
 import 'package:crypto/crypto.dart';
 import '../services/app_logger.dart';
 
+class LoginRateLimitedException implements Exception {
+  const LoginRateLimitedException({required this.retryAfterSeconds});
+
+  final int? retryAfterSeconds;
+}
+
 class AuthService {
   final _supabase = Supabase.instance.client;
 
@@ -21,6 +27,19 @@ class AuthService {
       'profile_login_v1',
       params: {'p_username': username, 'p_password': password},
     );
+    if (response is Map &&
+        (response['rate_limited'] == true ||
+            response['status'] == 'rate_limited')) {
+      final rawRetryAfter = response['retry_after_seconds'];
+      final parsedRetryAfter = rawRetryAfter is num
+          ? rawRetryAfter.ceil()
+          : int.tryParse(rawRetryAfter?.toString() ?? '');
+      throw LoginRateLimitedException(
+        retryAfterSeconds: parsedRetryAfter != null && parsedRetryAfter > 0
+            ? parsedRetryAfter
+            : null,
+      );
+    }
     return _profileFromSessionPayload(response);
   }
 
