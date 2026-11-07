@@ -45,6 +45,7 @@ class _OrderQueuePageState extends State<OrderQueuePage> {
   List<CustomerOrder> _cachedOrders = [];
 
   final Map<String, Set<String>> _pickedTracker = {};
+  bool _progressSyncWarningShown = false;
 
   @override
   void initState() {
@@ -113,10 +114,13 @@ class _OrderQueuePageState extends State<OrderQueuePage> {
     return true;
   }
 
-  void _openOrderChecklist(dynamic order) {
+  void _openOrderChecklist(CustomerOrder order) {
     setState(() {
       _selectedOrderId = order.id.toString();
-      _pickedTracker[order.id] ??= {};
+      _pickedTracker[order.id] ??= <String>{
+        for (final CustomerOrderItem item in order.items)
+          if (item.picked) item.productId,
+      };
     });
   }
 
@@ -126,11 +130,26 @@ class _OrderQueuePageState extends State<OrderQueuePage> {
     });
   }
 
-  void _markPickedItem(String orderId, String productId) {
+  Set<String> _pickedIds(CustomerOrder order) => <String>{
+    for (final item in order.items)
+      if (item.picked) item.productId,
+    ...?_pickedTracker[order.id],
+  };
+
+  Future<void> _markPickedItem(String orderId, String productId) async {
+    final synced = await widget.controller.markOrderItemPicked(
+      orderId,
+      productId,
+    );
+    if (!mounted) return;
     setState(() {
       _pickedTracker[orderId] ??= {};
       _pickedTracker[orderId]!.add(productId);
     });
+    if (!synced && !_progressSyncWarningShown) {
+      _progressSyncWarningShown = true;
+      AppToast.error(context, 'Picking progress is saved on this device only.');
+    }
   }
 
   bool _isToday(DateTime date) {
@@ -239,10 +258,9 @@ class _OrderQueuePageState extends State<OrderQueuePage> {
             return OrderChecklistPage(
               order: currentOrder,
               controller: widget.controller,
-              pickedItems: _pickedTracker[currentOrder.id] ?? {},
-              onItemVerified: (productId) {
-                _markPickedItem(currentOrder.id, productId);
-              },
+              pickedItems: _pickedIds(currentOrder),
+              onItemVerified: (productId) =>
+                  _markPickedItem(currentOrder.id, productId),
               onBack: _closeOrderChecklist,
               onFinish: () {
                 _pickedTracker.remove(currentOrder.id);
@@ -282,7 +300,7 @@ class _OrderQueuePageState extends State<OrderQueuePage> {
           int pickingCount = 0;
 
           for (final order in pendingOrders) {
-            final picked = _pickedTracker[order.id]?.length ?? 0;
+            final picked = _pickedIds(order).length;
 
             if (picked > 0) {
               pickingCount++;
@@ -388,8 +406,7 @@ class _OrderQueuePageState extends State<OrderQueuePage> {
                           itemCount: visiblePendingOrders.length,
                           itemBuilder: (context, index) {
                             final order = visiblePendingOrders[index];
-                            final pickedCount =
-                                _pickedTracker[order.id]?.length ?? 0;
+                            final pickedCount = _pickedIds(order).length;
                             final totalItems = order.items.length;
 
                             return _OrderCard(
@@ -644,11 +661,7 @@ class _OrderCard extends StatelessWidget {
             if (constraints.maxWidth < 340) {
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  details,
-                  const SizedBox(height: 16),
-                  action,
-                ],
+                children: [details, const SizedBox(height: 16), action],
               );
             }
             return Row(
@@ -669,7 +682,7 @@ class OrderChecklistPage extends StatefulWidget {
   final CustomerOrder order;
   final InventoryController controller;
   final Set<String> pickedItems;
-  final ValueChanged<String> onItemVerified;
+  final Future<void> Function(String) onItemVerified;
   final VoidCallback onBack;
   final VoidCallback onFinish;
 
@@ -693,7 +706,7 @@ class _OrderChecklistPageState extends State<OrderChecklistPage> {
   CustomerOrder get order => widget.order;
   InventoryController get controller => widget.controller;
   Set<String> get pickedItems => widget.pickedItems;
-  ValueChanged<String> get onItemVerified => widget.onItemVerified;
+  Future<void> Function(String) get onItemVerified => widget.onItemVerified;
   VoidCallback get onBack => widget.onBack;
   VoidCallback get onFinish => widget.onFinish;
 
@@ -790,9 +803,9 @@ class _OrderChecklistPageState extends State<OrderChecklistPage> {
                           Padding(
                             padding: const EdgeInsets.only(left: 8),
                             child: ChoiceChip(
-                              label: Text(style == MapViewStyle.twoD
-                                  ? '2D'
-                                  : '3D'),
+                              label: Text(
+                                style == MapViewStyle.twoD ? '2D' : '3D',
+                              ),
                               selected: viewStyle == style,
                               showCheckmark: false,
                               onSelected: (_) =>
@@ -808,8 +821,10 @@ class _OrderChecklistPageState extends State<OrderChecklistPage> {
                             ),
                           ),
                         IconButton(
-                          icon: const Icon(Icons.close,
-                              color: Color(0xFF1D4ED8)),
+                          icon: const Icon(
+                            Icons.close,
+                            color: Color(0xFF1D4ED8),
+                          ),
                           onPressed: () => Navigator.pop(dialogContext),
                         ),
                       ],
@@ -845,12 +860,31 @@ class _OrderChecklistPageState extends State<OrderChecklistPage> {
       MaterialPageRoute(
         builder: (scannerContext) => ScannerSearchPage(
           controller: controller,
-          onSelectItem: (scannedItem) {
+          onSelectItem: (scannedItem) async {
             Navigator.pop(scannerContext);
-            if (!mounted) return;
+            if (!context.mounted) return;
 
             if (scannedItem.id == expectedProductId) {
-              onItemVerified(expectedProductId);
+              try {
+                await onItemVerified(expectedProductId);
+              } catch (error, stackTrace) {
+                AppLogger.error(
+                  'Failed to save order picking progress',
+                  error: error,
+                  stackTrace: stackTrace,
+                );
+                if (context.mounted) {
+                  AppToast.error(
+                    context,
+                    AppErrorMapper.message(
+                      error,
+                      fallback: AppErrorCategory.dataSave,
+                    ),
+                  );
+                }
+                return;
+              }
+              if (!context.mounted) return;
               showDialog(
                 context: context,
                 builder: (dialogContext) => PickVerificationDialog(

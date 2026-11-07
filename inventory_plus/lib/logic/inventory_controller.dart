@@ -2560,19 +2560,23 @@ class InventoryController {
     }
 
     return _runSerializedHistoryQuery('all:$locationId', () async {
-      final response = await supabase
-          .from('transaction_history')
-          .select('*, products(product_name, sku), profiles(name, role)')
-          .eq('location_id', locationId)
-          .order('created_at', ascending: false);
-
-      if (activeLocationId != locationId) {
-        throw StateError('Transaction history location changed.');
+      const pageSize = 500;
+      final rows = <Map<String, dynamic>>[];
+      for (var offset = 0; ; offset += pageSize) {
+        final response = await supabase
+            .from('transaction_history')
+            .select('*, products(product_name, sku), profiles(name, role)')
+            .eq('location_id', locationId)
+            .order('created_at', ascending: false)
+            .order('id', ascending: false)
+            .range(offset, offset + pageSize - 1);
+        if (activeLocationId != locationId) {
+          throw StateError('Transaction history location changed.');
+        }
+        rows.addAll(List<Map<String, dynamic>>.from(response));
+        if (response.length < pageSize) break;
       }
-
-      return List<Map<String, dynamic>>.unmodifiable(
-        List<Map<String, dynamic>>.from(response),
-      );
+      return List<Map<String, dynamic>>.unmodifiable(rows);
     });
   }
 
@@ -2979,6 +2983,34 @@ class InventoryController {
     return refresh;
   }
 
+  /// Orders shown in the admin Orders & activity tab. The operational orders
+  /// table retains assignment and payment details that the history projection
+  /// does not expose to the client.
+  Future<List<CustomerOrder>> loadActivityOrders() async {
+    final locationId = activeLocationId;
+    if (locationId == null || locationId.isEmpty) {
+      return const <CustomerOrder>[];
+    }
+
+    const pageSize = 500;
+    final orders = <CustomerOrder>[];
+    for (var offset = 0; ; offset += pageSize) {
+      final rows = await supabase
+          .from('orders')
+          .select()
+          .eq('location_id', locationId)
+          .order('created_at', ascending: false)
+          .order('id', ascending: false)
+          .range(offset, offset + pageSize - 1);
+      if (activeLocationId != locationId) {
+        throw StateError('Orders location changed while loading.');
+      }
+      orders.addAll(rows.map((row) => CustomerOrder.fromJson(row)));
+      if (rows.length < pageSize) break;
+    }
+    return List<CustomerOrder>.unmodifiable(orders);
+  }
+
   Future<OrderHistoryData> _performOrderHistoryLoad() async {
     final String? locationId = activeLocationId;
     if (locationId == null || locationId.isEmpty) {
@@ -2988,27 +3020,31 @@ class InventoryController {
       );
     }
 
-    final response = await supabase
-        .from('order_history')
-        .select(
-          'id:order_id, status, items, created_at, event_at, total_amount, '
-          'discount_amount, created_by_id, created_by_name, '
-          'assigned_helper_id, assigned_helper_name, assigned_at, '
-          'prepared_by_id, prepared_by_name, prepared_at, '
-          'completed_by_id, completed_by_name, completed_at, '
-          'cancelled_by_id, cancelled_by_name, cancelled_at, '
-          'returned_by_id, returned_by_name, returned_at',
-        )
-        .eq('location_id', locationId)
-        .order('created_at', ascending: false);
-
-    if (activeLocationId != locationId) {
-      throw StateError('Order history location changed.');
+    const pageSize = 500;
+    final orders = <Map<String, dynamic>>[];
+    for (var offset = 0; ; offset += pageSize) {
+      final response = await supabase
+          .from('order_history')
+          .select(
+            'id:order_id, status, items, created_at, event_at, total_amount, '
+            'discount_amount, created_by_id, created_by_name, '
+            'assigned_helper_id, assigned_helper_name, assigned_at, '
+            'prepared_by_id, prepared_by_name, prepared_at, '
+            'completed_by_id, completed_by_name, completed_at, '
+            'cancelled_by_id, cancelled_by_name, cancelled_at, '
+            'returned_by_id, returned_by_name, returned_at, '
+            'payment_mode, cash_given, change_amount, payment_reference',
+          )
+          .eq('location_id', locationId)
+          .order('created_at', ascending: false)
+          .order('order_id', ascending: false)
+          .range(offset, offset + pageSize - 1);
+      if (activeLocationId != locationId) {
+        throw StateError('Order history location changed.');
+      }
+      orders.addAll(List<Map<String, dynamic>>.from(response));
+      if (response.length < pageSize) break;
     }
-
-    final List<Map<String, dynamic>> orders = List<Map<String, dynamic>>.from(
-      response,
-    );
     final Set<Object> profileIds = <Object>{};
 
     for (final Map<String, dynamic> order in orders) {
@@ -3026,21 +3062,25 @@ class InventoryController {
 
     final Map<String, String> profileNames = <String, String>{};
     if (profileIds.isNotEmpty) {
-      final profiles = await supabase
-          .from('profiles')
-          .select('id, name')
-          .inFilter('id', profileIds.toList(growable: false));
+      final ids = profileIds.toList(growable: false);
+      for (var offset = 0; offset < ids.length; offset += pageSize) {
+        final chunk = ids.skip(offset).take(pageSize).toList(growable: false);
+        final profiles = await supabase
+            .from('profiles')
+            .select('id, name')
+            .inFilter('id', chunk);
 
-      if (activeLocationId != locationId) {
-        throw StateError('Order history location changed.');
-      }
+        if (activeLocationId != locationId) {
+          throw StateError('Order history location changed.');
+        }
 
-      for (final dynamic row in profiles) {
-        final Map<String, dynamic> profile = Map<String, dynamic>.from(
-          row as Map,
-        );
-        profileNames[profile['id'].toString()] =
-            profile['name']?.toString() ?? '—';
+        for (final dynamic row in profiles) {
+          final Map<String, dynamic> profile = Map<String, dynamic>.from(
+            row as Map,
+          );
+          profileNames[profile['id'].toString()] =
+              profile['name']?.toString() ?? '—';
+        }
       }
     }
 
@@ -3712,6 +3752,50 @@ class InventoryController {
         error,
         stackTrace,
       );
+    }
+  }
+
+  /// Records a helper's verified pick so every store session sees the same
+  /// preparation progress through the existing order realtime stream.
+  Future<bool> markOrderItemPicked(String orderId, String productId) async {
+    final locationId = activeLocationId;
+    try {
+      final response = await supabase.rpc(
+        'mark_order_item_picked_v1',
+        params: <String, dynamic>{
+          'p_session_token': _requireSessionToken(),
+          'p_order_id': orderId,
+          'p_product_id': productId,
+        },
+      );
+      final updated = CustomerOrder.fromJson(
+        Map<String, dynamic>.from(response as Map),
+      );
+      if (locationId == activeLocationId &&
+          _ordersSnapshotLocationId == locationId) {
+        final index = _ordersSnapshot.indexWhere(
+          (order) => order.id == orderId,
+        );
+        if (index >= 0) {
+          final orders = List<CustomerOrder>.of(_ordersSnapshot);
+          orders[index] = updated;
+          _ordersSnapshot = List<CustomerOrder>.unmodifiable(orders);
+          _ordersController.add(_ordersSnapshot);
+        }
+      }
+      return true;
+    } catch (error, stackTrace) {
+      // Keep the existing local checklist usable until this RPC is installed.
+      if (error is PostgrestException &&
+          (error.code == 'PGRST202' || error.code == '42883')) {
+        AppLogger.error(
+          'Order picking progress RPC is unavailable',
+          error: error,
+          stackTrace: stackTrace,
+        );
+        return false;
+      }
+      _throwCriticalOperationError('Order item pick failed', error, stackTrace);
     }
   }
 

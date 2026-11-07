@@ -17,6 +17,7 @@ void main() {
   test('role page order matches MainScreen page construction', () {
     expect(MainSection.forRole('admin'), const <MainSection>[
       MainSection.dashboard,
+      MainSection.ordersActivity,
       MainSection.forecasting,
       MainSection.pos,
       MainSection.queue,

@@ -30,6 +30,7 @@ import 'inventory_page.dart';
 import 'item_detail_page.dart';
 import 'map_editor_page.dart';
 import 'order_queue_page.dart';
+import 'orders_activity_page.dart';
 import 'pos_cart_page.dart';
 import 'profile_info_page.dart';
 import 'system_settings_page.dart';
@@ -71,6 +72,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   bool _isDetailView = false;
   String? _selectedItemId;
   String _txTargetTab = 'Sales History';
+  String _ordersActivityTab = 'Orders';
   String? _targetOrderId;
   String? _targetPosOrderId;
 
@@ -112,7 +114,6 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   StateSetter? _storeLogoutDialogSetState;
 
   static const Color _primaryBlue = Color(0xFF2563EB);
-  static const Color _sidebarBg = Colors.white;
   static const Color _mainBg = Color(0xFFF4F6F8);
   static const Color _darkText = Color(0xFF0F172A);
   static const Color _inactiveText = Color(0xFF64748B);
@@ -2239,6 +2240,8 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
 
         final int dashboardIndex = isAdmin ? pageIndex++ : -1;
 
+        final int ordersActivityIndex = isAdmin ? pageIndex++ : -1;
+
         final int forecastingIndex = isAdmin ? pageIndex++ : -1;
 
         final int posIndex = (isCashier || isAdmin) ? pageIndex++ : -1;
@@ -2271,22 +2274,41 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
               isActive: _currentIndex == dashboardIndex,
               onViewTransactions: () {
                 _selectMainIndex(
-                  transactionIndex,
-                  updateState: () => _txTargetTab = 'Sales History',
+                  ordersActivityIndex,
+                  updateState: () => _ordersActivityTab = 'Payments',
                 );
               },
               onOpenQueue: () {
-                _selectMainIndex(orderQueueIndex);
+                _selectMainIndex(
+                  ordersActivityIndex,
+                  updateState: () => _ordersActivityTab = 'Orders',
+                );
               },
               onViewActivity: () {
                 _selectMainIndex(
-                  transactionIndex,
-                  updateState: () => _txTargetTab = 'Activity Log',
+                  ordersActivityIndex,
+                  updateState: () => _ordersActivityTab = 'Stock movements',
                 );
               },
               onOpenForecasting: () {
                 _selectMainIndex(forecastingIndex);
               },
+              onOpenApprovals: () => _selectMainIndex(approvalsIndex),
+              onOpenInventory: () => _selectMainIndex(inventoryIndex),
+              onOpenStaff: () => _selectMainIndex(performanceIndex),
+              staffPresence: _staffPresenceService,
+            ),
+          );
+
+          pages.add(
+            OrdersActivityPage(
+              controller: widget.controller,
+              isActive: _currentIndex == ordersActivityIndex,
+              initialTab: _ordersActivityTab,
+              onOpenQueue: (orderId) => _selectMainIndex(
+                orderQueueIndex,
+                updateState: () => _targetOrderId = orderId,
+              ),
             ),
           );
 
@@ -2445,20 +2467,32 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
               children: [
                 _buildSidebar(
                   dashboardIndex: dashboardIndex,
+                  ordersActivityIndex: ordersActivityIndex,
                   forecastingIndex: forecastingIndex,
-                  posIndex: posIndex,
-                  orderQueueIndex: orderQueueIndex,
                   inventoryIndex: inventoryIndex,
                   approvalsIndex: approvalsIndex,
                   performanceIndex: performanceIndex,
-                  transactionIndex: transactionIndex,
                   mapIndex: mapIndex,
                   systemSettingsIndex: systemSettingsIndex,
                 ),
                 Expanded(
-                  child: IndexedStack(
-                    index: _currentIndex,
-                    children: _lazyPageChildren(pages),
+                  child: Column(
+                    children: [
+                      if (_currentIndex == dashboardIndex ||
+                          _currentIndex == ordersActivityIndex)
+                        _buildDashboardTopBar(
+                          orderQueueIndex: orderQueueIndex,
+                          posIndex: posIndex,
+                          transactionIndex: transactionIndex,
+                          inventoryIndex: inventoryIndex,
+                        ),
+                      Expanded(
+                        child: IndexedStack(
+                          index: _currentIndex,
+                          children: _lazyPageChildren(pages),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ],
@@ -2467,7 +2501,10 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                if (isAdmin && _staffPresenceService != null)
+                if (isAdmin &&
+                    _staffPresenceService != null &&
+                    _currentIndex != dashboardIndex &&
+                    _currentIndex != ordersActivityIndex)
                   ActiveStaffButton(presenceService: _staffPresenceService!),
 
                 if (!kReleaseMode) ...[
@@ -2640,6 +2677,22 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     required bool isHelper,
     required bool isCashier,
   }) {
+    final visibleSections = isAdmin
+        ? const <MainSection>[
+            MainSection.dashboard,
+            MainSection.ordersActivity,
+            MainSection.forecasting,
+            MainSection.inventory,
+            MainSection.approvals,
+            MainSection.performance,
+            MainSection.storeMap,
+            MainSection.systemSettings,
+          ]
+        : _mainSections;
+    final visibleIndexes = [
+      for (final section in visibleSections) _mainSections.indexOf(section),
+    ];
+    final selectedIndex = visibleIndexes.indexOf(_currentIndex!);
     return NavigationBarTheme(
       data: NavigationBarThemeData(
         indicatorColor: _primaryBlue.withOpacity(0.1),
@@ -2666,9 +2719,10 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         height: 66,
         backgroundColor: Colors.white,
         surfaceTintColor: Colors.white,
-        selectedIndex: _currentIndex!,
+        selectedIndex: selectedIndex >= 0 ? selectedIndex : 1,
         labelBehavior: NavigationDestinationLabelBehavior.onlyShowSelected,
-        onDestinationSelected: _selectMainIndex,
+        onDestinationSelected: (index) =>
+            _selectMainIndex(visibleIndexes[index]),
         destinations: [
           if (isAdmin)
             const NavigationDestination(
@@ -2681,17 +2735,23 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
             ),
           if (isAdmin)
             const NavigationDestination(
+              icon: Icon(LucideIcons.receiptText, color: _inactiveText),
+              selectedIcon: Icon(LucideIcons.receiptText, color: _primaryBlue),
+              label: 'Orders',
+            ),
+          if (isAdmin)
+            const NavigationDestination(
               icon: Icon(LucideIcons.trendingUp, color: _inactiveText),
               selectedIcon: Icon(LucideIcons.trendingUp, color: _primaryBlue),
               label: 'Forecast',
             ),
-          if (isCashier || isAdmin)
+          if (isCashier)
             const NavigationDestination(
               icon: Icon(LucideIcons.shoppingCart, color: _inactiveText),
               selectedIcon: Icon(LucideIcons.shoppingCart, color: _primaryBlue),
               label: 'POS',
             ),
-          if (isHelper || isAdmin)
+          if (isHelper)
             const NavigationDestination(
               icon: Icon(LucideIcons.fileText, color: _inactiveText),
               selectedIcon: Icon(LucideIcons.fileText, color: _primaryBlue),
@@ -2725,12 +2785,6 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
             ),
           if (isAdmin)
             const NavigationDestination(
-              icon: Icon(LucideIcons.history, color: _inactiveText),
-              selectedIcon: Icon(LucideIcons.history, color: _primaryBlue),
-              label: 'Logs',
-            ),
-          if (isAdmin)
-            const NavigationDestination(
               icon: Icon(LucideIcons.map, color: _inactiveText),
               selectedIcon: Icon(LucideIcons.map, color: _primaryBlue),
               label: 'Map',
@@ -2746,126 +2800,170 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     );
   }
 
+  Widget _buildDashboardTopBar({
+    required int orderQueueIndex,
+    required int posIndex,
+    required int transactionIndex,
+    required int inventoryIndex,
+  }) {
+    final window = _scheduledStoreAccessWindow;
+    final now = DateTime.now();
+    final isOpen =
+        window != null &&
+        !now.isBefore(window.opening) &&
+        now.isBefore(window.shiftEnd);
+    final nextOpening = window != null && now.isAfter(window.shiftEnd)
+        ? window.opening.add(const Duration(days: 1))
+        : window?.opening;
+    final status = window == null
+        ? 'Store overview'
+        : isOpen
+        ? 'Open · closes ${_dashboardTime(window.shiftEnd)}'
+        : 'Closed · opens ${_dashboardTime(nextOpening!)}';
+    return Container(
+      height: 60,
+      padding: const EdgeInsets.symmetric(horizontal: 32),
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        border: Border(bottom: BorderSide(color: Color(0xFFE8E3DF))),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.circle, size: 10, color: Color(0xFFA8A29E)),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              status,
+              style: const TextStyle(
+                color: Color(0xFF171717),
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+          _buildNotificationControls(
+            orderQueueIndex: orderQueueIndex,
+            posIndex: posIndex,
+            transactionIndex: transactionIndex,
+            inventoryIndex: inventoryIndex,
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _dashboardTime(DateTime value) {
+    final hour = value.hour % 12 == 0 ? 12 : value.hour % 12;
+    return '$hour:${value.minute.toString().padLeft(2, '0')} ${value.hour < 12 ? 'AM' : 'PM'}';
+  }
+
   Widget _buildSidebar({
     required int dashboardIndex,
+    required int ordersActivityIndex,
     required int forecastingIndex,
-    required int posIndex,
-    required int orderQueueIndex,
     required int inventoryIndex,
     required int approvalsIndex,
     required int performanceIndex,
-    required int transactionIndex,
     required int mapIndex,
     required int systemSettingsIndex,
   }) {
     return Container(
-      width: 250,
-      decoration: BoxDecoration(
-        color: _sidebarBg,
-        border: Border(right: BorderSide(color: Colors.grey.shade200)),
+      width: 280,
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        border: Border(right: BorderSide(color: Color(0xFFE8E3DF))),
       ),
       child: Column(
         children: [
           Expanded(
             child: SingleChildScrollView(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16.0,
-                      vertical: 36.0,
-                    ),
-                    child: Row(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 18, 16, 16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
                       children: [
                         Container(
-                          width: 32,
-                          height: 32,
+                          width: 36,
+                          height: 36,
                           decoration: BoxDecoration(
-                            color: _primaryBlue,
-                            borderRadius: BorderRadius.circular(8),
+                            color: const Color(0xFFC83D08),
+                            borderRadius: BorderRadius.circular(11),
                           ),
-                          child: const Icon(
-                            LucideIcons.package,
-                            color: Colors.white,
-                            size: 18,
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Tooltip(
-                            message: 'Inventory Plus',
+                          child: const Center(
                             child: Text(
-                              'Inventory Plus',
-                              style: const TextStyle(
-                                color: _darkText,
-                                fontWeight: FontWeight.w900,
-                                fontSize: 18,
-                                fontFamily: _fontFam,
+                              'I+',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
                               ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
                             ),
                           ),
                         ),
-                        const SizedBox(width: 4),
-                        _buildNotificationControls(
-                          placement: NotificationPanelPlacement.besideSidebar,
-                          orderQueueIndex: orderQueueIndex,
-                          posIndex: posIndex,
-                          transactionIndex: transactionIndex,
-                          inventoryIndex: inventoryIndex,
+                        const SizedBox(width: 10),
+                        const Expanded(
+                          child: Text(
+                            'Inventory Plus',
+                            style: TextStyle(
+                              color: Color(0xFF171717),
+                              fontSize: 16,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
                         ),
                       ],
                     ),
-                  ),
-                  _buildSidebarItem(
-                    dashboardIndex,
-                    LucideIcons.layoutDashboard,
-                    'Dashboard',
-                  ),
-                  _buildSidebarItem(
-                    forecastingIndex,
-                    LucideIcons.trendingUp,
-                    'Forecasting',
-                  ),
-                  _buildSidebarItem(
-                    posIndex,
-                    LucideIcons.shoppingCart,
-                    'Cash Monitor',
-                  ),
-                  _buildSidebarItem(
-                    orderQueueIndex,
-                    LucideIcons.fileText,
-                    'Queue Monitor',
-                  ),
-                  _buildSidebarItem(
-                    inventoryIndex,
-                    LucideIcons.box,
-                    'Inventory',
-                  ),
-                  _buildSidebarItem(
-                    approvalsIndex,
-                    LucideIcons.clipboardCheck,
-                    'Approval Center',
-                  ),
-                  _buildSidebarItem(
-                    performanceIndex,
-                    LucideIcons.barChart2,
-                    'Staff Performance',
-                  ),
-                  _buildSidebarItem(
-                    transactionIndex,
-                    LucideIcons.history,
-                    'Transactions',
-                  ),
-                  _buildSidebarItem(mapIndex, LucideIcons.map, 'Store Map'),
-                  _buildSidebarItem(
-                    systemSettingsIndex,
-                    LucideIcons.settings,
-                    'System Settings',
-                  ),
-                ],
+                    const SizedBox(height: 7),
+                    const Text(
+                      'Store operations',
+                      style: TextStyle(color: Color(0xFF817A75), fontSize: 12),
+                    ),
+                    const SizedBox(height: 20),
+                    _sidebarHeading('Operations'),
+                    _buildSidebarItem(
+                      dashboardIndex,
+                      LucideIcons.layoutDashboard,
+                      'Overview',
+                    ),
+                    _buildSidebarItem(
+                      ordersActivityIndex,
+                      LucideIcons.receiptText,
+                      'Orders & activity',
+                    ),
+                    _buildSidebarItem(
+                      approvalsIndex,
+                      LucideIcons.clipboardCheck,
+                      'Approvals',
+                    ),
+                    _buildSidebarItem(mapIndex, LucideIcons.map, 'Store map'),
+                    const SizedBox(height: 16),
+                    _sidebarHeading('Catalog'),
+                    _buildSidebarItem(
+                      inventoryIndex,
+                      LucideIcons.package,
+                      'Inventory',
+                    ),
+                    _buildSidebarItem(
+                      forecastingIndex,
+                      LucideIcons.trendingUp,
+                      'Analytics',
+                    ),
+                    const SizedBox(height: 16),
+                    _sidebarHeading('Administration'),
+                    _buildSidebarItem(
+                      performanceIndex,
+                      LucideIcons.users,
+                      'Staff',
+                    ),
+                    _buildSidebarItem(
+                      systemSettingsIndex,
+                      LucideIcons.settings,
+                      'Settings',
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
@@ -2875,6 +2973,13 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     );
   }
 
+  Widget _sidebarHeading(String title) => Padding(
+    padding: const EdgeInsets.fromLTRB(9, 0, 9, 5),
+    child: Text(
+      title,
+      style: const TextStyle(color: Color(0xFFA59B95), fontSize: 12),
+    ),
+  );
   Widget _buildTopNavBar({
     required bool isHelper,
     required int orderQueueIndex,
@@ -3070,9 +3175,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         tooltip: 'Account menu',
         color: Colors.white,
         position: PopupMenuPosition.under,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         onSelected: (action) {
           if (action == 'profile') {
             _showProfileDialog();
@@ -3211,31 +3314,31 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
 
   Widget _buildSidebarItem(int index, IconData icon, String label) {
     final isSelected = _currentIndex == index;
-    final contentColor = isSelected ? _primaryBlue : _inactiveText;
-    final bgColor = isSelected
-        ? _primaryBlue.withOpacity(0.08)
-        : Colors.transparent;
+    final contentColor = isSelected
+        ? const Color(0xFFC83D08)
+        : const Color(0xFF36322F);
+    final bgColor = isSelected ? const Color(0xFFFFF0E8) : Colors.transparent;
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 4.0),
+      padding: const EdgeInsets.symmetric(vertical: 1),
       child: Material(
         color: Colors.transparent,
         child: InkWell(
           onTap: () {
             _selectMainIndex(index);
           },
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(10),
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 200),
-            padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+            padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 9),
             decoration: BoxDecoration(
               color: bgColor,
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(10),
             ),
             child: Row(
               children: [
-                Icon(icon, color: contentColor, size: 20),
-                const SizedBox(width: 16),
+                Icon(icon, color: contentColor, size: 17),
+                const SizedBox(width: 11),
                 Expanded(
                   child: Text(
                     label,
@@ -3244,7 +3347,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                       fontWeight: isSelected
                           ? FontWeight.w600
                           : FontWeight.w500,
-                      fontSize: 15,
+                      fontSize: 14,
                       fontFamily: _fontFam,
                     ),
                     maxLines: 1,
@@ -3268,25 +3371,25 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       child: InkWell(
         onTap: _showProfileDialog,
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           decoration: BoxDecoration(
             border: Border(top: BorderSide(color: Colors.grey.shade200)),
           ),
           child: Row(
             children: [
               CircleAvatar(
-                radius: 18,
-                backgroundColor: _primaryBlue.withOpacity(0.1),
+                radius: 16,
+                backgroundColor: const Color(0xFFEAF0FF),
                 child: Text(
                   initial,
                   style: const TextStyle(
-                    color: _primaryBlue,
+                    color: Color(0xFF2556DB),
                     fontWeight: FontWeight.bold,
                     fontFamily: _fontFam,
                   ),
                 ),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 10),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -3304,7 +3407,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                       overflow: TextOverflow.ellipsis,
                     ),
                     Text(
-                      'ID: ${widget.controller.currentUserId}',
+                      'Administrator',
                       style: TextStyle(
                         color: Colors.grey.shade500,
                         fontSize: 11,

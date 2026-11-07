@@ -180,11 +180,19 @@ class CustomerOrderItem {
   final String productId;
   final String productName;
   final double quantity;
+  final bool picked;
+  final String? unit;
+  final double? unitPrice;
+  final double? lineTotal;
 
   CustomerOrderItem({
     required this.productId,
     required this.productName,
     required this.quantity,
+    this.picked = false,
+    this.unit,
+    this.unitPrice,
+    this.lineTotal,
   });
 
   Map<String, dynamic> toJson() => {
@@ -204,6 +212,10 @@ class CustomerOrderItem {
         json['productName']?.toString() ??
         'Unknown',
     quantity: (json['quantity'] as num?)?.toDouble() ?? 0.0,
+    picked: json['picked'] == true,
+    unit: json['unit']?.toString(),
+    unitPrice: (json['unit_price'] as num?)?.toDouble(),
+    lineTotal: (json['line_total'] as num?)?.toDouble(),
   );
 }
 
