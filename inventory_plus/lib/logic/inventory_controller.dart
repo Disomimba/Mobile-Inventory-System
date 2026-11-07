@@ -975,7 +975,7 @@ class InventoryController {
           'p_model': newItem.model,
           'p_product_size': newItem.productSize,
           'p_shelf_level': newItem.shelfLevel,
-          'p_bin_number': newItem.binNumber,
+          'p_bin_number': null,
           'p_unit': newItem.unit,
           'p_max_quantity': newItem.maxQuantity,
         },
@@ -1617,7 +1617,6 @@ class InventoryController {
           'model': updatedItem.model,
           'product_size': updatedItem.productSize,
           'shelf_level': updatedItem.shelfLevel,
-          'bin_number': updatedItem.binNumber,
           'image_url': updatedItem.imageUrl,
           'unit': updatedItem.unit,
           'max_quantity': updatedItem.maxQuantity,
@@ -1884,28 +1883,6 @@ class InventoryController {
     );
   }
 
-  Future<void> updateItemLocationDetails(
-    String itemId, {
-    required int shelf,
-    required String layer,
-  }) async {
-    try {
-      await supabase
-          .from('products')
-          .update({'shelf_level': shelf.toString(), 'bin_number': layer})
-          .eq('id', itemId);
-
-      final index = _items.indexWhere((item) => item.id == itemId);
-      if (index != -1) {
-        _items[index] = _items[index].copyWith(
-          shelfLevel: shelf.toString(),
-          binNumber: layer,
-        );
-        _publishInventorySnapshot();
-      }
-    } catch (e) {}
-  }
-
   List<InventoryItem> get unassignedItems => _items
       .where((item) => item.shelfLevel == null || item.shelfLevel!.isEmpty)
       .toList();
@@ -1972,7 +1949,6 @@ class InventoryController {
     String? model,
     String? productSize,
     String? shelfLevel,
-    String? binNumber,
     String? imageUrl,
     String? unit,
   }) {
@@ -1987,7 +1963,6 @@ class InventoryController {
       model: model,
       productSize: productSize,
       shelfLevel: shelfLevel,
-      binNumber: binNumber,
       imageUrl: imageUrl,
       unit: unit,
     );
@@ -2005,7 +1980,6 @@ class InventoryController {
     String? model,
     String? productSize,
     String? shelfLevel,
-    String? binNumber,
     String? imageUrl,
     String unit = 'pcs',
   }) {
@@ -2025,7 +1999,6 @@ class InventoryController {
       model: model,
       productSize: productSize,
       shelfLevel: shelfLevel,
-      binNumber: binNumber,
       imageUrl: imageUrl ?? '',
       unit: unit,
     );

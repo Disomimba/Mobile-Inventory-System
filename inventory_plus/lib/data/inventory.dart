@@ -2,6 +2,25 @@ import 'package:flutter/material.dart';
 
 enum ElementType { door, rack, shelf, cashier, wall }
 
+/// Door variants use distinct fixed footprints, so the width already saved in
+/// existing layouts also identifies which model to render.
+enum DoorStyle {
+  single(80.0, 'Single'),
+  doubleDoor(160.0, 'Double'),
+  loading(240.0, 'Loading');
+
+  const DoorStyle(this.width, this.label);
+
+  final double width;
+  final String label;
+
+  static DoorStyle fromWidth(double width) {
+    if (width < 120) return DoorStyle.single;
+    if (width < 200) return DoorStyle.doubleDoor;
+    return DoorStyle.loading;
+  }
+}
+
 class MapElement {
   final String id;
   final ElementType type;
@@ -46,7 +65,7 @@ class MapElement {
     'height': size.height,
     'label': label,
     'rotation': rotation,
-  };  
+  };
 
   factory MapElement.fromJson(Map<String, dynamic> json) => MapElement(
     id: json['id'],
@@ -64,18 +83,6 @@ class MapElement {
   );
 }
 
-class ItemLocation {
-  final String aisle;
-  final int shelf;
-  final String section;
-
-  ItemLocation({
-    required this.aisle,
-    required this.shelf,
-    required this.section,
-  });
-}
-
 class InventoryItem {
   final String id;
   final String name;
@@ -86,13 +93,11 @@ class InventoryItem {
   final String category;
   final String description;
   final String imageUrl;
-  final ItemLocation? location;
   final String? locationId;
   final String? manufacturer;
   final String? model;
   final String? productSize;
   final String? shelfLevel;
-  final String? binNumber;
   final String unit;
 
   InventoryItem({
@@ -105,13 +110,11 @@ class InventoryItem {
     required this.category,
     required this.description,
     required this.imageUrl,
-    this.location,
     this.locationId,
     this.manufacturer,
     this.model,
     this.productSize,
     this.shelfLevel,
-    this.binNumber,
     this.unit = 'pcs',
   });
 
@@ -133,7 +136,6 @@ class InventoryItem {
       model: map['model'],
       productSize: map['product_size'],
       shelfLevel: map['shelf_level'],
-      binNumber: map['bin_number'],
       unit: map['unit'] ?? 'pcs',
     );
   }
@@ -152,7 +154,6 @@ class InventoryItem {
     String? model,
     String? productSize,
     String? shelfLevel,
-    String? binNumber,
     String? unit,
   }) {
     return InventoryItem(
@@ -170,7 +171,6 @@ class InventoryItem {
       model: model ?? this.model,
       productSize: productSize ?? this.productSize,
       shelfLevel: shelfLevel ?? this.shelfLevel,
-      binNumber: binNumber ?? this.binNumber,
       unit: unit ?? this.unit,
     );
   }
@@ -188,19 +188,25 @@ class CustomerOrderItem {
   });
 
   Map<String, dynamic> toJson() => {
-        'product_id': productId,
-        'product_name': productName,
-        'quantity': quantity,
-      };
+    'product_id': productId,
+    'product_name': productName,
+    'quantity': quantity,
+  };
 
-  factory CustomerOrderItem.fromJson(Map<String, dynamic> json) =>
-      CustomerOrderItem(
-        // The fallback ?? checks ensure it can read both your old format and the new format
-        productId: json['product_id']?.toString() ?? json['productId']?.toString() ?? '',
-        productName: json['product_name']?.toString() ?? json['productName']?.toString() ?? 'Unknown',
-        quantity: (json['quantity'] as num?)?.toDouble() ?? 0.0,
-      );
+  factory CustomerOrderItem.fromJson(
+    Map<String, dynamic> json,
+  ) => CustomerOrderItem(
+    // The fallback ?? checks ensure it can read both your old format and the new format
+    productId:
+        json['product_id']?.toString() ?? json['productId']?.toString() ?? '',
+    productName:
+        json['product_name']?.toString() ??
+        json['productName']?.toString() ??
+        'Unknown',
+    quantity: (json['quantity'] as num?)?.toDouble() ?? 0.0,
+  );
 }
+
 class CustomerOrder {
   final String id;
   final List<CustomerOrderItem> items;

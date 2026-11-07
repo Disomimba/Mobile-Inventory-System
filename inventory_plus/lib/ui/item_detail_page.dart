@@ -4,15 +4,14 @@ import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../../data/inventory.dart';
 import '../../logic/inventory_controller.dart';
-import '../../logic/inventory_approval.dart';
 import 'package:image_picker/image_picker.dart';
 import 'dart:io';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/services.dart';
 import 'package:inventory_plus/ui/widgets/app_toast.dart';
 import 'package:inventory_plus/ui/widgets/app_dialog.dart';
-import 'package:inventory_plus/ui/widgets/approval_proof_picker.dart';
 import 'package:inventory_plus/ui/widgets/restock_request_dialog.dart';
+import 'package:inventory_plus/ui/widgets/write_off_request_dialog.dart';
 import 'package:inventory_plus/services/app_error_mapper.dart';
 import 'package:inventory_plus/services/app_logger.dart';
 import 'store_map.dart'; // Adjust the path if necessary depending on your folder structure
@@ -48,9 +47,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
   StreamSubscription<void>? _transactionHistorySubscription;
   List<Map<String, dynamic>> _transactionHistory = [];
   final ValueNotifier<List<Map<String, dynamic>>> _transactionHistoryNotifier =
-      ValueNotifier<List<Map<String, dynamic>>>(
-        const <Map<String, dynamic>>[],
-      );
+      ValueNotifier<List<Map<String, dynamic>>>(const <Map<String, dynamic>>[]);
   bool _isLoadingHistory = true;
   bool _isClosing = false;
 
@@ -59,7 +56,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
 
   bool _isSaving = false;
   bool get _isDisabled => widget.controller.isDisabled(_currentItem.id);
-  
+
   String? _newImageUrl;
   XFile? _selectedImage;
   final ImagePicker _picker = ImagePicker();
@@ -121,8 +118,9 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
   void _resolveCurrentItem() {
     if (!mounted || _isClosing) return;
 
-    final InventoryItem? latest =
-        widget.controller.findAnyItemById(_currentItem.id);
+    final InventoryItem? latest = widget.controller.findAnyItemById(
+      _currentItem.id,
+    );
 
     if (latest == null) {
       _isClosing = true;
@@ -156,41 +154,6 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
     controller: widget.controller,
     item: _currentItem,
   );
-
-  Widget _stockSummary(
-    String label,
-    String value,
-    Color color, {
-    bool alignEnd = false,
-  }) {
-    return Column(
-      crossAxisAlignment: alignEnd
-          ? CrossAxisAlignment.end
-          : CrossAxisAlignment.start,
-      children: [
-        Text(
-          label,
-          style: TextStyle(
-            fontSize: 10,
-            fontWeight: FontWeight.w700,
-            letterSpacing: 0.8,
-            color: Colors.grey.shade500,
-            fontFamily: _fontFam,
-          ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          value,
-          style: TextStyle(
-            fontSize: 18,
-            fontWeight: FontWeight.w800,
-            color: color,
-            fontFamily: _fontFam,
-          ),
-        ),
-      ],
-    );
-  }
 
   Future<void> _loadHistory({bool force = false}) async {
     if (!mounted) return;
@@ -530,11 +493,10 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
   }
 
   Future<void> _handleSave() async {
-
     if (!_validate()) {
-    _toast('Please fix the highlighted fields', isError: true);
-    return;
-  }
+      _toast('Please fix the highlighted fields', isError: true);
+      return;
+    }
 
     setState(() => _isSaving = true);
 
@@ -543,7 +505,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
 
       if (_newImageUrl != null && _newImageUrl != _currentItem.imageUrl) {
         if (_newImageUrl!.isEmpty) {
-           finalImageUrl = '';
+          finalImageUrl = '';
         } else if (!_newImageUrl!.startsWith('http')) {
           final String fileName = _nameController.text.isNotEmpty
               ? '${_nameController.text}_image.jpg'
@@ -576,13 +538,14 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
         newSku: _skuController.text,
         newPrice: _priceController.text,
         newStock: _stockController.text,
-        newMaxStock: _currentItem.maxQuantity.toString(), // Passes existing back safely
+        newMaxStock: _currentItem.maxQuantity
+            .toString(), // Passes existing back safely
         newDesc: _descController.text,
         manufacturer: _manufacturerController.text,
         model: _modelController.text,
         productSize: _sizeController.text,
-        shelfLevel: _currentItem.shelfLevel ?? '', // Passes existing back safely
-        binNumber: _currentItem.binNumber ?? '', // Passes existing back safely
+        shelfLevel:
+            _currentItem.shelfLevel ?? '', // Passes existing back safely
         imageUrl: finalImageUrl,
       );
 
@@ -624,7 +587,6 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
   String _fmt(double v) =>
       v == v.roundToDouble() ? v.toInt().toString() : v.toStringAsFixed(2);
 
-  
   bool _validate() {
     final errors = <String, String>{};
     if (_nameController.text.trim().isEmpty)
@@ -759,7 +721,8 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
             icon: const Icon(LucideIcons.check, color: Colors.greenAccent),
             onPressed: _handleSave,
           )
-        else if (widget.controller.currentUserRole?.toLowerCase() == 'admin' && !_isDisabled)
+        else if (widget.controller.currentUserRole?.toLowerCase() == 'admin' &&
+            !_isDisabled)
           IconButton(
             icon: const Icon(LucideIcons.pencil, color: Colors.white, size: 20),
             onPressed: () => setState(() => _isEditing = true),
@@ -835,15 +798,15 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
     final imageUrl = _newImageUrl ?? _currentItem.imageUrl;
 
     if (imageUrl.isEmpty) {
-  return Container(
-    color: Colors.grey.shade200,
-    child: const Icon(
-      Icons.image_not_supported,
-      color: Colors.grey,
-      size: 50,
-    ),
-  );
-}
+      return Container(
+        color: Colors.grey.shade200,
+        child: const Icon(
+          Icons.image_not_supported,
+          color: Colors.grey,
+          size: 50,
+        ),
+      );
+    }
 
     if (kIsWeb || imageUrl.startsWith('http')) {
       return Image.network(
@@ -881,7 +844,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
     Color color,
     TextEditingController controller, {
     String? errorKey,
-    bool isReadOnly = false
+    bool isReadOnly = false,
   }) {
     final error = errorKey == null ? null : _errors[errorKey];
     return Expanded(
@@ -906,7 +869,11 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                 children: [
                   Text(
                     label.toUpperCase(),
-                    style: const TextStyle(fontSize: 10, color: Colors.grey, fontFamily: _fontFam),
+                    style: const TextStyle(
+                      fontSize: 10,
+                      color: Colors.grey,
+                      fontFamily: _fontFam,
+                    ),
                   ),
                   if (_isEditing && error != null)
                     Padding(
@@ -933,7 +900,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                           },
                           style: const TextStyle(
                             fontWeight: FontWeight.bold,
-                            fontSize: 16,
+                            fontSize: 18,
                             fontFamily: _fontFam,
                           ),
                         )
@@ -941,7 +908,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                           value,
                           style: const TextStyle(
                             fontWeight: FontWeight.bold,
-                            fontSize: 18,
+                            fontSize: 16,
                             fontFamily: _fontFam,
                           ),
                         ),
@@ -972,7 +939,10 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
               SizedBox(width: 8),
               Text(
                 "Specifications",
-                style: TextStyle(fontWeight: FontWeight.bold, fontFamily: _fontFam),
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontFamily: _fontFam,
+                ),
               ),
             ],
           ),
@@ -1025,7 +995,10 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
               SizedBox(width: 8),
               Text(
                 "Inventory Info",
-                style: TextStyle(fontWeight: FontWeight.bold, fontFamily: _fontFam),
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontFamily: _fontFam,
+                ),
               ),
             ],
           ),
@@ -1037,7 +1010,12 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
             errorKey: 'name',
           ),
           const SizedBox(height: 16),
-          _buildField("SKU", _skuController, _currentItem.sku, isReadOnly: true),
+          _buildField(
+            "SKU",
+            _skuController,
+            _currentItem.sku,
+            isReadOnly: true,
+          ),
           const SizedBox(height: 16),
           _buildField(
             "Description",
@@ -1049,8 +1027,10 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
       ),
     );
   }
+
   Widget _buildLocationMapBox() {
-    final hasLocation = _currentItem.locationId != null && _currentItem.locationId!.isNotEmpty;
+    final hasLocation =
+        _currentItem.locationId != null && _currentItem.locationId!.isNotEmpty;
 
     return Container(
       width: double.infinity,
@@ -1073,7 +1053,10 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                     SizedBox(width: 8),
                     Text(
                       "Store Location",
-                      style: TextStyle(fontWeight: FontWeight.bold, fontFamily: _fontFam),
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontFamily: _fontFam,
+                      ),
                     ),
                   ],
                 ),
@@ -1081,7 +1064,10 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                   TextButton(
                     onPressed: _showFullscreenMap,
                     style: TextButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 4,
+                      ),
                       minimumSize: Size.zero,
                       tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                     ),
@@ -1097,7 +1083,11 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                           ),
                         ),
                         SizedBox(width: 4),
-                        Icon(LucideIcons.maximize, size: 14, color: _primaryBlue),
+                        Icon(
+                          LucideIcons.maximize,
+                          size: 14,
+                          color: _primaryBlue,
+                        ),
                       ],
                     ),
                   ),
@@ -1126,7 +1116,8 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
               child: StoreMap(
                 controller: widget.controller,
                 mode: MapMode.view,
-                selectedItemId: _currentItem.id, // Auto-opens the specific item's location
+                selectedItemId:
+                    _currentItem.id, // Auto-opens the specific item's location
                 fitEntireMap: true,
                 compactZoomControls: true,
               ),
@@ -1159,7 +1150,10 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                   SizedBox(width: 8),
                   Text(
                     "Transaction History",
-                    style: TextStyle(fontWeight: FontWeight.bold, fontFamily: _fontFam),
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontFamily: _fontFam,
+                    ),
                   ),
                 ],
               ),
@@ -1250,11 +1244,19 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
       ),
       title: Text(
         "${isPositive ? '+' : ''}$quantityChange  •  ${type.replaceAll('_', ' ').capitalize()}",
-        style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13, fontFamily: _fontFam),
+        style: const TextStyle(
+          fontWeight: FontWeight.w600,
+          fontSize: 13,
+          fontFamily: _fontFam,
+        ),
       ),
       subtitle: Text(
         "By $userName  •  $formattedDate",
-        style: TextStyle(fontSize: 11, color: Colors.grey.shade500, fontFamily: _fontFam),
+        style: TextStyle(
+          fontSize: 11,
+          color: Colors.grey.shade500,
+          fontFamily: _fontFam,
+        ),
       ),
       trailing: Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -1264,7 +1266,11 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
         ),
         child: Text(
           "Qty: ${transaction['new_quantity']}",
-          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, fontFamily: _fontFam),
+          style: const TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+            fontFamily: _fontFam,
+          ),
         ),
       ),
     );
@@ -1385,7 +1391,14 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label, style: const TextStyle(fontSize: 12, color: Colors.grey, fontFamily: _fontFam)),
+        Text(
+          label,
+          style: const TextStyle(
+            fontSize: 12,
+            color: Colors.grey,
+            fontFamily: _fontFam,
+          ),
+        ),
         (_isEditing && !isReadOnly)
             ? TextField(
                 controller: controller,
@@ -1426,23 +1439,56 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
   }
 
   Widget _buildBottomActions() {
-  final role = widget.controller.currentUserRole?.toLowerCase();
-  final isAdmin = role == 'admin';
-  final canRequest = role == 'helper' || role == 'staff' || role == 'cashier';
-  final disabled = _isDisabled;
+    final role = widget.controller.currentUserRole?.toLowerCase();
+    final isAdmin = role == 'admin';
+    final canRequest = role == 'helper' || role == 'staff' || role == 'cashier';
+    final disabled = _isDisabled;
 
-  final buttons = <Widget>[];
+    final buttons = <Widget>[];
 
-  if (!disabled) {
-    // Active item
-    if (canRequest) {
+    if (!disabled) {
+      // Active item
+      if (canRequest) {
+        buttons.add(
+          ElevatedButton.icon(
+            onPressed: _showRestockDialog,
+            icon: const Icon(LucideIcons.plus, size: 18),
+            label: const Text(
+              "Request Restock",
+              style: TextStyle(fontFamily: _fontFam),
+            ),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _primaryBlue,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(vertical: 16),
+            ),
+          ),
+        );
+        buttons.add(
+          OutlinedButton.icon(
+            onPressed: _currentItem.quantity > 0 ? _showWriteOffDialog : null,
+            icon: const Icon(LucideIcons.packageMinus, size: 18),
+            label: const Text(
+              "Request Write-off",
+              style: TextStyle(fontFamily: _fontFam),
+            ),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: Colors.red,
+              side: const BorderSide(color: Colors.red),
+              padding: const EdgeInsets.symmetric(vertical: 16),
+            ),
+          ),
+        );
+      }
+    } else if (isAdmin) {
+      // Legacy inactive item compatibility actions.
       buttons.add(
         ElevatedButton.icon(
-          onPressed: _showRestockDialog,
-          icon: const Icon(LucideIcons.plus, size: 18),
-          label: const Text("Request Restock", style: TextStyle(fontFamily: _fontFam)),
+          onPressed: _restoreItem,
+          icon: const Icon(LucideIcons.rotateCcw, size: 18),
+          label: const Text("Restore", style: TextStyle(fontFamily: _fontFam)),
           style: ElevatedButton.styleFrom(
-            backgroundColor: _primaryBlue,
+            backgroundColor: Colors.green,
             foregroundColor: Colors.white,
             padding: const EdgeInsets.symmetric(vertical: 16),
           ),
@@ -1450,9 +1496,9 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
       );
       buttons.add(
         OutlinedButton.icon(
-          onPressed: _currentItem.quantity > 0 ? _showWriteOffDialog : null,
-          icon: const Icon(LucideIcons.packageMinus, size: 18),
-          label: const Text("Request Write-off", style: TextStyle(fontFamily: _fontFam)),
+          onPressed: _showDeleteDialog,
+          icon: const Icon(LucideIcons.trash2, size: 18),
+          label: const Text("Delete", style: TextStyle(fontFamily: _fontFam)),
           style: OutlinedButton.styleFrom(
             foregroundColor: Colors.red,
             side: const BorderSide(color: Colors.red),
@@ -1461,57 +1507,31 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
         ),
       );
     }
-  } else if (isAdmin) {
-    // Legacy inactive item compatibility actions.
-    buttons.add(
-      ElevatedButton.icon(
-        onPressed: _restoreItem,
-        icon: const Icon(LucideIcons.rotateCcw, size: 18),
-        label: const Text("Restore", style: TextStyle(fontFamily: _fontFam)),
-        style: ElevatedButton.styleFrom(
-          backgroundColor: Colors.green,
-          foregroundColor: Colors.white,
-          padding: const EdgeInsets.symmetric(vertical: 16),
+
+    if (buttons.isEmpty) return const SizedBox.shrink();
+
+    return Positioned(
+      bottom: 0,
+      left: 0,
+      right: 0,
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          border: Border(top: BorderSide(color: Colors.grey.shade200)),
         ),
-      ),
-    );
-    buttons.add(
-      OutlinedButton.icon(
-        onPressed: _showDeleteDialog,
-        icon: const Icon(LucideIcons.trash2, size: 18),
-        label: const Text("Delete", style: TextStyle(fontFamily: _fontFam)),
-        style: OutlinedButton.styleFrom(
-          foregroundColor: Colors.red,
-          side: const BorderSide(color: Colors.red),
-          padding: const EdgeInsets.symmetric(vertical: 16),
+        child: Row(
+          children: [
+            for (var i = 0; i < buttons.length; i++) ...[
+              if (i > 0) const SizedBox(width: 8),
+              Expanded(child: buttons[i]),
+            ],
+          ],
         ),
       ),
     );
   }
 
-  if (buttons.isEmpty) return const SizedBox.shrink();
-
-  return Positioned(
-    bottom: 0,
-    left: 0,
-    right: 0,
-    child: Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border(top: BorderSide(color: Colors.grey.shade200)),
-      ),
-      child: Row(
-        children: [
-          for (var i = 0; i < buttons.length; i++) ...[
-            if (i > 0) const SizedBox(width: 8),
-            Expanded(child: buttons[i]),
-          ],
-        ],
-      ),
-    ),
-  );
-}
   Future<void> _restoreItem() async {
     final overlay = Overlay.of(context, rootOverlay: true);
     final name = _currentItem.name;
@@ -1537,7 +1557,8 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
         icon: LucideIcons.trash2,
         color: Colors.red,
         title: 'Delete permanently?',
-        subtitle: "This permanently removes the legacy inactive item. Its past sales will show as Deleted item in the dashboard and activity log.",
+        subtitle:
+            "This permanently removes the legacy inactive item. Its past sales will show as Deleted item in the dashboard and activity log.",
         actions: [
           OutlinedButton(
             onPressed: () => Navigator.pop(dialogContext, false),
@@ -1556,7 +1577,10 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
             icon: const Icon(LucideIcons.trash2, size: 16),
             label: const Text(
               'Delete',
-              style: TextStyle(fontWeight: FontWeight.bold, fontFamily: _fontFam),
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                fontFamily: _fontFam,
+              ),
             ),
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.red,
@@ -1595,7 +1619,11 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                   const SizedBox(height: 4),
                   Text(
                     '${_currentItem.sku}  •  ${_fmt(_currentItem.quantity)} ${_currentItem.unit} in stock',
-                    style: TextStyle(fontSize: 12, color: Colors.grey.shade600, fontFamily: _fontFam),
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey.shade600,
+                      fontFamily: _fontFam,
+                    ),
                   ),
                 ],
               ),
@@ -1603,7 +1631,11 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
             const SizedBox(height: 14),
             Text(
               'This permanently removes the item from your inventory.',
-              style: TextStyle(fontSize: 13, color: Colors.grey.shade700, fontFamily: _fontFam),
+              style: TextStyle(
+                fontSize: 13,
+                color: Colors.grey.shade700,
+                fontFamily: _fontFam,
+              ),
             ),
           ],
         ),
@@ -1630,331 +1662,12 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
     }
   }
 
-  Future<void> _showWriteOffDialog() async {
-    final qtyCtrl = TextEditingController();
-    final noteCtrl = TextEditingController();
-    final unit = _currentItem.unit;
+  Future<void> _showWriteOffDialog() => showWriteOffRequestDialog(
+    context: context,
+    controller: widget.controller,
+    item: _currentItem,
+  );
 
-    const reasons = ['Damaged', 'Expired', 'Lost', 'Other'];
-    String reason = reasons.first;
-    bool saving = false;
-    bool uploadingProof = false;
-    bool touched = false;
-    String? error;
-    ApprovalProofSelection? proof;
-    final operationId = widget.controller.newOperationId(
-      'inventory-approval',
-    );
-
-    String? validate(String text) {
-      final t = text.trim();
-      if (t.isEmpty) return 'Enter the quantity to remove';
-      final v = double.tryParse(t);
-      if (v == null) return 'Enter a valid number';
-      if (v <= 0) return 'Must be greater than 0';
-      if (v > _currentItem.quantity) {
-        return 'Only ${_fmt(_currentItem.quantity)} $unit in stock';
-      }
-      return null;
-    }
-
-    await showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (dialogContext) => StatefulBuilder(
-        builder: (ctx, setDialogState) {
-          final value = double.tryParse(qtyCtrl.text.trim());
-          final remaining =
-              (value != null && value > 0 && value <= _currentItem.quantity)
-              ? _currentItem.quantity - value
-              : null;
-          final canSubmit =
-              validate(qtyCtrl.text) == null && proof != null && !saving;
-
-          Future<void> submit() async {
-            touched = true;
-            final err = validate(qtyCtrl.text);
-            if (err != null || proof == null) {
-              setDialogState(() => error = err);
-              return;
-            }
-            setDialogState(() {
-              error = null;
-              saving = true;
-              uploadingProof = true;
-            });
-            try {
-              final qty = double.parse(qtyCtrl.text.trim());
-              final selectedProof = proof!;
-              final proofPath = await widget.controller.uploadApprovalEvidence(
-                operationId: operationId,
-                bytes: selectedProof.bytes,
-                fileName: selectedProof.fileName,
-                mimeType: selectedProof.mimeType,
-              );
-              if (dialogContext.mounted) {
-                setDialogState(() => uploadingProof = false);
-              }
-              await widget.controller.submitInventoryApprovalRequest(
-                operationId: operationId,
-                type: InventoryApprovalType.writeOff,
-                productId: _currentItem.id,
-                quantity: qty,
-                reason: reason,
-                note: noteCtrl.text,
-                proofStoragePath: proofPath,
-                proofFileName: selectedProof.fileName,
-                proofMimeType: selectedProof.mimeType,
-              );
-              if (!mounted) return;
-              if (dialogContext.mounted) Navigator.pop(dialogContext);
-              _toast(
-                'Write-off request submitted. Inventory remains unchanged '
-                'until Admin approval.',
-              );
-            } catch (e, stackTrace) {
-              AppLogger.error(
-                'Write-off approval request failed',
-                error: e,
-                stackTrace: stackTrace,
-              );
-              if (dialogContext.mounted) {
-                setDialogState(() {
-                  saving = false;
-                  uploadingProof = false;
-                });
-              }
-              _toast(
-                AppErrorMapper.message(
-                  e,
-                  fallback: AppErrorCategory.dataSave,
-                ),
-                isError: true,
-              );
-            }
-          }
-
-          OutlineInputBorder border(Color c, [double w = 1]) =>
-              OutlineInputBorder(
-                borderRadius: BorderRadius.circular(10),
-                borderSide: BorderSide(color: c, width: w),
-              );
-
-          return AppDialog(
-            icon: LucideIcons.packageMinus,
-            color: Colors.red,
-            title: 'Request write-off',
-            subtitle: _currentItem.name,
-            actions: [
-              OutlinedButton(
-                onPressed: saving ? null : () => Navigator.pop(dialogContext),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: Colors.black87,
-                  side: BorderSide(color: Colors.grey.shade300),
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                ),
-                child: const Text('Cancel', style: TextStyle(fontFamily: _fontFam)),
-              ),
-              ElevatedButton(
-                onPressed: canSubmit ? submit : null,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.red,
-                  foregroundColor: Colors.white,
-                  elevation: 0,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                ),
-                child: saving
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Colors.white,
-                        ),
-                      )
-                    : const Text(
-                        'Submit for Approval',
-                        style: TextStyle(fontWeight: FontWeight.bold, fontFamily: _fontFam),
-                      ),
-              ),
-            ],
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFF8FAFC),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.grey.shade200),
-                  ),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: _stockSummary(
-                          'CURRENT',
-                          '${_fmt(_currentItem.quantity)} $unit',
-                          const Color(0xFF0F172A),
-                        ),
-                      ),
-                      Icon(
-                        LucideIcons.arrowRight,
-                        size: 18,
-                        color: Colors.grey.shade400,
-                      ),
-                      Expanded(
-                        child: _stockSummary(
-                          'AFTER',
-                          remaining == null ? '—' : '${_fmt(remaining)} $unit',
-                          remaining == null ? Colors.grey : Colors.red.shade700,
-                          alignEnd: true,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 20),
-                const Text(
-                  'Reason',
-                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, fontFamily: _fontFam),
-                ),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 8,
-                  children: reasons
-                      .map(
-                        (r) => ChoiceChip(
-                          label: Text(r),
-                          selected: reason == r,
-                          selectedColor: Colors.red.withOpacity(0.12),
-                          labelStyle: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                            color: reason == r
-                                ? Colors.red.shade700
-                                : Colors.black87,
-                            fontFamily: _fontFam,
-                          ),
-                          onSelected: saving
-                              ? null
-                              : (_) => setDialogState(() => reason = r),
-                        ),
-                      )
-                      .toList(),
-                ),
-                const SizedBox(height: 20),
-                const Text(
-                  'Quantity to remove',
-                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, fontFamily: _fontFam),
-                ),
-                if (error != null)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 6),
-                    child: Row(
-                      children: [
-                        const Icon(
-                          LucideIcons.alertCircle,
-                          size: 13,
-                          color: Colors.red,
-                        ),
-                        const SizedBox(width: 6),
-                        Flexible(
-                          child: Text(
-                            error!,
-                            style: const TextStyle(
-                              color: Colors.red,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                              fontFamily: _fontFam,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: qtyCtrl,
-                  autofocus: true,
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
-                  ),
-                  inputFormatters: [
-                    // digits with at most one decimal point
-                    FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}')),
-                  ],
-                  onChanged: (text) => setDialogState(() {
-                    if (touched) error = validate(text);
-                  }),
-                  style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    fontFamily: _fontFam,
-                  ),
-                  decoration: InputDecoration(
-                    hintText: '0',
-                    hintStyle: const TextStyle(fontFamily: _fontFam),
-                    suffixText: unit,
-                    filled: true,
-                    fillColor: Colors.white,
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 14,
-                      vertical: 14,
-                    ),
-                    enabledBorder: border(
-                      error != null ? Colors.red : Colors.grey.shade300,
-                    ),
-                    focusedBorder: border(
-                      error != null ? Colors.red : Colors.red.shade300,
-                      1.5,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: noteCtrl,
-                  maxLines: 2,
-                  style: const TextStyle(fontFamily: _fontFam),
-                  decoration: InputDecoration(
-                    hintText: 'Note (optional), e.g. dropped during unloading',
-                    hintStyle: TextStyle(
-                      fontSize: 13,
-                      color: Colors.grey.shade500,
-                      fontFamily: _fontFam,
-                    ),
-                    filled: true,
-                    fillColor: Colors.white,
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 14,
-                      vertical: 12,
-                    ),
-                    enabledBorder: border(Colors.grey.shade300),
-                    focusedBorder: border(Colors.red.shade300, 1.5),
-                  ),
-                ),
-                const SizedBox(height: 20),
-                ApprovalProofPicker(
-                  busy: uploadingProof,
-                  onChanged: (selection) {
-                    setDialogState(() => proof = selection);
-                  },
-                ),
-              ],
-            ),
-          );
-        },
-      ),
-    );
-
-    qtyCtrl.dispose();
-    noteCtrl.dispose();
-  }
   void _showFullscreenMap() {
     showDialog(
       context: context,
@@ -1968,18 +1681,26 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
             children: [
               Container(
                 color: const Color(0xFF0F172A),
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 12,
+                ),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Text(
                       'Location: ${_currentItem.name}',
-                      style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold, fontFamily: _fontFam),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        fontFamily: _fontFam,
+                      ),
                     ),
                     IconButton(
                       icon: const Icon(Icons.close, color: Colors.white),
                       onPressed: () => Navigator.pop(dialogContext),
-                    )
+                    ),
                   ],
                 ),
               ),
@@ -1987,7 +1708,8 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                 child: StoreMap(
                   controller: widget.controller,
                   mode: MapMode.view,
-                  selectedItemId: _currentItem.id, // Auto-opens the specific item's location
+                  selectedItemId: _currentItem
+                      .id, // Auto-opens the specific item's location
                   fitEntireMap: true,
                 ),
               ),

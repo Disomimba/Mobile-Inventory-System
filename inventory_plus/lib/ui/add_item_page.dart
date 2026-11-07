@@ -404,7 +404,6 @@ class _AddItemPageState extends State<AddItemPage> {
         model: _modelController.text.trim(),
         productSize: _sizeController.text.trim(),
         shelfLevel: '', // Default empty value
-        binNumber: '', // Default empty value
         imageUrl: finalImageUrl ?? '',
         unit: _selectedUnit,
       );
