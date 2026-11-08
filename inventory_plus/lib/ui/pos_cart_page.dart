@@ -1370,7 +1370,8 @@ class _PosCartPageState extends State<PosCartPage>
                         children: [
                           buildPaymentTile('Cash', LucideIcons.banknote),
                           const SizedBox(width: 8),
-                          buildPaymentTile('GCash', LucideIcons.smartphone),
+                          if (widget.controller.gcashEnabled)
+                            buildPaymentTile('GCash', LucideIcons.smartphone),
                         ],
                       ),
 

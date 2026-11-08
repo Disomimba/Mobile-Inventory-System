@@ -12,6 +12,8 @@ import 'package:flutter/foundation.dart' show debugPrint, debugPrintStack;
 import '../services/app_error_mapper.dart';
 import '../services/app_logger.dart';
 
+part 'system_settings_dashboard.dart';
+
 const Color _primaryBlue = Color(0xFF2563EB);
 const String _fontFam = 'Hellix';
 
@@ -38,6 +40,19 @@ class SystemSettingsPage extends StatefulWidget {
 }
 
 class _SystemSettingsPageState extends State<SystemSettingsPage> {
+  _SettingsSection _selectedSettingsSection = _SettingsSection.stock;
+  Map<int, StoreDayHours> _weeklyHoursDraft = {};
+  bool _autoAssignOrders = true;
+  int _maxHelperOrders = 3;
+  double _maxApprovedDiscount = 25;
+  bool _gcashEnabled = true;
+  final _gcashAccountCtrl = TextEditingController();
+  final _gcashNumberCtrl = TextEditingController();
+  final _gcashMerchantCtrl = TextEditingController();
+  final Map<String, TextEditingController> _cashierLimitCtrls = {};
+  bool _isLoadingDashboardExtras = true;
+  bool _isSavingDashboard = false;
+  String? _dashboardError;
   bool _storeAccessExpanded = true;
   bool _staffExpanded = true;
   bool _thresholdsExpanded = true;
@@ -136,6 +151,7 @@ class _SystemSettingsPageState extends State<SystemSettingsPage> {
     );
     _fetchSettings();
     _fetchStoreAccessSettings();
+    _loadDashboardExtras();
   }
 
   @override
@@ -148,6 +164,12 @@ class _SystemSettingsPageState extends State<SystemSettingsPage> {
     _lowPercentCtrl.dispose();
     _criticalPercentCtrl.dispose();
     _discountLimitCtrl.dispose();
+    _gcashAccountCtrl.dispose();
+    _gcashNumberCtrl.dispose();
+    _gcashMerchantCtrl.dispose();
+    for (final controller in _cashierLimitCtrls.values) {
+      controller.dispose();
+    }
     super.dispose();
   }
 
@@ -189,7 +211,13 @@ class _SystemSettingsPageState extends State<SystemSettingsPage> {
         int.tryParse(_afterMinutesCtrl.text) !=
             baseline.staffAccessAfterMinutes ||
         _restrictStaffLogin != baseline.restrictStaffLogin ||
-        _allowAdminAnytime != baseline.allowAdminAnytime;
+        _allowAdminAnytime != baseline.allowAdminAnytime ||
+        _weeklyHoursDraft.entries.any((entry) {
+          final previous = baseline.hoursForWeekday(entry.key);
+          return entry.value.openingTime != previous.openingTime ||
+              entry.value.closingTime != previous.closingTime ||
+              entry.value.closed != previous.closed;
+        });
   }
 
   bool _sameStoreAccess(StoreAccessSettings left, StoreAccessSettings right) {
@@ -199,7 +227,13 @@ class _SystemSettingsPageState extends State<SystemSettingsPage> {
         left.staffAccessBeforeMinutes == right.staffAccessBeforeMinutes &&
         left.staffAccessAfterMinutes == right.staffAccessAfterMinutes &&
         left.restrictStaffLogin == right.restrictStaffLogin &&
-        left.allowAdminAnytime == right.allowAdminAnytime;
+        left.allowAdminAnytime == right.allowAdminAnytime &&
+        List.generate(7, (index) => index + 1).every((day) {
+          final a = left.hoursForWeekday(day);
+          final b = right.hoursForWeekday(day);
+          return a.openingTime == b.openingTime &&
+              a.closingTime == b.closingTime && a.closed == b.closed;
+        });
   }
 
   void _handleRuntimeSettingsSnapshot(
@@ -317,6 +351,9 @@ class _SystemSettingsPageState extends State<SystemSettingsPage> {
       _storeAccessBaseline = settings;
       _openingTime = _parseClockTime(settings.openingTime);
       _closingTime = _parseClockTime(settings.closingTime);
+      _weeklyHoursDraft = {
+        for (var day = 1; day <= 7; day++) day: settings.hoursForWeekday(day),
+      };
       _beforeMinutesCtrl.text = settings.staffAccessBeforeMinutes.toString();
       _afterMinutesCtrl.text = settings.staffAccessAfterMinutes.toString();
       _restrictStaffLogin = settings.restrictStaffLogin;
@@ -761,6 +798,11 @@ class _SystemSettingsPageState extends State<SystemSettingsPage> {
       return;
     }
 
+    if (_weeklyHoursDraft.values.every((day) => day.closed)) {
+      setState(() => _storeAccessError = 'Keep at least one day open.');
+      return;
+    }
+
     setState(() {
       _isSavingStoreAccess = true;
       _storeAccessError = null;
@@ -775,6 +817,7 @@ class _SystemSettingsPageState extends State<SystemSettingsPage> {
         staffAccessAfterMinutes: afterMinutes,
         restrictStaffLogin: _restrictStaffLogin,
         allowAdminAnytime: _allowAdminAnytime,
+        weeklyHours: _weeklyHoursDraft,
       );
 
       final latest = await widget.storeAccessService.refreshSettings();
@@ -2909,7 +2952,10 @@ class _SystemSettingsPageState extends State<SystemSettingsPage> {
 
   // ─── UI BUILDER ────────────────────────────────────────────────────────────
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => _buildSettingsDashboard(context);
+
+  // ignore: unused_element
+  Widget _buildLegacySettings(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFF4F6F8),
       body: (_isLoadingSettings)

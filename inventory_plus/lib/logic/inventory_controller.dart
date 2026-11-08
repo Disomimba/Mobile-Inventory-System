@@ -275,6 +275,7 @@ class InventoryController {
   Map<String, double> _baselineByProduct = {};
 
   String gcashQrUrl = '';
+  bool gcashEnabled = true;
   double cashierAutoApprovedDiscountLimitPct = 10.0;
 
   Future<void> loadStoreSettings() async {
@@ -516,6 +517,35 @@ class InventoryController {
     _publishRuntimeSettings();
   }
 
+  Future<void> saveSettingsDashboardExtras({
+    required bool autoAssignOrders,
+    required int maxHelperOrders,
+    required double maxApprovedDiscount,
+    required double defaultCashierLimit,
+    required bool acceptGcash,
+    required String gcashAccountName,
+    required String gcashNumber,
+    required String gcashMerchantId,
+    required Map<String, double> cashierLimits,
+  }) async {
+    await supabase.rpc('update_settings_dashboard_v1', params: {
+      'p_session_token': _requireSessionToken(),
+      'p_auto_assign_orders': autoAssignOrders,
+      'p_max_helper_orders': maxHelperOrders,
+      'p_max_approved_discount': maxApprovedDiscount,
+      'p_default_cashier_limit': defaultCashierLimit,
+      'p_gcash_enabled': acceptGcash,
+      'p_gcash_account_name': gcashAccountName.trim(),
+      'p_gcash_number': gcashNumber.trim(),
+      'p_gcash_merchant_id': gcashMerchantId.trim(),
+      'p_cashier_limits': cashierLimits,
+    });
+    gcashEnabled = acceptGcash;
+    cashierAutoApprovedDiscountLimitPct = defaultCashierLimit;
+    _paymentSettingsLoaded = false;
+    await _refreshPaymentSettings();
+  }
+
   Future<void> Function({
     required String locationId,
     required String transactionId,
@@ -664,6 +694,7 @@ class InventoryController {
     _clearStaffConfigurationSnapshot();
     _clearApprovalState();
     gcashQrUrl = '';
+    gcashEnabled = true;
     cashierAutoApprovedDiscountLimitPct = 10.0;
     _paymentSettingsLoaded = false;
     _publishRuntimeSettings();
@@ -816,16 +847,44 @@ class InventoryController {
 
   Future<void> _performPaymentRefresh() async {
     final locationId = activeLocationId;
+    final accountId = currentUserNumericId;
     if (locationId == null) return;
     try {
-      final response = await supabase
-          .from('store_settings')
-          .select('gcash_qr_url, cashier_auto_approved_discount_limit_pct')
-          .eq('location_id', locationId)
-          .maybeSingle();
-      if (activeLocationId != locationId) return;
+      Map<String, dynamic>? response;
+      try {
+        response = await supabase
+            .from('store_settings')
+            .select('gcash_qr_url, cashier_auto_approved_discount_limit_pct, gcash_enabled')
+            .eq('location_id', locationId)
+            .maybeSingle();
+      } catch (_) {
+        response = await supabase
+            .from('store_settings')
+            .select('gcash_qr_url, cashier_auto_approved_discount_limit_pct')
+            .eq('location_id', locationId)
+            .maybeSingle();
+      }
+      double? cashierOverride;
+      if (accountId != null) {
+        try {
+          final profile = await supabase
+              .from('profiles')
+              .select('cashier_discount_limit_pct')
+              .eq('id', accountId)
+              .eq('location_id', locationId)
+              .maybeSingle();
+          cashierOverride =
+              (profile?['cashier_discount_limit_pct'] as num?)?.toDouble();
+        } catch (_) {
+          // Older databases have no per-cashier override column yet.
+        }
+      }
+      if (activeLocationId != locationId || currentUserNumericId != accountId) {
+        return;
+      }
       gcashQrUrl = response?['gcash_qr_url']?.toString() ?? '';
-      cashierAutoApprovedDiscountLimitPct =
+      gcashEnabled = response?['gcash_enabled'] != false;
+      cashierAutoApprovedDiscountLimitPct = cashierOverride ??
           (response?['cashier_auto_approved_discount_limit_pct'] as num?)
               ?.toDouble() ??
           10.0;
