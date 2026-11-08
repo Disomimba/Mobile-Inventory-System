@@ -10,6 +10,7 @@ CREATE TABLE "public"."profiles" (
   "phone"                text,
   "address"              text,
   "must_change_password" boolean                  NOT NULL DEFAULT false,
+  "is_active"            boolean                  NOT NULL DEFAULT true,
   CONSTRAINT "profiles_email_key" UNIQUE (email),
   CONSTRAINT "profiles_location_id_fkey" FOREIGN KEY (location_id) REFERENCES public.locations(id),
   CONSTRAINT "profiles_pkey" PRIMARY KEY (id),

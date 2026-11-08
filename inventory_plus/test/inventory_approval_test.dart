@@ -29,6 +29,12 @@ void main() {
     'lib/notifications/notification_repository.dart',
   ).readAsStringSync();
   final requesterUi = File('lib/ui/item_detail_page.dart').readAsStringSync();
+  final restockUi = File(
+    'lib/ui/widgets/restock_request_dialog.dart',
+  ).readAsStringSync();
+  final writeOffUi = File(
+    'lib/ui/widgets/write_off_request_dialog.dart',
+  ).readAsStringSync();
   final approvalUi = File(
     'lib/ui/approval_center_page.dart',
   ).readAsStringSync();
@@ -52,7 +58,7 @@ void main() {
     expect(create, contains("v_type not in ('restock', 'write_off')"));
     expect(create, isNot(contains('update public.products')));
     expect(create, isNot(contains('insert into public.transaction_history')));
-    expect(requesterUi, contains('InventoryApprovalType.restock'));
+    expect(restockUi, contains('InventoryApprovalType.restock'));
   });
 
   test('Cashier creates Write-off request without changing quantity', () {
@@ -63,7 +69,7 @@ void main() {
     );
     expect(create, contains("v_type = 'write_off'"));
     expect(create, isNot(contains('update public.products')));
-    expect(requesterUi, contains('InventoryApprovalType.writeOff'));
+    expect(writeOffUi, contains('InventoryApprovalType.writeOff'));
   });
 
   test('approval SQL and Dart use live UUID identifier contracts', () {
@@ -103,7 +109,10 @@ void main() {
   });
 
   test('evidence uses private storage and scoped signed previews', () {
-    expect(evidenceMigration, contains("'approval_evidence',\n  false"));
+    expect(
+      evidenceMigration,
+      matches(RegExp(r"'approval_evidence',\s*'approval_evidence',\s*false")),
+    );
     expect(
       evidenceMigration,
       contains('inventory_approval_evidence_access_v1'),
@@ -114,11 +123,11 @@ void main() {
     expect(controller, isNot(contains('approvalEvidencePublicUrl')));
   });
 
-  test('Approval Center requires proof viewing before review actions', () {
-    expect(approvalUi, contains('Approval Center'));
-    expect(approvalUi, contains('No proof — legacy request'));
-    expect(approvalUi, contains('_viewedRequests.contains(request.id)'));
-    expect(approvalUi, contains('fetchApprovalEvidenceUrl(request.id)'));
+  test('Approval panel shows evidence and requires a rejection note', () {
+    expect(approvalUi, contains('Supporting image'));
+    expect(approvalUi, contains('No image attached'));
+    expect(approvalUi, contains('_proofUrl(request)'));
+    expect(approvalUi, contains('Add a note before rejecting this request.'));
   });
 
   test('Admin approves Restock and quantity increases once', () {

@@ -47,7 +47,7 @@ import 'widgets/active_staff_button.dart';
 import '../services/store_access_service.dart';
 import '../services/main_section_url.dart';
 import 'staff_history_page.dart';
-import 'staff_performance_page.dart';
+import 'staff_page.dart';
 import '../services/realtime/realtime_sync_service.dart';
 
 class MainScreen extends StatefulWidget {
@@ -85,6 +85,9 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   StoreAccessService? _storeAccessService;
   StreamSubscription<StoreAccessSettings>? _storeAccessSubscription;
   StreamSubscription<CurrentUserProfileSnapshot?>? _currentProfileSubscription;
+  StreamSubscription<void>? _approvalCountSubscription;
+  int _pendingApprovalCount = 0;
+  bool _approvalCountLoading = false;
   late final String _sessionRole;
   late final List<MainSection> _mainSections;
   CurrentUserProfileSnapshot? _currentProfile;
@@ -180,6 +183,12 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     _currentProfileSubscription = widget.controller.currentUserProfileSnapshots
         .listen(_handleCurrentProfileChange);
 
+    if (widget.controller.isAdmin) {
+      _approvalCountSubscription = widget.realtimeSync.approvalRequestChanges
+          .listen((_) => unawaited(_refreshPendingApprovalCount()));
+      unawaited(_refreshPendingApprovalCount());
+    }
+
     if (locationId != null && userId != null && role != null) {
       _notificationController = NotificationBootstrap.create(
         locationId: locationId,
@@ -259,6 +268,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     unawaited(_inventoryNotificationSubscription?.cancel());
     unawaited(_storeAccessSubscription?.cancel());
     unawaited(_currentProfileSubscription?.cancel());
+    unawaited(_approvalCountSubscription?.cancel());
     unawaited(_storeAccessService?.dispose());
     if (!_deferredControllerData.isCompleted) {
       _deferredControllerData.complete();
@@ -373,7 +383,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
           return 'Approval Center';
 
         case 6:
-          return 'Staff Performance';
+          return 'Staff';
 
         case 7:
           return 'Transactions';
@@ -2386,11 +2396,21 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         );
 
         if (isAdmin) {
-          pages.add(ApprovalCenterPage(controller: widget.controller));
           pages.add(
-            StaffPerformancePage(
+            ApprovalCenterPage(
+              controller: widget.controller,
+              onPendingCountChanged: (count) {
+                if (mounted && count != _pendingApprovalCount) {
+                  setState(() => _pendingApprovalCount = count);
+                }
+              },
+            ),
+          );
+          pages.add(
+            StaffPage(
               controller: widget.controller,
               isActive: _currentIndex == performanceIndex,
+              presence: _staffPresenceService,
             ),
           );
         }
@@ -3354,12 +3374,48 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
+                if (label == 'Approvals' && _pendingApprovalCount > 0)
+                  Container(
+                    constraints: const BoxConstraints(minWidth: 22),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 5,
+                      vertical: 3,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFC83D08),
+                      borderRadius: BorderRadius.circular(7),
+                    ),
+                    child: Text(
+                      '$_pendingApprovalCount',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
               ],
             ),
           ),
         ),
       ),
     );
+  }
+
+  Future<void> _refreshPendingApprovalCount() async {
+    if (_approvalCountLoading || !widget.controller.isAdmin) return;
+    _approvalCountLoading = true;
+    try {
+      final count = await widget.controller.fetchPendingApprovalCount();
+      if (mounted && count != _pendingApprovalCount) {
+        setState(() => _pendingApprovalCount = count);
+      }
+    } catch (error) {
+      debugPrint('[Approvals] Pending count load failed: $error');
+    } finally {
+      _approvalCountLoading = false;
+    }
   }
 
   Widget _buildProfileTile() {

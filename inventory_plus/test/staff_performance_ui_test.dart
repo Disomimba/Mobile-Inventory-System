@@ -101,7 +101,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.textContaining('5 ÷ 5 × 100'), findsOneWidget);
-      expect(find.textContaining('100.00 × 40% = 40.00'), findsOneWidget);
+      expect(find.textContaining('100.00 × 40% = 40.00'), findsWidgets);
     });
 
     testWidgets('score header explains formula and actual result', (
@@ -116,7 +116,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(
-        find.textContaining('Final Score = (On-Time × 40%)'),
+        find.textContaining(RegExp(r'Final Score\s*=\s*\(On-Time × 40%\)')),
         findsOneWidget,
       );
       expect(find.textContaining('= 91.50'), findsOneWidget);

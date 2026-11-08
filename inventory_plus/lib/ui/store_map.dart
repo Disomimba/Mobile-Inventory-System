@@ -28,7 +28,7 @@ enum MapSidebarAction {
 }
 
 // Updated to the soft light-blue background
-const Color kMapContainerBg = Color.fromARGB(255, 214, 235, 255);
+const Color kMapContainerBg = Color(0xFFF7F5F3);
 
 // Visual model heights are separate from the saved 2D footprints.
 const double _rack3DHeight = 6.0;
@@ -80,6 +80,8 @@ class StoreMap extends StatefulWidget {
   final Function(MapElement)? onElementSelected;
   final ValueChanged<MapElement?>? onManageSelectionChanged;
   final VoidCallback? onLayoutEdited;
+  final ElementType? placementType;
+  final VoidCallback? onPlacementCompleted;
 
   const StoreMap({
     super.key,
@@ -100,6 +102,8 @@ class StoreMap extends StatefulWidget {
     this.onElementSelected,
     this.onManageSelectionChanged,
     this.onLayoutEdited,
+    this.placementType,
+    this.onPlacementCompleted,
   });
 
   @override
@@ -550,6 +554,32 @@ class StoreMapState extends State<StoreMap>
       _dragPreviewSize = null;
       _dragPreviewType = null;
     });
+  }
+
+  void _placeElementAt(Offset globalPosition, ElementType type) {
+    final size = _getDefaultSize(type);
+    final position = _paletteWorldPosition(globalPosition, size);
+    if (position == null) return;
+    final element = MapElement(
+      id: DateTime.now().microsecondsSinceEpoch.toString(),
+      type: type,
+      position: position,
+      size: size,
+      label: type.name.toUpperCase(),
+    );
+    final snapped = _snapObjectNearWall(element, position, size, 0);
+    if (_hasCollision(element, snapped, size, 0)) {
+      AppToast.error(context, 'Cannot place an element over another fixture.');
+      return;
+    }
+    element.position = snapped;
+    setState(() {
+      _layout.add(element);
+      _activeElementId = element.id;
+    });
+    widget.onManageSelectionChanged?.call(element);
+    widget.onLayoutEdited?.call();
+    widget.onPlacementCompleted?.call();
   }
 
   Offset _snapToGrid(Offset position, Size size, ElementType type) {
@@ -1097,6 +1127,16 @@ class StoreMapState extends State<StoreMap>
     });
     widget.onManageSelectionChanged?.call(null);
   }
+
+  void selectManageElement(String elementId) {
+    final matches = _layout.where((element) => element.id == elementId);
+    if (!mounted || matches.isEmpty) return;
+    setState(() => _activeElementId = elementId);
+    widget.onManageSelectionChanged?.call(matches.first);
+  }
+
+  bool canUpdateElement(MapElement element) =>
+      !_hasCollision(element, element.position, element.size, element.rotation);
 
   void setPaletteDragActive(bool active) {
     if (!mounted || _isPaletteDragActive == active) return;
@@ -2102,7 +2142,17 @@ class StoreMapState extends State<StoreMap>
             child: Builder(
               builder: (BuildContext dropContext) {
                 return GestureDetector(
+                  onTapUp:
+                      widget.mode == MapMode.manage &&
+                          widget.viewStyle == MapViewStyle.twoD &&
+                          widget.placementType != null
+                      ? (details) => _placeElementAt(
+                          details.globalPosition,
+                          widget.placementType!,
+                        )
+                      : null,
                   onTap: () {
+                    if (widget.placementType != null) return;
                     if (widget.mode == MapMode.manage) {
                       setState(() {
                         _activeElementId = null;
@@ -2263,91 +2313,144 @@ class StoreMapState extends State<StoreMap>
     bool selected = false,
     bool highlighted = false,
     double highlightPulse = 1,
+    String? label,
+    int productCount = 0,
   }) {
     final Color fill;
     final Color edge;
     final String name;
     switch (type) {
       case ElementType.wall:
-        fill = const Color(0xFF64748B);
-        edge = const Color(0xFF475569);
+        fill = const Color(0xFF56524F);
+        edge = const Color(0xFF45413E);
         name = '';
         break;
       case ElementType.door:
-        fill = const Color(0xFFF59E0B);
-        edge = const Color(0xFFB45309);
+        fill = const Color(0xFFD9F5E2);
+        edge = const Color(0xFF70C78B);
         name = '';
         break;
       case ElementType.rack:
-        fill = const Color(0xFFBFDBFE);
-        edge = const Color(0xFF3B82F6);
+        fill = const Color(0xFFF2EDE6);
+        edge = const Color(0xFFAFA69E);
         name = 'RACK';
         break;
       case ElementType.shelf:
-        fill = const Color(0xFFA7F3D0);
-        edge = const Color(0xFF059669);
+        fill = const Color(0xFFEBF0F5);
+        edge = const Color(0xFF9DAFC3);
         name = 'SHELF';
         break;
       case ElementType.cashier:
-        fill = const Color(0xFFC4B5FD);
-        edge = const Color(0xFF7C3AED);
+        fill = const Color(0xFFE8EFFF);
+        edge = const Color(0xFF2859EE);
         name = 'CASHIER';
         break;
     }
 
     final emphasized = selected || highlighted;
-    return Container(
-      width: size.width,
-      height: size.height,
-      alignment: Alignment.center,
-      decoration: BoxDecoration(
-        color: fill,
-        borderRadius: BorderRadius.circular(
-          type == ElementType.wall || type == ElementType.door ? 2 : 5,
-        ),
-        border: Border.all(
-          color: highlighted
-              ? const Color(
-                  0xFFFF9800,
-                ).withValues(alpha: 0.15 + 0.85 * highlightPulse)
-              : (selected ? const Color(0xFF1D4ED8) : edge),
-          width: emphasized ? 3 : 1.5,
-        ),
-        boxShadow: emphasized
-            ? [
-                BoxShadow(
-                  color:
-                      (highlighted
-                              ? const Color(0xFFFF9800)
-                              : const Color(0xFF2563EB))
-                          .withValues(
-                            alpha: highlighted
-                                ? 0.05 + 0.4 * highlightPulse
-                                : 0.25,
-                          ),
-                  blurRadius: 8,
-                  spreadRadius: 2,
+    final displayLabel =
+        (label?.trim().isNotEmpty == true
+                ? label!.split(' · ').first.trim()
+                : name)
+            .replaceAll('_', ' ');
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        Container(
+          width: size.width,
+          height: size.height,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: fill,
+            borderRadius: BorderRadius.circular(
+              type == ElementType.wall || type == ElementType.door ? 2 : 5,
+            ),
+            border: Border.all(
+              color: highlighted
+                  ? const Color(
+                      0xFFFF9800,
+                    ).withValues(alpha: 0.15 + 0.85 * highlightPulse)
+                  : (selected ? const Color(0xFFC83D08) : edge),
+              width: emphasized ? 3 : 1.5,
+            ),
+            boxShadow: emphasized
+                ? [
+                    BoxShadow(
+                      color:
+                          (highlighted
+                                  ? const Color(0xFFFF9800)
+                                  : const Color(0xFFC83D08))
+                              .withValues(
+                                alpha: highlighted
+                                    ? 0.05 + 0.4 * highlightPulse
+                                    : 0.25,
+                              ),
+                      blurRadius: 8,
+                      spreadRadius: 2,
+                    ),
+                  ]
+                : null,
+          ),
+          child: Stack(
+            children: [
+              if (type == ElementType.rack)
+                Positioned.fill(
+                  child: CustomPaint(
+                    painter: _RackDividerPainter(
+                      horizontal: size.height > size.width,
+                    ),
+                  ),
                 ),
-              ]
-            : null,
-      ),
-      child: name.isNotEmpty && size.width >= 65 && size.height >= 33
-          ? Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4),
+              if (displayLabel.isNotEmpty &&
+                  size.width >= 65 &&
+                  size.height >= 33)
+                Center(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    child: RotatedBox(
+                      quarterTurns: size.height > size.width * 1.8 ? 3 : 0,
+                      child: Text(
+                        displayLabel,
+                        textAlign: TextAlign.center,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Color(0xFF243244),
+                          fontWeight: FontWeight.w600,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+        if (productCount > 0 &&
+            type != ElementType.wall &&
+            type != ElementType.door)
+          Positioned(
+            top: -9,
+            right: -9,
+            child: Container(
+              width: 21,
+              height: 21,
+              alignment: Alignment.center,
+              decoration: const BoxDecoration(
+                color: Color(0xFF171717),
+                shape: BoxShape.circle,
+              ),
               child: Text(
-                name,
-                textAlign: TextAlign.center,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+                '$productCount',
                 style: const TextStyle(
-                  color: Color(0xFF1E293B),
-                  fontWeight: FontWeight.w800,
+                  color: Colors.white,
                   fontSize: 10,
-                  letterSpacing: 0.6,
+                  fontWeight: FontWeight.w700,
                 ),
               ),
-            )
-          : null,
+            ),
+          ),
+      ],
     );
   }
 
@@ -2641,12 +2744,20 @@ class StoreMapState extends State<StoreMap>
                     el.size,
                     highlighted: true,
                     highlightPulse: _animController.value,
+                    label: el.label,
+                    productCount: widget.controller.allItems
+                        .where((item) => item.locationId == sourceId)
+                        .length,
                   ),
                 )
               : _buildFlatElement(
                   el.type,
                   el.size,
                   selected: showObjectGlow || isHovered,
+                  label: el.label,
+                  productCount: widget.controller.allItems
+                      .where((item) => item.locationId == sourceId)
+                      .length,
                 ))
         : Container(
             width: el.size.width,
@@ -3533,6 +3644,39 @@ class _ObjectSilhouettePainter extends CustomPainter {
 //   @override
 //   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 // }
+class _RackDividerPainter extends CustomPainter {
+  const _RackDividerPainter({required this.horizontal});
+
+  final bool horizontal;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = const Color(0xFFCEC7BF)
+      ..strokeWidth = 1;
+    final length = horizontal ? size.height : size.width;
+    for (var offset = 40.0; offset < length; offset += 40) {
+      if (horizontal) {
+        canvas.drawLine(
+          Offset(5, offset),
+          Offset(size.width - 5, offset),
+          paint,
+        );
+      } else {
+        canvas.drawLine(
+          Offset(offset, 5),
+          Offset(offset, size.height - 5),
+          paint,
+        );
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _RackDividerPainter oldDelegate) =>
+      oldDelegate.horizontal != horizontal;
+}
+
 class GridPainter extends CustomPainter {
   final bool flat;
 
@@ -3541,13 +3685,11 @@ class GridPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final floorPaint = Paint()
-      ..color = flat
-          ? const Color(0xFFEFF6FF)
-          : const Color.fromARGB(255, 165, 205, 245);
+      ..color = flat ? const Color(0xFFFCFBF9) : const Color(0xFFFAF9F7);
     canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), floorPaint);
 
     final linePaint = Paint()
-      ..color = flat ? const Color(0xFFC3DBF8) : Colors.white
+      ..color = flat ? const Color(0xFFEDEAE6) : const Color(0xFFE8E4DF)
       ..strokeWidth = flat ? 1.0 : 1.5;
 
     final double step = flat ? 20.0 : 40.0;

@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:inventory_plus/data/inventory.dart';
 import 'package:inventory_plus/logic/inventory_controller.dart';
+import 'package:inventory_plus/ui/map_editor_page.dart';
 import 'package:inventory_plus/ui/store_map.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -16,6 +17,117 @@ void main() {
       url: 'https://example.supabase.co',
       publishableKey: 'test-publishable-key',
     );
+  });
+
+  testWidgets('clicking an empty floor cell places the selected fixture', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final layout = <MapElement>[];
+    var edits = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: StoreMap(
+            controller: InventoryController(),
+            layout: layout,
+            mode: MapMode.manage,
+            viewStyle: MapViewStyle.twoD,
+            placementType: ElementType.rack,
+            showMobileToolbar: false,
+            onLayoutEdited: () => edits++,
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.tapAt(const Offset(600, 450));
+    await tester.pump();
+
+    expect(layout, hasLength(1));
+    expect(layout.single.type, ElementType.rack);
+    expect(edits, 1);
+  });
+
+  test('an assigned product can clear its map location', () {
+    final item = InventoryItem(
+      id: 'item-1',
+      name: 'Item',
+      sku: 'SKU-1',
+      price: 10,
+      quantity: 1,
+      maxQuantity: 10,
+      category: 'General',
+      description: '',
+      imageUrl: '',
+      locationId: 'rack-1',
+    );
+    expect(item.copyWith(clearLocation: true).locationId, isNull);
+  });
+
+  testWidgets('Assign items tab shows the product placement workflow', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1400, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final controller = _MapAssignmentController()
+      ..storeLayout = [
+        MapElement(
+          id: 'rack-1',
+          type: ElementType.rack,
+          position: const Offset(200, 200),
+          label: 'Rack A',
+        ),
+      ];
+    await tester.pumpWidget(
+      MaterialApp(home: MapEditorPage(controller: controller)),
+    );
+    await tester.pump();
+    expect(tester.widget<StoreMap>(find.byType(StoreMap)).mode, MapMode.manage);
+    final assignTabCenter = tester.getCenter(find.text('Assign items'));
+    final viewCenter = tester.getCenter(find.text('3D view'));
+    expect(viewCenter.dx, greaterThan(1100));
+    expect(assignTabCenter.dx, lessThan(viewCenter.dx));
+    expect((assignTabCenter.dy - viewCenter.dy).abs(), lessThan(2));
+
+    await tester.tap(find.byKey(const ValueKey('rack-1')));
+    await tester.pump();
+    expect(find.byKey(const ValueKey('map-label-rack-1')), findsOneWidget);
+    expect(find.text('ADJUST WIDTH'), findsOneWidget);
+    for (final coordinate in ['X', 'Y', 'W', 'H']) {
+      expect(find.text(coordinate), findsNothing);
+    }
+
+    await tester.tap(find.text('Assign items'));
+    await tester.pump();
+    expect(find.text('Items to place'), findsOneWidget);
+    expect(find.text('Search items or SKU…'), findsOneWidget);
+    expect(
+      tester.widget<StoreMap>(find.byType(StoreMap)).mode,
+      MapMode.selection,
+    );
+    expect(
+      find.text(
+        'Add a rack or shelf in Manage layout before placing products.',
+      ),
+      findsNothing,
+    );
+    await tester.tap(find.byKey(const ValueKey('map-assign-product-item-1')));
+    await tester.pump();
+    expect(
+      tester.widget<StoreMap>(find.byType(StoreMap)).selectedItemId,
+      'item-1',
+    );
+    await tester.tap(find.byKey(const ValueKey('rack-1')));
+    await tester.pump();
+    expect(controller.allItems.single.locationId, 'rack-1');
   });
 
   testWidgets('tapping the raised cashier model selects it', (tester) async {
@@ -223,9 +335,9 @@ void main() {
       (widget) => widget is CustomPaint && widget.painter is GridPainter,
     );
     await tester.pumpWidget(mapAtRotation(0));
-    final before = tester.widget<CustomPaint>(floor).size!;
+    final before = tester.widget<CustomPaint>(floor).size;
     await tester.pumpWidget(mapAtRotation(math.pi / 2));
-    final after = tester.widget<CustomPaint>(floor).size!;
+    final after = tester.widget<CustomPaint>(floor).size;
     expect(after.height, greaterThan(before.height));
   });
 
@@ -267,4 +379,36 @@ void main() {
     mapKey.currentState!.applySidebarAction(MapSidebarAction.rotate);
     expect(cashier.rotation, 0);
   });
+}
+
+class _MapAssignmentController extends InventoryController {
+  List<InventoryItem> _testItems = [
+    InventoryItem(
+      id: 'item-1',
+      name: 'Test product',
+      sku: 'SKU-1',
+      price: 10,
+      quantity: 1,
+      maxQuantity: 10,
+      category: 'General',
+      description: '',
+      imageUrl: '',
+    ),
+  ];
+
+  @override
+  List<InventoryItem> get allItems => _testItems;
+
+  @override
+  Future<void> assignItemToLocation(String itemId, String? mapElementId) async {
+    _testItems = [
+      for (final item in _testItems)
+        item.id == itemId
+            ? item.copyWith(
+                locationId: mapElementId,
+                clearLocation: mapElementId == null,
+              )
+            : item,
+    ];
+  }
 }

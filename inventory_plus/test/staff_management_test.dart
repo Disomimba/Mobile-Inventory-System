@@ -4,6 +4,21 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:inventory_plus/logic/staff_management.dart';
 
 void main() {
+  test('staff passwords use the role and first/last initials', () {
+    expect(
+      generateStaffPassword(name: 'Abdulmalik Disomimba', role: 'staff'),
+      'CashierAD@123',
+    );
+    expect(
+      generateStaffPassword(name: 'Helper Mark', role: 'helper'),
+      'HelperHM@123',
+    );
+    expect(
+      generateStaffPassword(name: 'Admin User', role: 'admin'),
+      'AdminAU@123',
+    );
+  });
+
   test('new staff payload normalizes blank optional fields to null', () {
     final payload = buildStaffCreationPayload(
       name: ' Yves Santos ',
@@ -107,5 +122,17 @@ void main() {
       roleRequiresForcedPasswordChange(newlyCreated['role']?.toString()),
       roleRequiresForcedPasswordChange('staff'),
     );
+  });
+
+  test('new non-admin accounts must change their issued password', () {
+    final payload = buildStaffCreationPayload(
+      name: 'Jomar Villanueva',
+      username: 'jomar',
+      passwordHash: 'hash',
+      role: 'staff',
+      locationId: 'location-a',
+      mustChangePassword: true,
+    );
+    expect(payload['must_change_password'], isTrue);
   });
 }

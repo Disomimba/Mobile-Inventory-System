@@ -1399,6 +1399,26 @@ class InventoryController {
     };
   }
 
+  Future<int> fetchPendingApprovalCount() async {
+    if (!isAdmin) return 0;
+    final accountId = currentUserId;
+    final locationId = activeLocationId;
+    if (accountId == null || locationId == null) return 0;
+    final response = await supabase.rpc(
+      'approval_requests_page_v1',
+      params: <String, dynamic>{
+        'p_session_token': _requireSessionToken(),
+        'p_status': InventoryApprovalStatus.pending.databaseValue,
+        'p_page': 1,
+        'p_page_size': 1,
+      },
+    );
+    if (accountId != currentUserId || locationId != activeLocationId) return 0;
+    return (Map<String, dynamic>.from(response as Map)['total_count'] as num?)
+            ?.toInt() ??
+        0;
+  }
+
   Future<InventoryApprovalRequest> approveInventoryApprovalRequest(
     String requestId, {
     String? reviewNote,
@@ -2167,16 +2187,19 @@ class InventoryController {
     final locationId = activeLocationId;
     if (userId == null || locationId == null) return;
     try {
-      final row = await supabase
-          .from('profiles')
-          .select(
-            'id, location_id, name, role, email, address, phone, '
-            'must_change_password',
-          )
-          .eq('id', userId)
-          .maybeSingle();
+      final restored = await supabase.rpc(
+        'profile_restore_session_v1',
+        params: <String, dynamic>{'p_session_token': _requireSessionToken()},
+      );
+      final session = restored is Map
+          ? Map<String, dynamic>.from(restored)
+          : null;
+      final profile = session?['profile'];
+      final row = profile is Map ? Map<String, dynamic>.from(profile) : null;
       if (currentUserId != userId || activeLocationId != locationId) return;
-      if (row == null || row['location_id']?.toString() != locationId) {
+      if (row == null ||
+          row['location_id']?.toString() != locationId ||
+          row['is_active'] == false) {
         _currentProfileSnapshot = null;
         _currentUserProfileController.add(null);
         return;
@@ -2250,6 +2273,7 @@ class InventoryController {
               email: email,
               phone: phone,
               address: address,
+              mustChangePassword: roleRequiresForcedPasswordChange(role),
             ),
           )
           .select()
@@ -2305,25 +2329,52 @@ class InventoryController {
 
   Future<bool> updateStaffRole(String id, String newRole) async {
     try {
-      final row = await supabase
-          .from('profiles')
-          .update({'role': newRole})
-          .eq('id', id)
-          .select()
-          .single();
-      final index = _staffSnapshot.indexWhere(
-        (staff) => staff['id'].toString() == id,
+      final staff = await fetchStaffProfile(id);
+      if (staff == null) return false;
+      return await updateStaffAccount(
+        id: id,
+        name: staff['name']?.toString() ?? '',
+        email: staff['email']?.toString() ?? '',
+        phone: staff['phone']?.toString() ?? '',
+        address: staff['address']?.toString() ?? '',
+        role: newRole,
+        isActive: staff['is_active'] != false,
       );
-      if (index >= 0) {
-        final updated = List<Map<String, dynamic>>.from(_staffSnapshot);
-        updated[index] = Map<String, dynamic>.from(row);
-        _staffSnapshot = List<Map<String, dynamic>>.unmodifiable(updated);
-        _publishStaffConfigurationSnapshot();
-      }
-      return true;
-    } catch (e) {
+    } catch (_) {
       return false;
     }
+  }
+
+  Future<bool> updateStaffAccount({
+    required String id,
+    required String name,
+    required String email,
+    required String phone,
+    String? address,
+    required String role,
+    required bool isActive,
+  }) async {
+    if (!isAdmin) throw StateError('Only Admin accounts may edit staff.');
+    final profileId = int.tryParse(id);
+    if (profileId == null) return false;
+    final response = await supabase.rpc(
+      'update_staff_account_v1',
+      params: <String, dynamic>{
+        'p_session_token': _requireSessionToken(),
+        'p_target_profile_id': profileId,
+        'p_name': name.trim(),
+        'p_email': email.trim(),
+        'p_phone': phone.trim(),
+        if (address != null) 'p_address': address.trim(),
+        'p_role': role,
+        'p_is_active': isActive,
+      },
+    );
+    if (response != true) return false;
+    await _refreshStaffConfiguration();
+    if (id == currentUserId) await _refreshCurrentProfile();
+    _invalidateStaffPerformance();
+    return true;
   }
 
   Future<Map<String, dynamic>?> fetchStaffProfile(String id) async {
@@ -4266,7 +4317,7 @@ class InventoryController {
     );
   }
 
-  Future<void> assignItemToLocation(String itemId, String mapElementId) async {
+  Future<void> assignItemToLocation(String itemId, String? mapElementId) async {
     try {
       await supabase
           .from('products')
@@ -4275,7 +4326,10 @@ class InventoryController {
 
       final index = _items.indexWhere((item) => item.id == itemId);
       if (index != -1) {
-        _items[index] = _items[index].copyWith(locationId: mapElementId);
+        _items[index] = _items[index].copyWith(
+          locationId: mapElementId,
+          clearLocation: mapElementId == null,
+        );
         _publishInventorySnapshot();
       }
     } catch (e) {

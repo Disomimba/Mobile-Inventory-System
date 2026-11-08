@@ -218,8 +218,8 @@ void main() {
     expect(repair, contains('v_snapshot.normalized_items'));
     expect(repair, contains("'unit_price', scoped.product_price"));
     expect(repair, contains("'line_total'"));
-    expect(approvalCenter, contains('REQUESTED BY'));
-    expect(approvalCenter, contains('DETAILS'));
+    expect(approvalCenter, contains('Proposed discount'));
+    expect(approvalCenter, contains('Customer saves'));
     expect(
       approvalCenter,
       contains('Detailed cart snapshot unavailable for this legacy request.'),
