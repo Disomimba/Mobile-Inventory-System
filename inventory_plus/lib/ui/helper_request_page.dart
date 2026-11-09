@@ -51,7 +51,9 @@ class _HelperRequestPageState extends State<HelperRequestPage> {
   ApprovalProofSelection? _photo;
   bool _picking = false;
   bool _submitting = false;
-  String? _error;
+  String? _productError;
+  String? _quantityError;
+  String? _photoError;
   int _productFieldKey = 0;
   int _reasonFieldKey = 0;
 
@@ -138,13 +140,14 @@ class _HelperRequestPageState extends State<HelperRequestPage> {
         throw const FormatException('Photo must be smaller than 10 MB.');
       }
       if (!mounted) return;
-      setState(
-        () => _photo = ApprovalProofSelection(
+      setState(() {
+        _photo = ApprovalProofSelection(
           bytes: bytes,
           fileName: file.name,
           mimeType: mime,
-        ),
-      );
+        );
+        _photoError = null;
+      });
     } catch (error, stackTrace) {
       AppLogger.error(
         'Stock request photo selection failed',
@@ -171,36 +174,41 @@ class _HelperRequestPageState extends State<HelperRequestPage> {
     if (_submitting) return;
     final product = items.where((item) => item.id == _productId).firstOrNull;
     final amount = double.tryParse(_qty.text.trim());
-    if (product == null) {
-      setState(() => _error = 'Select a product.');
-      return;
-    }
+    final productError = product == null ? 'Choose a product.' : null;
+    String? quantityError;
     if (amount == null || !amount.isFinite || amount <= 0) {
-      setState(() => _error = 'Enter a quantity greater than zero.');
-      return;
+      quantityError = 'Enter a quantity above 0.';
+    } else if (product != null) {
+      final allowsDecimals = const {
+        'kg',
+        'g',
+        'l',
+        'ml',
+      }.contains(product.unit.toLowerCase());
+      if (!allowsDecimals && amount != amount.roundToDouble()) {
+        quantityError = 'Enter a whole-number quantity for ${product.unit}.';
+      } else if (_type == InventoryApprovalType.writeOff &&
+          amount > product.quantity) {
+        quantityError =
+            'Only ${_quantity(product.quantity)} ${product.unit} is on hand.';
+      }
     }
-    final allowsDecimals = const {
-      'kg',
-      'g',
-      'l',
-      'ml',
-    }.contains(product.unit.toLowerCase());
-    if (!allowsDecimals && amount != amount.roundToDouble()) {
-      setState(
-        () => _error = 'Enter a whole-number quantity for ${product.unit}.',
-      );
-      return;
-    }
-    if (_type == InventoryApprovalType.writeOff && amount > product.quantity) {
-      setState(
-        () => _error =
-            'Only ${_quantity(product.quantity)} ${product.unit} is on hand.',
-      );
+    final photoError = _type == InventoryApprovalType.writeOff && _photo == null
+        ? 'Attach at least one photo of the affected stock.'
+        : null;
+    if (productError != null || quantityError != null || photoError != null) {
+      setState(() {
+        _productError = productError;
+        _quantityError = quantityError;
+        _photoError = photoError;
+      });
       return;
     }
     setState(() {
       _submitting = true;
-      _error = null;
+      _productError = null;
+      _quantityError = null;
+      _photoError = null;
     });
     try {
       final operationId = widget.controller.newOperationId(
@@ -218,8 +226,8 @@ class _HelperRequestPageState extends State<HelperRequestPage> {
       await widget.controller.submitInventoryApprovalRequest(
         operationId: operationId,
         type: _type,
-        productId: product.id,
-        quantity: amount,
+        productId: product!.id,
+        quantity: amount!,
         reason: _reason,
         note: _notes.text,
         proofStoragePath: proofPath,
@@ -234,6 +242,9 @@ class _HelperRequestPageState extends State<HelperRequestPage> {
         _productId = null;
         _photo = null;
         _productFieldKey++;
+        _productError = null;
+        _quantityError = null;
+        _photoError = null;
       });
       AppToast.success(context, '$typeLabel request submitted for review.');
       await _refresh();
@@ -303,7 +314,9 @@ class _HelperRequestPageState extends State<HelperRequestPage> {
                       _label('Product'),
                       const SizedBox(height: 8),
                       DropdownButtonFormField<String>(
-                        key: ValueKey('$_productFieldKey:${selected?.id ?? ''}'),
+                        key: ValueKey(
+                          '$_productFieldKey:${selected?.id ?? ''}',
+                        ),
                         initialValue: selected?.id,
                         isExpanded: true,
                         hint: const Text('Select a product...'),
@@ -323,9 +336,10 @@ class _HelperRequestPageState extends State<HelperRequestPage> {
                             ? null
                             : (value) => setState(() {
                                 _productId = value;
-                                _error = null;
+                                _productError = null;
                               }),
                       ),
+                      _fieldError(_productError),
                       if (selected != null) ...[
                         const SizedBox(height: 5),
                         Text(
@@ -357,11 +371,12 @@ class _HelperRequestPageState extends State<HelperRequestPage> {
                                   ],
                                   decoration: _decoration(),
                                   onChanged: (_) {
-                                    if (_error != null) {
-                                      setState(() => _error = null);
+                                    if (_quantityError != null) {
+                                      setState(() => _quantityError = null);
                                     }
                                   },
                                 ),
+                                _fieldError(_quantityError),
                               ],
                             ),
                           ),
@@ -415,19 +430,12 @@ class _HelperRequestPageState extends State<HelperRequestPage> {
                         ),
                       ),
                       const SizedBox(height: 24),
-                      _optionalLabel('Photos'),
+                      _type == InventoryApprovalType.writeOff
+                          ? _annotatedLabel('Photos', 'required')
+                          : _optionalLabel('Photos'),
                       const SizedBox(height: 8),
                       _photoPicker(),
-                      if (_error != null) ...[
-                        const SizedBox(height: 16),
-                        Text(
-                          _error!,
-                          style: const TextStyle(
-                            color: Color(0xFFB42318),
-                            fontSize: 13,
-                          ),
-                        ),
-                      ],
+                      _fieldError(_photoError),
                       const SizedBox(height: 24),
                       SizedBox(
                         height: 48,
@@ -507,7 +515,9 @@ class _HelperRequestPageState extends State<HelperRequestPage> {
                   ? _restockReasons.first
                   : _writeOffReasons.first;
               _reasonFieldKey++;
-              _error = null;
+              _productError = null;
+              _quantityError = null;
+              _photoError = null;
             }),
       borderRadius: BorderRadius.circular(8),
       child: Container(
@@ -545,7 +555,9 @@ class _HelperRequestPageState extends State<HelperRequestPage> {
     ),
   );
 
-  Widget _optionalLabel(String text) => RichText(
+  Widget _optionalLabel(String text) => _annotatedLabel(text, 'optional');
+
+  Widget _annotatedLabel(String text, String annotation) => RichText(
     text: TextSpan(
       style: const TextStyle(
         color: _ink,
@@ -554,13 +566,23 @@ class _HelperRequestPageState extends State<HelperRequestPage> {
       ),
       children: [
         TextSpan(text: '$text '),
-        const TextSpan(
-          text: '(optional)',
-          style: TextStyle(color: _muted, fontWeight: FontWeight.w400),
+        TextSpan(
+          text: '($annotation)',
+          style: const TextStyle(color: _muted, fontWeight: FontWeight.w400),
         ),
       ],
     ),
   );
+
+  Widget _fieldError(String? message) => message == null
+      ? const SizedBox.shrink()
+      : Padding(
+          padding: const EdgeInsets.only(top: 6),
+          child: Text(
+            message,
+            style: const TextStyle(color: Color(0xFFB42318), fontSize: 12),
+          ),
+        );
 
   InputDecoration _decoration({String? hint}) => InputDecoration(
     hintText: hint,

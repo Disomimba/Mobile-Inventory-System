@@ -1337,6 +1337,9 @@ class InventoryController {
       throw ArgumentError.value(reason, 'reason', 'A reason is required');
     }
     final hasProof = proofStoragePath?.trim().isNotEmpty ?? false;
+    if (type == InventoryApprovalType.writeOff && !hasProof) {
+      throw ArgumentError('Photo evidence is required for write-off requests.');
+    }
     if (hasProof &&
         ((proofFileName?.trim().isEmpty ?? true) ||
             (proofMimeType?.trim().isEmpty ?? true))) {

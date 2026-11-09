@@ -61,6 +61,9 @@ begin
   if p_quantity is null or p_quantity <= 0 then
     raise exception 'Quantity must be greater than 0';
   end if;
+  if v_type = 'write_off' and v_proof_path is null then
+    raise exception 'Photo evidence is required for write-off requests';
+  end if;
   if v_proof_path is not null or v_proof_name is not null or v_proof_mime is not null then
     if v_proof_path is null or v_proof_name is null or v_proof_mime is null then
       raise exception 'Photo evidence details are incomplete';

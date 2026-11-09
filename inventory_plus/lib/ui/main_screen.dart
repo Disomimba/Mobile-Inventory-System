@@ -49,6 +49,7 @@ import '../services/main_section_url.dart';
 import 'staff_history_page.dart';
 import 'staff_page.dart';
 import 'helper_request_page.dart';
+import 'helper_me_page.dart';
 import 'store_map.dart';
 import '../services/realtime/realtime_sync_service.dart';
 
@@ -2761,59 +2762,11 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     ],
   );
 
-  Widget _buildHelperMePage() => ColoredBox(
-    color: const Color(0xFFF6F5F2),
-    child: ListView(
-      padding: const EdgeInsets.all(20),
-      children: [
-        const Text(
-          'Me',
-          style: TextStyle(
-            fontSize: 22,
-            fontWeight: FontWeight.w800,
-            color: Color(0xFF171717),
-          ),
-        ),
-        const SizedBox(height: 18),
-        Container(
-          padding: const EdgeInsets.all(18),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            border: Border.all(color: const Color(0xFFE1DCD5)),
-            borderRadius: BorderRadius.circular(16),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                widget.controller.currentUserName ?? 'Helper',
-                style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                widget.controller.loggedInUserEmail ?? 'Order helper',
-                style: const TextStyle(color: Color(0xFF736B65)),
-              ),
-              const SizedBox(height: 18),
-              OutlinedButton.icon(
-                onPressed: _showProfileDialog,
-                icon: const Icon(LucideIcons.userRound, size: 17),
-                label: const Text('View and edit profile'),
-              ),
-              const SizedBox(height: 6),
-              TextButton.icon(
-                onPressed: _handleLogout,
-                icon: const Icon(LucideIcons.logOut, size: 17),
-                label: const Text('Sign out'),
-              ),
-            ],
-          ),
-        ),
-      ],
-    ),
+  Widget _buildHelperMePage() => HelperMePage(
+    controller: widget.controller,
+    locationName: _helperLocationName,
+    storeAccessSettings: _scheduledStoreAccessSettings,
+    onLogout: () => unawaited(_handleLogout()),
   );
 
   Widget _buildHelperMobileNavigationBar({
