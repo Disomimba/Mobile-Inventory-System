@@ -9,6 +9,7 @@ import '../logic/inventory_controller.dart';
 import '../data/inventory.dart';
 import '../services/app_error_mapper.dart';
 import '../services/app_logger.dart';
+import '../services/staff_presence_service.dart';
 import 'widgets/app_toast.dart';
 import 'widgets/app_dialog.dart';
 import 'store_map.dart';
@@ -19,14 +20,18 @@ const String _fontFam = 'Hellix';
 
 class OrderQueuePage extends StatefulWidget {
   final InventoryController controller;
+  final StaffPresenceService? presenceService;
   final String? targetOrderId;
   final VoidCallback? onOrderOpened;
+  final ValueChanged<bool>? onChecklistVisibilityChanged;
 
   const OrderQueuePage({
     super.key,
     required this.controller,
+    this.presenceService,
     this.targetOrderId,
     this.onOrderOpened,
+    this.onChecklistVisibilityChanged,
   });
 
   @override
@@ -35,6 +40,7 @@ class OrderQueuePage extends StatefulWidget {
 
 class _OrderQueuePageState extends State<OrderQueuePage> {
   Timer? _timer;
+  StreamSubscription<List<MapElement>>? _layoutSubscription;
   Duration? _timeOffset;
   String? _pendingAutoOpenId;
   String _searchQuery = '';
@@ -42,10 +48,12 @@ class _OrderQueuePageState extends State<OrderQueuePage> {
   final TextEditingController _searchController = TextEditingController();
 
   String? _selectedOrderId;
+  CustomerOrder? _preparedConfirmationOrder;
   List<CustomerOrder> _cachedOrders = [];
 
   final Map<String, Set<String>> _pickedTracker = {};
   bool _progressSyncWarningShown = false;
+  final Set<String> _claimingOrderIds = <String>{};
 
   @override
   void initState() {
@@ -56,6 +64,18 @@ class _OrderQueuePageState extends State<OrderQueuePage> {
     _timer = Timer.periodic(const Duration(minutes: 1), (_) {
       if (mounted) setState(() {});
     });
+    _layoutSubscription = widget.controller.mapLayoutSnapshots.listen((_) {
+      if (mounted) setState(() {});
+    });
+    unawaited(_loadMapLayout());
+  }
+
+  Future<void> _loadMapLayout() async {
+    try {
+      await widget.controller.fetchMapLayout();
+    } catch (error) {
+      debugPrint('[Helper queue] map locations unavailable: $error');
+    }
   }
 
   @override
@@ -71,6 +91,7 @@ class _OrderQueuePageState extends State<OrderQueuePage> {
   @override
   void dispose() {
     _timer?.cancel();
+    unawaited(_layoutSubscription?.cancel());
     _searchController.dispose();
     super.dispose();
   }
@@ -122,12 +143,15 @@ class _OrderQueuePageState extends State<OrderQueuePage> {
           if (item.picked) item.productId,
       };
     });
+    widget.onChecklistVisibilityChanged?.call(true);
   }
 
   void _closeOrderChecklist() {
     setState(() {
       _selectedOrderId = null;
+      _preparedConfirmationOrder = null;
     });
+    widget.onChecklistVisibilityChanged?.call(false);
   }
 
   Set<String> _pickedIds(CustomerOrder order) => <String>{
@@ -160,6 +184,361 @@ class _OrderQueuePageState extends State<OrderQueuePage> {
         date.day == now.day;
   }
 
+  Future<void> _claimOrder(CustomerOrder order) async {
+    if (_claimingOrderIds.contains(order.id)) return;
+    setState(() => _claimingOrderIds.add(order.id));
+    final claimed = await widget.controller.claimOrderForCurrentHelper(
+      order.id,
+    );
+    if (!mounted) return;
+    setState(() => _claimingOrderIds.remove(order.id));
+    if (!claimed) {
+      AppToast.error(
+        context,
+        'This order could not be claimed. It may already be assigned.',
+      );
+    }
+  }
+
+  String _mobileOrderId(CustomerOrder order) {
+    final id = order.id.trim();
+    return '#${id.length <= 8 ? id : id.substring(0, 8)}';
+  }
+
+  String _mobileOrderLocations(CustomerOrder order) {
+    final labels = <String>{};
+    for (final orderItem in order.items) {
+      final item = widget.controller.findAnyItemById(orderItem.productId);
+      if (item == null || item.locationId == null) continue;
+      for (final element in widget.controller.storeLayout) {
+        if (element.id == item.locationId && element.label.trim().isNotEmpty) {
+          labels.add(element.label.trim());
+          break;
+        }
+      }
+    }
+    return labels.isEmpty ? '' : ' · ${labels.join(', ')}';
+  }
+
+  Widget _buildMobileQueue({
+    required List<CustomerOrder> assignedOrders,
+    required List<CustomerOrder> openOrders,
+    required int doneToday,
+  }) {
+    const ink = Color(0xFF171717);
+    const muted = Color(0xFF78716C);
+    const border = Color(0xFFE1DCD5);
+    final presence = widget.presenceService;
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(20, 24, 20, 28),
+      children: [
+        if (presence != null)
+          AnimatedBuilder(
+            animation: presence,
+            builder: (context, _) => presence.isOnBreak
+                ? Container(
+                    margin: const EdgeInsets.only(bottom: 30),
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFFF2D0),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: const Row(
+                      children: [
+                        Icon(
+                          LucideIcons.coffee,
+                          size: 18,
+                          color: Color(0xFFA65A00),
+                        ),
+                        SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            "You're on break. New orders won't be auto-assigned to you until you switch back to Available.",
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: ink,
+                              height: 1.45,
+                              fontFamily: _fontFam,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+                : const SizedBox.shrink(),
+          ),
+        Row(
+          children: [
+            const Expanded(
+              child: Text(
+                'Your orders',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w800,
+                  color: ink,
+                  fontFamily: _fontFam,
+                ),
+              ),
+            ),
+            Text(
+              '$doneToday done today',
+              style: const TextStyle(
+                fontSize: 13,
+                color: muted,
+                fontFamily: _fontFam,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        if (assignedOrders.isEmpty)
+          Container(
+            padding: const EdgeInsets.symmetric(vertical: 24),
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: Colors.white,
+              border: Border.all(color: border),
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: const Text(
+              'No orders assigned to you.',
+              style: TextStyle(color: muted, fontFamily: _fontFam),
+            ),
+          ),
+        for (final order in assignedOrders) ...[
+          _mobileAssignedCard(order),
+          const SizedBox(height: 12),
+        ],
+        const SizedBox(height: 32),
+        Row(
+          children: [
+            const Text(
+              'Open orders',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w800,
+                color: ink,
+                fontFamily: _fontFam,
+              ),
+            ),
+            const SizedBox(width: 6),
+            Text(
+              '${openOrders.length}',
+              style: const TextStyle(
+                fontSize: 17,
+                color: muted,
+                fontFamily: _fontFam,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 3),
+        const Text(
+          'Not yet assigned. Claim one if you have capacity.',
+          style: TextStyle(fontSize: 13, color: muted, fontFamily: _fontFam),
+        ),
+        const SizedBox(height: 16),
+        if (openOrders.isEmpty)
+          Container(
+            height: 65,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: const Color(0xFFEDEBE7),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: const Text(
+              'No open orders.',
+              style: TextStyle(
+                color: muted,
+                fontSize: 14,
+                fontFamily: _fontFam,
+              ),
+            ),
+          ),
+        for (final order in openOrders) ...[
+          _mobileOpenCard(order),
+          const SizedBox(height: 10),
+        ],
+      ],
+    );
+  }
+
+  Widget _mobileAssignedCard(CustomerOrder order) {
+    const orange = Color(0xFFC83D08);
+    final picked = _pickedIds(order).length.clamp(0, order.items.length);
+    final total = order.items.length;
+    return Material(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(18),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(18),
+        onTap: () => _openAssignedOrderChecklist(order),
+        child: Container(
+          padding: const EdgeInsets.all(18),
+          decoration: BoxDecoration(
+            border: Border.all(color: const Color(0xFFE1DCD5)),
+            borderRadius: BorderRadius.circular(18),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      _mobileOrderId(order),
+                      style: const TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w800,
+                        color: Color(0xFF171717),
+                        fontFamily: _fontFam,
+                      ),
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFE4EFFD),
+                      borderRadius: BorderRadius.circular(99),
+                    ),
+                    child: Text(
+                      picked > 0 ? 'Preparing' : 'Assigned',
+                      style: const TextStyle(
+                        color: Color(0xFF245C9E),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        fontFamily: _fontFam,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 7),
+              Text(
+                '$total ${total == 1 ? 'item' : 'items'}${_mobileOrderLocations(order)}',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: Color(0xFF736B65),
+                  fontSize: 14,
+                  fontFamily: _fontFam,
+                ),
+              ),
+              const SizedBox(height: 18),
+              Row(
+                children: [
+                  Expanded(
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(99),
+                      child: LinearProgressIndicator(
+                        value: total == 0 ? 0 : picked / total,
+                        minHeight: 7,
+                        backgroundColor: const Color(0xFFECEAE6),
+                        valueColor: const AlwaysStoppedAnimation(orange),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Text(
+                    '$picked/$total verified',
+                    style: const TextStyle(
+                      color: Color(0xFF736B65),
+                      fontSize: 12,
+                      fontFamily: _fontFam,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 20),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      picked > 0 ? 'Continue picking' : 'Start picking',
+                      style: const TextStyle(
+                        color: orange,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        fontFamily: _fontFam,
+                      ),
+                    ),
+                  ),
+                  const Icon(LucideIcons.chevronRight, size: 18, color: orange),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _mobileOpenCard(CustomerOrder order) {
+    final claiming = _claimingOrderIds.contains(order.id);
+    final total = order.items.length;
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border.all(color: const Color(0xFFE1DCD5)),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  _mobileOrderId(order),
+                  style: const TextStyle(
+                    fontSize: 19,
+                    fontWeight: FontWeight.w800,
+                    color: Color(0xFF171717),
+                    fontFamily: _fontFam,
+                  ),
+                ),
+                const SizedBox(height: 5),
+                Text(
+                  '$total ${total == 1 ? 'item' : 'items'}${_mobileOrderLocations(order)} · ${_timeAgo(order.createdAt)}',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: Color(0xFF736B65),
+                    fontFamily: _fontFam,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          FilledButton(
+            onPressed: claiming ? null : () => _claimOrder(order),
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFF211F1D),
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(9),
+              ),
+            ),
+            child: Text(
+              claiming ? 'Claiming…' : 'Claim',
+              style: const TextStyle(
+                fontWeight: FontWeight.w700,
+                fontFamily: _fontFam,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   bool _isAssignedToCurrentHelper(CustomerOrder order) {
     final currentUserId = widget.controller.currentUserId;
 
@@ -168,11 +547,90 @@ class _OrderQueuePageState extends State<OrderQueuePage> {
     return order.assignedHelperId?.toString() == currentUserId.toString();
   }
 
+  Widget _buildPreparedConfirmation(CustomerOrder order) {
+    const orange = Color(0xFFC83D08);
+    final id = order.id.trim();
+    final shortId = (id.length <= 8 ? id : id.substring(0, 8)).toUpperCase();
+
+    return Scaffold(
+      backgroundColor: const Color(0xFFF6F5F2),
+      body: Center(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 36),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 500),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const CircleAvatar(
+                  radius: 36,
+                  backgroundColor: Color(0xFFDDF3E6),
+                  child: Icon(
+                    LucideIcons.packageCheck,
+                    color: Color(0xFF128044),
+                    size: 34,
+                  ),
+                ),
+                const SizedBox(height: 22),
+                Text(
+                  'Order #$shortId is ready',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Color(0xFF171717),
+                    fontSize: 21,
+                    fontWeight: FontWeight.w800,
+                    fontFamily: _fontFam,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Bring the items to the checkout counter. The cashier will release them to the customer.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Color(0xFF756D67),
+                    fontSize: 15,
+                    height: 1.45,
+                    fontFamily: _fontFam,
+                  ),
+                ),
+                const SizedBox(height: 38),
+                SizedBox(
+                  width: double.infinity,
+                  height: 54,
+                  child: FilledButton(
+                    onPressed: _closeOrderChecklist,
+                    style: FilledButton.styleFrom(
+                      backgroundColor: orange,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                    child: const Text(
+                      'Back to queue',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                        fontFamily: _fontFam,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final isCompact = MediaQuery.sizeOf(context).width < 600;
     return Scaffold(
-      backgroundColor: const Color(0xFFF4F6F8),
+      backgroundColor: isCompact
+          ? const Color(0xFFF6F5F2)
+          : const Color(0xFFF4F6F8),
       body: StreamBuilder<List<CustomerOrder>>(
         stream: widget.controller.streamOrders(),
         builder: (context, snapshot) {
@@ -196,6 +654,10 @@ class _OrderQueuePageState extends State<OrderQueuePage> {
             _cachedOrders = snapshot.data!;
           }
 
+          if (isCompact && _preparedConfirmationOrder != null) {
+            return _buildPreparedConfirmation(_preparedConfirmationOrder!);
+          }
+
           CustomerOrder? selectedOrder;
 
           if (_selectedOrderId != null) {
@@ -208,7 +670,8 @@ class _OrderQueuePageState extends State<OrderQueuePage> {
 
             final bool selectedOrderStillValid =
                 selectedOrder != null &&
-                selectedOrder.status == 'pending' &&
+                (selectedOrder.status == 'pending' ||
+                    selectedOrder.status == 'prepared') &&
                 _isAssignedToCurrentHelper(selectedOrder);
 
             if (!selectedOrderStillValid) {
@@ -222,6 +685,7 @@ class _OrderQueuePageState extends State<OrderQueuePage> {
                 setState(() {
                   _selectedOrderId = null;
                 });
+                widget.onChecklistVisibilityChanged?.call(false);
               });
             }
           }
@@ -264,7 +728,11 @@ class _OrderQueuePageState extends State<OrderQueuePage> {
               onBack: _closeOrderChecklist,
               onFinish: () {
                 _pickedTracker.remove(currentOrder.id);
-                _closeOrderChecklist();
+                if (isCompact) {
+                  setState(() => _preparedConfirmationOrder = currentOrder);
+                } else {
+                  _closeOrderChecklist();
+                }
               },
             );
           }
@@ -318,6 +786,32 @@ class _OrderQueuePageState extends State<OrderQueuePage> {
               )
               .length;
 
+          if (isCompact) {
+            final openOrders =
+                _cachedOrders
+                    .where(
+                      (order) =>
+                          order.status == 'pending' &&
+                          (order.assignedHelperId == null ||
+                              order.assignedHelperId!.trim().isEmpty),
+                    )
+                    .toList()
+                  ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+            final doneToday = _cachedOrders
+                .where(
+                  (order) =>
+                      _isAssignedToCurrentHelper(order) &&
+                      order.preparedAt != null &&
+                      _isToday(order.preparedAt!),
+                )
+                .length;
+            return _buildMobileQueue(
+              assignedOrders: pendingOrders,
+              openOrders: openOrders,
+              doneToday: doneToday,
+            );
+          }
+
           final String emptyQueueMessage;
           if (_searchQuery.trim().isNotEmpty) {
             emptyQueueMessage =
@@ -333,6 +827,48 @@ class _OrderQueuePageState extends State<OrderQueuePage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                if (widget.presenceService != null)
+                  AnimatedBuilder(
+                    animation: widget.presenceService!,
+                    builder: (context, _) {
+                      if (!widget.presenceService!.isOnBreak) {
+                        return const SizedBox.shrink();
+                      }
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 20),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 14,
+                          ),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFFF3D4),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: const Row(
+                            children: [
+                              Icon(
+                                LucideIcons.coffee,
+                                size: 18,
+                                color: Color(0xFFA95700),
+                              ),
+                              SizedBox(width: 12),
+                              Expanded(
+                                child: Text(
+                                  "You're on break. New orders won't be auto-assigned to you until you switch back to Available.",
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    color: Color(0xFF473013),
+                                    fontFamily: _fontFam,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
                 const Text(
                   'Order queue',
                   style: TextStyle(
@@ -702,6 +1238,8 @@ class OrderChecklistPage extends StatefulWidget {
 
 class _OrderChecklistPageState extends State<OrderChecklistPage> {
   bool _isSubmittingPreparation = false;
+  MapViewStyle _mobileMapStyle = MapViewStyle.twoD;
+  String? _focusedProductId;
 
   CustomerOrder get order => widget.order;
   InventoryController get controller => widget.controller;
@@ -713,6 +1251,8 @@ class _OrderChecklistPageState extends State<OrderChecklistPage> {
   Future<void> _markPrepared(BuildContext context) async {
     if (_isSubmittingPreparation) return;
     setState(() => _isSubmittingPreparation = true);
+    final notificationController = NotificationProvider.maybeOf(context);
+    final showConfirmation = MediaQuery.sizeOf(context).width < 600;
 
     try {
       await controller.updateOrderStatus(
@@ -721,23 +1261,34 @@ class _OrderChecklistPageState extends State<OrderChecklistPage> {
         expectedStatus: 'pending',
       );
 
-      final notificationController = NotificationProvider.maybeOf(context);
       final locationId = controller.activeLocationId;
       final preparedByName = controller.currentUserName ?? 'Unknown User';
       final preparedAt = DateTime.now();
 
       if (notificationController != null && locationId != null) {
-        await notificationController.notifyOrderPrepared(
-          locationId: locationId,
-          orderId: order.id,
-          preparedByName: preparedByName,
-          preparedAt: preparedAt,
-        );
+        try {
+          await notificationController.notifyOrderPrepared(
+            locationId: locationId,
+            orderId: order.id,
+            preparedByName: preparedByName,
+            preparedAt: preparedAt,
+          );
+        } catch (error, stackTrace) {
+          AppLogger.error(
+            'Order prepared, but cashier notification failed',
+            error: error,
+            stackTrace: stackTrace,
+          );
+        }
       }
 
       if (context.mounted) {
-        final shortId = order.id.toString().substring(0, 8).toUpperCase();
-        AppToast.success(context, 'Cashier notified for #ORD-$shortId');
+        if (!showConfirmation) {
+          final id = order.id.trim();
+          final shortId = (id.length <= 8 ? id : id.substring(0, 8))
+              .toUpperCase();
+          AppToast.success(context, 'Order #$shortId is ready');
+        }
         onFinish();
       }
     } catch (error, stackTrace) {
@@ -885,6 +1436,9 @@ class _OrderChecklistPageState extends State<OrderChecklistPage> {
                 return;
               }
               if (!context.mounted) return;
+              if (_focusedProductId == expectedProductId) {
+                setState(() => _focusedProductId = null);
+              }
               showDialog(
                 context: context,
                 builder: (dialogContext) => PickVerificationDialog(
@@ -911,8 +1465,474 @@ class _OrderChecklistPageState extends State<OrderChecklistPage> {
     );
   }
 
+  List<CustomerOrderItem> _walkingOrderItems() {
+    final items = [...order.items];
+    final fixtures = {
+      for (final element in controller.storeLayout) element.id: element,
+    };
+    final entrance = controller.storeLayout.where(
+      (element) =>
+          element.type == ElementType.door &&
+          element.label.toLowerCase().contains('entrance'),
+    );
+    var current = entrance.isEmpty
+        ? const Offset(0, 0)
+        : entrance.first.position;
+    final ordered = <CustomerOrderItem>[];
+    while (items.isNotEmpty) {
+      var bestIndex = 0;
+      var bestDistance = double.infinity;
+      for (var i = 0; i < items.length; i++) {
+        final fixture =
+            fixtures[controller
+                .findAnyItemById(items[i].productId)
+                ?.locationId];
+        if (fixture == null) continue;
+        final distance = (fixture.position - current).distanceSquared;
+        if (distance < bestDistance) {
+          bestDistance = distance;
+          bestIndex = i;
+        }
+      }
+      final next = items.removeAt(bestIndex);
+      ordered.add(next);
+      final fixture =
+          fixtures[controller.findAnyItemById(next.productId)?.locationId];
+      if (fixture != null) current = fixture.position;
+    }
+    return ordered;
+  }
+
+  String _shortOrderId() {
+    final id = order.id.trim();
+    return '#${(id.length <= 8 ? id : id.substring(0, 8)).toUpperCase()}';
+  }
+
+  String _itemLocation(CustomerOrderItem orderItem) {
+    final item = controller.findAnyItemById(orderItem.productId);
+    if (item == null) return 'Find item in store';
+    final fixtures = controller.storeLayout.where(
+      (element) => element.id == item.locationId,
+    );
+    final fixtureName = fixtures.isEmpty
+        ? 'Store shelf'
+        : fixtures.first.label.trim().isEmpty
+        ? 'Store shelf'
+        : fixtures.first.label.trim();
+    final level = item.shelfLevel?.trim();
+    return level == null || level.isEmpty
+        ? fixtureName
+        : '$fixtureName · Shelf $level';
+  }
+
+  Widget _buildMobileChecklist(BuildContext context) {
+    const orange = Color(0xFFC83D08);
+    const ink = Color(0xFF171717);
+    const muted = Color(0xFF756D67);
+    final walkingItems = _walkingOrderItems();
+    final pickStopMarkers = <PickStopMarker>[];
+    for (var i = 0; i < walkingItems.length; i++) {
+      final locationId = controller
+          .findAnyItemById(walkingItems[i].productId)
+          ?.locationId;
+      if (locationId != null) {
+        pickStopMarkers.add(
+          PickStopMarker(
+            locationId: locationId,
+            number: i + 1,
+            label: _itemLocation(walkingItems[i]),
+          ),
+        );
+      }
+    }
+    final pickedCount = order.items
+        .where((item) => pickedItems.contains(item.productId))
+        .length;
+    final remaining = order.items.length - pickedCount;
+    final nextItem = walkingItems.where(
+      (item) => !pickedItems.contains(item.productId),
+    );
+    final highlightedProductId =
+        _focusedProductId ??
+        (nextItem.isEmpty ? null : nextItem.first.productId);
+    final highlightedLocationId = highlightedProductId == null
+        ? null
+        : controller.findAnyItemById(highlightedProductId)?.locationId;
+
+    return Scaffold(
+      backgroundColor: const Color(0xFFF6F5F2),
+      body: Column(
+        children: [
+          Container(
+            color: Colors.white,
+            padding: const EdgeInsets.fromLTRB(12, 12, 20, 14),
+            child: Row(
+              children: [
+                IconButton(
+                  onPressed: onBack,
+                  icon: const Icon(LucideIcons.arrowLeft, color: muted),
+                  tooltip: 'Back to queue',
+                ),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _shortOrderId(),
+                        style: const TextStyle(
+                          color: ink,
+                          fontSize: 19,
+                          fontWeight: FontWeight.w800,
+                          fontFamily: _fontFam,
+                        ),
+                      ),
+                      const Text(
+                        'Deliver to checkout counter',
+                        style: TextStyle(
+                          color: muted,
+                          fontSize: 12,
+                          fontFamily: _fontFam,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Text(
+                  '$pickedCount/${order.items.length}',
+                  style: const TextStyle(
+                    color: ink,
+                    fontSize: 17,
+                    fontWeight: FontWeight.w800,
+                    fontFamily: _fontFam,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: ListView(
+              children: [
+                Container(
+                  color: Colors.white,
+                  padding: const EdgeInsets.fromLTRB(12, 16, 12, 20),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(4),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFEDEBE6),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            for (final style in MapViewStyle.values)
+                              GestureDetector(
+                                onTap: () =>
+                                    setState(() => _mobileMapStyle = style),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 14,
+                                    vertical: 9,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: _mobileMapStyle == style
+                                        ? Colors.white
+                                        : Colors.transparent,
+                                    borderRadius: BorderRadius.circular(7),
+                                  ),
+                                  child: Text(
+                                    style == MapViewStyle.twoD
+                                        ? '2D plan'
+                                        : '3D view',
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: _mobileMapStyle == style
+                                          ? FontWeight.w700
+                                          : FontWeight.w500,
+                                      color: _mobileMapStyle == style
+                                          ? ink
+                                          : muted,
+                                      fontFamily: _fontFam,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      SizedBox(
+                        height: 310,
+                        child: StoreMap(
+                          controller: controller,
+                          mode: MapMode.view,
+                          viewStyle: _mobileMapStyle,
+                          highlightId: highlightedLocationId,
+                          showProductCounts: false,
+                          pickStopMarkers: pickStopMarkers,
+                          showItemPopup: false,
+                          showZoomControls: true,
+                          compactZoomControls: true,
+                          miniZoomControls: true,
+                          zoomAccentColor: const Color(0xFFC83D08),
+                          showMobileToolbar: false,
+                          itemAssignmentEnabled: false,
+                          fitEntireMap: true,
+                        ),
+                      ),
+                      if (_mobileMapStyle == MapViewStyle.threeD &&
+                          pickStopMarkers.isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 6,
+                          children: [
+                            for (final marker in pickStopMarkers)
+                              Container(
+                                padding: const EdgeInsets.fromLTRB(5, 4, 8, 4),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFF6F5F2),
+                                  border: Border.all(
+                                    color: const Color(0xFFE1DCD5),
+                                  ),
+                                  borderRadius: BorderRadius.circular(20),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    CircleAvatar(
+                                      radius: 9,
+                                      backgroundColor: ink,
+                                      child: Text(
+                                        '${marker.number}',
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 6),
+                                    ConstrainedBox(
+                                      constraints: const BoxConstraints(
+                                        maxWidth: 155,
+                                      ),
+                                      child: Text(
+                                        marker.label ?? 'Pick stop',
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          color: ink,
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w600,
+                                          fontFamily: _fontFam,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                          ],
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 10, 16, 14),
+                  child: Text(
+                    'Pick list · in walking order',
+                    style: const TextStyle(
+                      color: ink,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w800,
+                      fontFamily: _fontFam,
+                    ),
+                  ),
+                ),
+                for (var index = 0; index < walkingItems.length; index++)
+                  _buildMobilePickCard(context, walkingItems[index], index + 1),
+                const SizedBox(height: 16),
+              ],
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              border: Border(top: BorderSide(color: Color(0xFFE1DCD5))),
+            ),
+            child: SafeArea(
+              top: false,
+              child: SizedBox(
+                width: double.infinity,
+                height: 54,
+                child: FilledButton(
+                  onPressed: remaining == 0 && !_isSubmittingPreparation
+                      ? () => _markPrepared(context)
+                      : null,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: orange,
+                    disabledBackgroundColor: const Color(0xFFE9B79F),
+                    disabledForegroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
+                  child: Text(
+                    _isSubmittingPreparation
+                        ? 'Saving preparation…'
+                        : remaining == 0
+                        ? 'Finish preparing'
+                        : 'Scan $remaining more to finish',
+                    style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w800,
+                      fontFamily: _fontFam,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMobilePickCard(
+    BuildContext context,
+    CustomerOrderItem orderItem,
+    int position,
+  ) {
+    const ink = Color(0xFF171717);
+    const muted = Color(0xFF756D67);
+    final verified = pickedItems.contains(orderItem.productId);
+    final item = controller.findAnyItemById(orderItem.productId);
+    final unit = orderItem.unit ?? item?.unit ?? 'pc';
+    final quantity = orderItem.quantity == orderItem.quantity.roundToDouble()
+        ? orderItem.quantity.toInt().toString()
+        : orderItem.quantity.toString();
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border.all(color: const Color(0xFFE1DCD5)),
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Row(
+        children: [
+          CircleAvatar(
+            radius: 17,
+            backgroundColor: verified ? const Color(0xFF168047) : ink,
+            child: verified
+                ? const Icon(LucideIcons.check, color: Colors.white, size: 16)
+                : Text(
+                    '$position',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+          ),
+          const SizedBox(width: 12),
+          Container(
+            width: 56,
+            height: 56,
+            clipBehavior: Clip.antiAlias,
+            decoration: BoxDecoration(
+              color: const Color(0xFFF0EEEA),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: item?.imageUrl.isNotEmpty == true
+                ? Image.network(
+                    item!.imageUrl,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, _, _) => const Icon(
+                      LucideIcons.package,
+                      color: Color(0xFF807A73),
+                    ),
+                  )
+                : const Icon(LucideIcons.package, color: Color(0xFF807A73)),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: InkWell(
+              onTap: () =>
+                  setState(() => _focusedProductId = orderItem.productId),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    _itemLocation(orderItem),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: ink,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w800,
+                      fontFamily: _fontFam,
+                    ),
+                  ),
+                  Text(
+                    orderItem.productName,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: ink,
+                      fontSize: 13,
+                      fontFamily: _fontFam,
+                    ),
+                  ),
+                  Text(
+                    'Qty $quantity $unit${verified ? ' · Verified' : ''}',
+                    style: const TextStyle(
+                      color: muted,
+                      fontSize: 12,
+                      fontFamily: _fontFam,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          if (!verified)
+            FilledButton.icon(
+              onPressed: () => _openScannerToCheckoff(
+                context,
+                orderItem.productId,
+                orderItem.quantity,
+              ),
+              icon: const Icon(LucideIcons.scanLine, size: 17),
+              label: const Text('Scan'),
+              style: FilledButton.styleFrom(
+                backgroundColor: ink,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(9),
+                ),
+              ),
+            )
+          else
+            const Icon(LucideIcons.circleCheck, color: Color(0xFF168047)),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    if (MediaQuery.sizeOf(context).width < 600) {
+      return _buildMobileChecklist(context);
+    }
     final String shortId = order.id.toString().substring(0, 8).toUpperCase();
 
     final int pickedCount = pickedItems.length;

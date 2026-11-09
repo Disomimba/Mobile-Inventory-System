@@ -12,6 +12,18 @@ enum MapMode { view, manage, selection, pick }
 /// Changes only the map projection; both views use the same saved layout.
 enum MapViewStyle { twoD, threeD }
 
+class PickStopMarker {
+  const PickStopMarker({
+    required this.locationId,
+    required this.number,
+    this.label,
+  });
+
+  final String locationId;
+  final int number;
+  final String? label;
+}
+
 enum MapSidebarAction {
   rotate,
   up,
@@ -65,6 +77,8 @@ bool canResizeMapElementWidth(MapElement element, {required bool grow}) {
 class StoreMap extends StatefulWidget {
   final InventoryController controller;
   final String? highlightId;
+  final bool showProductCounts;
+  final List<PickStopMarker> pickStopMarkers;
   final String? itemName;
   final MapMode mode;
   final MapViewStyle viewStyle;
@@ -75,7 +89,9 @@ class StoreMap extends StatefulWidget {
   final bool centerOnSelectedItem;
   final bool fitEntireMap;
   final bool compactZoomControls;
+  final bool miniZoomControls;
   final bool showZoomControls;
+  final Color zoomAccentColor;
   final List<MapElement>? layout;
   final bool itemAssignmentEnabled;
   final VoidCallback? onSelectionAssigned;
@@ -89,6 +105,8 @@ class StoreMap extends StatefulWidget {
     super.key,
     required this.controller,
     this.highlightId,
+    this.showProductCounts = true,
+    this.pickStopMarkers = const [],
     this.itemName,
     this.mode = MapMode.view,
     this.viewStyle = MapViewStyle.threeD,
@@ -99,7 +117,9 @@ class StoreMap extends StatefulWidget {
     this.centerOnSelectedItem = false,
     this.fitEntireMap = false,
     this.compactZoomControls = false,
+    this.miniZoomControls = false,
     this.showZoomControls = true,
+    this.zoomAccentColor = const Color(0xFF2563EB),
     this.layout,
     this.itemAssignmentEnabled = true,
     this.onSelectionAssigned,
@@ -972,26 +992,27 @@ class StoreMapState extends State<StoreMap>
   // ==========================================
   Widget _buildZoomControls() {
     final compact = widget.compactZoomControls;
-    final buttonSize = compact ? 34.0 : 48.0;
-    final iconSize = compact ? 17.0 : 24.0;
-    final iconColor = compact ? const Color(0xFF2563EB) : Colors.white;
+    final mini = compact && widget.miniZoomControls;
+    final buttonSize = mini ? 20.0 : (compact ? 26.0 : 48.0);
+    final iconSize = mini ? 12.0 : (compact ? 14.0 : 24.0);
+    final iconColor = compact ? widget.zoomAccentColor : Colors.white;
     return Positioned(
-      bottom: compact ? 8 : 20,
-      right: compact ? 8 : 20,
+      bottom: compact ? 6 : 20,
+      right: compact ? 6 : 20,
       child: Container(
         decoration: BoxDecoration(
           color: compact ? Colors.white : const Color(0xFF1E293B),
-          borderRadius: BorderRadius.circular(compact ? 10 : 16),
+          borderRadius: BorderRadius.circular(mini ? 6 : (compact ? 8 : 16)),
           border: Border.all(
             color: compact
-                ? const Color(0xFFBFDBFE)
+                ? widget.zoomAccentColor.withValues(alpha: 0.35)
                 : Colors.blueGrey.withOpacity(0.5),
-            width: 1.5,
+            width: compact ? 1 : 1.5,
           ),
           boxShadow: [
             BoxShadow(
               color: compact ? const Color(0x220F172A) : Colors.black45,
-              blurRadius: compact ? 5 : 8,
+              blurRadius: compact ? 3 : 8,
               offset: Offset(0, compact ? 2 : 4),
             ),
           ],
@@ -1010,9 +1031,9 @@ class StoreMapState extends State<StoreMap>
             ),
             Container(
               height: 1,
-              width: compact ? 28 : 40,
+              width: mini ? 16 : (compact ? 20 : 40),
               color: compact
-                  ? const Color(0xFFDBEAFE)
+                  ? widget.zoomAccentColor.withValues(alpha: 0.15)
                   : Colors.blueGrey.withOpacity(0.5),
             ),
             IconButton(
@@ -1026,9 +1047,9 @@ class StoreMapState extends State<StoreMap>
             ),
             Container(
               height: 1,
-              width: compact ? 28 : 40,
+              width: mini ? 16 : (compact ? 20 : 40),
               color: compact
-                  ? const Color(0xFFDBEAFE)
+                  ? widget.zoomAccentColor.withValues(alpha: 0.15)
                   : Colors.blueGrey.withOpacity(0.5),
             ),
             IconButton(
@@ -1040,7 +1061,7 @@ class StoreMapState extends State<StoreMap>
               icon: Icon(
                 LucideIcons.focus,
                 color: iconColor,
-                size: compact ? 16 : 20,
+                size: mini ? 11 : (compact ? 13 : 20),
               ),
               onPressed: () {
                 setState(() {
@@ -2255,8 +2276,9 @@ class StoreMapState extends State<StoreMap>
                           ...visibleLayout.map(
                             (el) => _buildPhysicalElement(el, minX, minY),
                           ),
-                           if (widget.mode == MapMode.view &&
-                               widget.showItemPopup &&
+                          ..._buildPickStopMarkers(minX, minY),
+                          if (widget.mode == MapMode.view &&
+                              widget.showItemPopup &&
                               _selectedPopupElement != null)
                             _buildFloatingPopup(mapWidth, minX, minY),
                         ],
@@ -2318,6 +2340,110 @@ class StoreMapState extends State<StoreMap>
       default:
         return Colors.grey;
     }
+  }
+
+  List<Widget> _buildPickStopMarkers(double minX, double minY) {
+    if (widget.pickStopMarkers.isEmpty) return const [];
+    final fixtures = {for (final element in _layout) element.id: element};
+    final seenAtFixture = <String, int>{};
+    final badges = <Widget>[];
+    for (final marker in widget.pickStopMarkers) {
+      final fixture = fixtures[marker.locationId];
+      if (fixture == null ||
+          (fixture.type != ElementType.rack &&
+              fixture.type != ElementType.shelf)) {
+        continue;
+      }
+      final offset = seenAtFixture.update(
+        marker.locationId,
+        (count) => count + 1,
+        ifAbsent: () => 0,
+      );
+      if (widget.viewStyle == MapViewStyle.threeD) {
+        final label = marker.label?.trim().isNotEmpty == true
+            ? marker.label!.trim()
+            : fixture.label;
+        badges.add(
+          Positioned(
+            left: fixture.position.dx - minX + fixture.size.width / 2 - 12,
+            top: fixture.position.dy - minY - 12 - offset * 26,
+            child: IgnorePointer(
+              child: Transform(
+                alignment: Alignment.center,
+                transform: Matrix4.inverted(
+                  Matrix4.identity()
+                    ..rotateX(-0.95)
+                    ..rotateZ(0.785),
+                ),
+                child: Semantics(
+                  label: 'Pick stop ${marker.number}: $label',
+                  child: Container(
+                    width: 24,
+                    height: 24,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF262626),
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.white, width: 2),
+                      boxShadow: const [
+                        BoxShadow(
+                          color: Color(0x33000000),
+                          blurRadius: 4,
+                          offset: Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                    child: Text(
+                      '${marker.number}',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+        continue;
+      }
+      badges.add(
+        Positioned(
+          left:
+              fixture.position.dx -
+              minX +
+              fixture.size.width -
+              11 -
+              offset * 24,
+          top: fixture.position.dy - minY - 11,
+          child: IgnorePointer(
+            child: Semantics(
+              label: 'Pick stop ${marker.number}',
+              child: Container(
+                width: 22,
+                height: 22,
+                alignment: Alignment.center,
+                decoration: const BoxDecoration(
+                  color: Color(0xFF171717),
+                  shape: BoxShape.circle,
+                ),
+                child: Text(
+                  '${marker.number}',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+    return badges;
   }
 
   Widget _buildFlatElement(
@@ -2439,7 +2565,8 @@ class StoreMapState extends State<StoreMap>
             ],
           ),
         ),
-        if (productCount > 0 &&
+        if (widget.showProductCounts &&
+            productCount > 0 &&
             type != ElementType.wall &&
             type != ElementType.door)
           Positioned(
@@ -2922,9 +3049,9 @@ class StoreMapState extends State<StoreMap>
                   hitBottomExtra +
                   hitPadding * 2,
               child: MouseRegion(
-                 cursor: widget.mode == MapMode.view && !widget.showItemPopup
-                     ? SystemMouseCursors.basic
-                     : SystemMouseCursors.click,
+                cursor: widget.mode == MapMode.view && !widget.showItemPopup
+                    ? SystemMouseCursors.basic
+                    : SystemMouseCursors.click,
                 opaque: false,
                 hitTestBehavior: HitTestBehavior.deferToChild,
                 onEnter: (_) => _hoverPhysicalElement(sourceId),
@@ -2990,8 +3117,8 @@ class StoreMapState extends State<StoreMap>
                       if (widget.onElementSelected != null) {
                         widget.onElementSelected!(interactiveEl);
                       }
-                     } else if (widget.mode == MapMode.view &&
-                         widget.showItemPopup) {
+                    } else if (widget.mode == MapMode.view &&
+                        widget.showItemPopup) {
                       if (el.type != ElementType.door &&
                           el.type != ElementType.cashier &&
                           el.type != ElementType.wall) {

@@ -25,7 +25,7 @@ import '../services/app_error_mapper.dart';
 import '../services/app_logger.dart';
 import 'dashboard_page.dart';
 import 'approval_center_page.dart';
-import 'forecasting_page.dart';
+import 'analytics_page.dart';
 import 'inventory_page.dart';
 import 'item_detail_page.dart';
 import 'map_editor_page.dart';
@@ -48,6 +48,8 @@ import '../services/store_access_service.dart';
 import '../services/main_section_url.dart';
 import 'staff_history_page.dart';
 import 'staff_page.dart';
+import 'helper_request_page.dart';
+import 'store_map.dart';
 import '../services/realtime/realtime_sync_service.dart';
 
 class MainScreen extends StatefulWidget {
@@ -81,6 +83,10 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   bool _isCheckingStockAlerts = false;
   bool _isCheckingExportReminders = false;
   StaffPresenceService? _staffPresenceService;
+  bool _changingHelperBreak = false;
+  int _helperMobileTab = 0;
+  bool _helperChecklistVisible = false;
+  String? _helperLocationName;
   OrderAutoAssignmentService? _orderAutoAssignmentService;
   StoreAccessService? _storeAccessService;
   StreamSubscription<StoreAccessSettings>? _storeAccessSubscription;
@@ -162,6 +168,12 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       _sessionRole,
     );
     _currentIndex = _mainSections.indexOf(initialSection);
+    if (_sessionRole == 'helper' && initialSection == MainSection.history) {
+      _helperMobileTab = 2;
+    }
+    if (_sessionRole == 'helper' && locationId != null) {
+      unawaited(_loadHelperLocationName(locationId));
+    }
     _mountedPageIndexes.add(_currentIndex!);
     WidgetsBinding.instance.addObserver(this);
 
@@ -1910,7 +1922,10 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       });
     }
     unawaited(
-      _scanInventoryStockAlerts().catchError((Object error, StackTrace stackTrace) {
+      _scanInventoryStockAlerts().catchError((
+        Object error,
+        StackTrace stackTrace,
+      ) {
         AppLogger.error(
           'Stock alert refresh failed after item save',
           error: error,
@@ -2331,10 +2346,10 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
           );
 
           pages.add(
-            ForecastingPage(
+            AnalyticsPage(
               controller: widget.controller,
-              aiService: _aiInsightsService,
               isActive: _currentIndex == forecastingIndex,
+              onOpenInventory: () => _selectMainIndex(inventoryIndex),
             ),
           );
         }
@@ -2383,10 +2398,16 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
           pages.add(
             OrderQueuePage(
               controller: widget.controller,
+              presenceService: _staffPresenceService,
               targetOrderId: _targetOrderId,
               onOrderOpened: () {
                 if (mounted) {
                   setState(() => _targetOrderId = null);
+                }
+              },
+              onChecklistVisibilityChanged: (visible) {
+                if (mounted && _helperChecklistVisible != visible) {
+                  setState(() => _helperChecklistVisible = visible);
                 }
               },
             ),
@@ -2546,21 +2567,50 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
 
         return Scaffold(
           backgroundColor: Colors.white,
-          appBar: _buildMobileAppBar(
-            orderQueueIndex: orderQueueIndex,
-            posIndex: posIndex,
-            transactionIndex: transactionIndex,
-            inventoryIndex: inventoryIndex,
-          ),
-          body: IndexedStack(
-            index: _currentIndex,
-            children: _lazyPageChildren(pages),
-          ),
-          bottomNavigationBar: _buildMobileNavigationBar(
-            isAdmin: isAdmin,
-            isHelper: isHelper,
-            isCashier: isCashier,
-          ),
+          appBar: isHelper
+              ? _buildHelperMobileAppBar(
+                  orderQueueIndex: orderQueueIndex,
+                  posIndex: posIndex,
+                  transactionIndex: transactionIndex,
+                  inventoryIndex: inventoryIndex,
+                )
+              : _buildMobileAppBar(
+                  orderQueueIndex: orderQueueIndex,
+                  posIndex: posIndex,
+                  transactionIndex: transactionIndex,
+                  inventoryIndex: inventoryIndex,
+                ),
+          body: isHelper
+              ? IndexedStack(
+                  index: _helperMobileTab,
+                  children: [
+                    pages[orderQueueIndex],
+                    _buildHelperMapPage(),
+                    pages[staffHistoryIndex],
+                    HelperRequestPage(
+                      controller: widget.controller,
+                      approvalChanges:
+                          widget.realtimeSync.approvalRequestChanges,
+                    ),
+                    _buildHelperMePage(),
+                  ],
+                )
+              : IndexedStack(
+                  index: _currentIndex,
+                  children: _lazyPageChildren(pages),
+                ),
+          bottomNavigationBar: isHelper
+              ? _helperChecklistVisible
+                    ? null
+                    : _buildHelperMobileNavigationBar(
+                        orderQueueIndex: orderQueueIndex,
+                        staffHistoryIndex: staffHistoryIndex,
+                      )
+              : _buildMobileNavigationBar(
+                  isAdmin: isAdmin,
+                  isHelper: isHelper,
+                  isCashier: isCashier,
+                ),
         );
       },
     );
@@ -2572,6 +2622,8 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     required int transactionIndex,
     required int inventoryIndex,
     NotificationPanelPlacement placement = NotificationPanelPlacement.belowBell,
+    Color iconColor = const Color(0xFF0F172A),
+    bool helperMobilePanel = false,
   }) {
     return Row(
       mainAxisSize: MainAxisSize.min,
@@ -2618,7 +2670,9 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
           const SizedBox(width: 4),
         ],
         NotificationBell(
+          iconColor: iconColor,
           placement: placement,
+          helperMobilePanel: helperMobilePanel,
           isActionable: (notification) => _isNotificationActionable(
             notification,
             orderQueueIndex: orderQueueIndex,
@@ -2635,6 +2689,295 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
             inventoryIndex: inventoryIndex,
           ),
         ),
+      ],
+    );
+  }
+
+  Future<void> _toggleHelperBreak() async {
+    final presence = _staffPresenceService;
+    if (presence == null || !presence.isStarted || _changingHelperBreak) return;
+    setState(() => _changingHelperBreak = true);
+    try {
+      await presence.setOnBreak(!presence.isOnBreak);
+    } catch (_) {
+      if (mounted) {
+        AppToast.error(context, 'Could not update your availability.');
+      }
+    } finally {
+      if (mounted) setState(() => _changingHelperBreak = false);
+    }
+  }
+
+  Future<void> _loadHelperLocationName(String locationId) async {
+    try {
+      final row = await widget.controller.supabase
+          .from('locations')
+          .select('location_name')
+          .eq('id', locationId)
+          .maybeSingle();
+      if (!mounted || widget.controller.activeLocationId != locationId) return;
+      final name = row?['location_name']?.toString().trim();
+      if (name != null && name.isNotEmpty) {
+        setState(() => _helperLocationName = name);
+      }
+    } catch (error) {
+      debugPrint('[Helper] location name unavailable: $error');
+    }
+  }
+
+  Widget _buildHelperMapPage() => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      const Padding(
+        padding: EdgeInsets.fromLTRB(20, 22, 20, 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Store map',
+              style: TextStyle(
+                fontSize: 22,
+                fontWeight: FontWeight.w800,
+                color: Color(0xFF171717),
+              ),
+            ),
+            SizedBox(height: 4),
+            Text(
+              'Find products on the store floor.',
+              style: TextStyle(fontSize: 13, color: Color(0xFF736B65)),
+            ),
+          ],
+        ),
+      ),
+      Expanded(
+        child: StoreMap(
+          controller: widget.controller,
+          mode: MapMode.view,
+          viewStyle: MapViewStyle.twoD,
+          itemAssignmentEnabled: false,
+          fitEntireMap: true,
+        ),
+      ),
+    ],
+  );
+
+  Widget _buildHelperMePage() => ColoredBox(
+    color: const Color(0xFFF6F5F2),
+    child: ListView(
+      padding: const EdgeInsets.all(20),
+      children: [
+        const Text(
+          'Me',
+          style: TextStyle(
+            fontSize: 22,
+            fontWeight: FontWeight.w800,
+            color: Color(0xFF171717),
+          ),
+        ),
+        const SizedBox(height: 18),
+        Container(
+          padding: const EdgeInsets.all(18),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            border: Border.all(color: const Color(0xFFE1DCD5)),
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                widget.controller.currentUserName ?? 'Helper',
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                widget.controller.loggedInUserEmail ?? 'Order helper',
+                style: const TextStyle(color: Color(0xFF736B65)),
+              ),
+              const SizedBox(height: 18),
+              OutlinedButton.icon(
+                onPressed: _showProfileDialog,
+                icon: const Icon(LucideIcons.userRound, size: 17),
+                label: const Text('View and edit profile'),
+              ),
+              const SizedBox(height: 6),
+              TextButton.icon(
+                onPressed: _handleLogout,
+                icon: const Icon(LucideIcons.logOut, size: 17),
+                label: const Text('Sign out'),
+              ),
+            ],
+          ),
+        ),
+      ],
+    ),
+  );
+
+  Widget _buildHelperMobileNavigationBar({
+    required int orderQueueIndex,
+    required int staffHistoryIndex,
+  }) {
+    return BottomNavigationBar(
+      currentIndex: _helperMobileTab,
+      type: BottomNavigationBarType.fixed,
+      backgroundColor: Colors.white,
+      selectedItemColor: const Color(0xFFC83D08),
+      unselectedItemColor: const Color(0xFF746E68),
+      selectedFontSize: 11,
+      unselectedFontSize: 11,
+      showUnselectedLabels: true,
+      elevation: 0,
+      onTap: (index) {
+        setState(() => _helperMobileTab = index);
+        _selectMainIndex(index == 2 ? staffHistoryIndex : orderQueueIndex);
+      },
+      items: const [
+        BottomNavigationBarItem(
+          icon: Icon(LucideIcons.listChecks),
+          label: 'Queue',
+        ),
+        BottomNavigationBarItem(icon: Icon(LucideIcons.map), label: 'Map'),
+        BottomNavigationBarItem(
+          icon: Icon(LucideIcons.history),
+          label: 'History',
+        ),
+        BottomNavigationBarItem(
+          icon: Icon(LucideIcons.clipboardPlus),
+          label: 'Request',
+        ),
+        BottomNavigationBarItem(icon: Icon(LucideIcons.userRound), label: 'Me'),
+      ],
+    );
+  }
+
+  PreferredSizeWidget _buildHelperMobileAppBar({
+    required int orderQueueIndex,
+    required int posIndex,
+    required int transactionIndex,
+    required int inventoryIndex,
+  }) {
+    final name = widget.controller.currentUserName ?? 'Helper';
+    final initials = name
+        .trim()
+        .split(RegExp(r'\s+'))
+        .take(2)
+        .map((part) => part.isEmpty ? '' : part[0].toUpperCase())
+        .join();
+    final presence = _staffPresenceService;
+    return AppBar(
+      automaticallyImplyLeading: false,
+      backgroundColor: const Color(0xFF211F1D),
+      surfaceTintColor: Colors.transparent,
+      toolbarHeight: 74,
+      titleSpacing: 16,
+      title: Row(
+        children: [
+          CircleAvatar(
+            radius: 21,
+            backgroundColor: const Color(0xFF45413E),
+            child: Text(
+              initials,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                    fontFamily: _fontFam,
+                  ),
+                ),
+                Text(
+                  _helperLocationName == null
+                      ? 'Helper'
+                      : 'Helper · $_helperLocationName',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Color(0xFFC2BCB7),
+                    fontSize: 12,
+                    fontFamily: _fontFam,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+      actions: [
+        if (presence != null)
+          AnimatedBuilder(
+            animation: presence,
+            builder: (context, _) {
+              final onBreak = presence.isOnBreak;
+              return Padding(
+                padding: const EdgeInsets.only(right: 4),
+                child: ActionChip(
+                  tooltip: onBreak
+                      ? 'Switch to Available'
+                      : 'Switch to On break',
+                  onPressed: _changingHelperBreak || !presence.isStarted
+                      ? null
+                      : _toggleHelperBreak,
+                  backgroundColor: onBreak
+                      ? const Color(0xFF45413E)
+                      : const Color(0xFF168047),
+                  disabledColor: const Color(0xFF45413E),
+                  side: BorderSide.none,
+                  shape: const StadiumBorder(),
+                  label: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        width: 6,
+                        height: 6,
+                        decoration: const BoxDecoration(
+                          color: Colors.white,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                      const SizedBox(width: 7),
+                      Text(
+                        onBreak ? 'On break' : 'Available',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          fontFamily: _fontFam,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        _buildNotificationControls(
+          orderQueueIndex: orderQueueIndex,
+          posIndex: posIndex,
+          transactionIndex: transactionIndex,
+          inventoryIndex: inventoryIndex,
+          iconColor: Colors.white,
+          helperMobilePanel: true,
+        ),
+        const SizedBox(width: 8),
       ],
     );
   }

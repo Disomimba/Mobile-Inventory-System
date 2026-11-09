@@ -1312,9 +1312,9 @@ class InventoryController {
     required InventoryApprovalType type,
     required String productId,
     required double quantity,
-    required String proofStoragePath,
-    required String proofFileName,
-    required String proofMimeType,
+    String? proofStoragePath,
+    String? proofFileName,
+    String? proofMimeType,
     String? reason,
     String? note,
   }) async {
@@ -1336,10 +1336,11 @@ class InventoryController {
         (reason == null || reason.trim().isEmpty)) {
       throw ArgumentError.value(reason, 'reason', 'A reason is required');
     }
-    if (proofStoragePath.trim().isEmpty ||
-        proofFileName.trim().isEmpty ||
-        proofMimeType.trim().isEmpty) {
-      throw ArgumentError('Photo evidence is required.');
+    final hasProof = proofStoragePath?.trim().isNotEmpty ?? false;
+    if (hasProof &&
+        ((proofFileName?.trim().isEmpty ?? true) ||
+            (proofMimeType?.trim().isEmpty ?? true))) {
+      throw ArgumentError('Photo evidence details are incomplete.');
     }
     late final dynamic response;
     try {
@@ -1353,9 +1354,11 @@ class InventoryController {
           'p_quantity': quantity,
           'p_reason': reason?.trim(),
           'p_note': note?.trim(),
-          'p_proof_storage_path': proofStoragePath.trim(),
-          'p_proof_file_name': proofFileName.trim(),
-          'p_proof_mime_type': proofMimeType.trim().toLowerCase(),
+          'p_proof_storage_path': hasProof ? proofStoragePath!.trim() : null,
+          'p_proof_file_name': hasProof ? proofFileName!.trim() : null,
+          'p_proof_mime_type': hasProof
+              ? proofMimeType!.trim().toLowerCase()
+              : null,
         },
       );
     } catch (error, stackTrace) {
@@ -1371,6 +1374,25 @@ class InventoryController {
     _invalidateApprovalPages(refreshVisible: false);
     await _notifyApprovalLifecycle(request);
     return request;
+  }
+
+  Future<List<InventoryApprovalRequest>>
+  fetchMyInventoryApprovalRequests() async {
+    if (!canRequestInventoryApproval) {
+      throw StateError('Only Cashier or Helper accounts may view requests.');
+    }
+    final response = await supabase.rpc(
+      'my_inventory_approval_requests_v1',
+      params: <String, dynamic>{'p_session_token': _requireSessionToken()},
+    );
+    final records = response as List<dynamic>? ?? const [];
+    return records
+        .map(
+          (row) => InventoryApprovalRequest.fromJson(
+            Map<String, dynamic>.from(row as Map),
+          ),
+        )
+        .toList(growable: false);
   }
 
   Future<String> uploadApprovalEvidence({
