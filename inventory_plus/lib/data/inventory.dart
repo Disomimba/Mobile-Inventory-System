@@ -98,6 +98,7 @@ class InventoryItem {
   final String? model;
   final String? productSize;
   final String? shelfLevel;
+  final String? binNumber;
   final String unit;
 
   InventoryItem({
@@ -115,6 +116,7 @@ class InventoryItem {
     this.model,
     this.productSize,
     this.shelfLevel,
+    this.binNumber,
     this.unit = 'pcs',
   });
 
@@ -136,6 +138,7 @@ class InventoryItem {
       model: map['model'],
       productSize: map['product_size'],
       shelfLevel: map['shelf_level'],
+      binNumber: map['bin_number'],
       unit: map['unit'] ?? 'pcs',
     );
   }
@@ -155,6 +158,7 @@ class InventoryItem {
     String? model,
     String? productSize,
     String? shelfLevel,
+    String? binNumber,
     String? unit,
   }) {
     return InventoryItem(
@@ -172,6 +176,7 @@ class InventoryItem {
       model: model ?? this.model,
       productSize: productSize ?? this.productSize,
       shelfLevel: shelfLevel ?? this.shelfLevel,
+      binNumber: binNumber ?? this.binNumber,
       unit: unit ?? this.unit,
     );
   }

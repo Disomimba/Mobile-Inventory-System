@@ -160,16 +160,21 @@ void main() {
 
     await tester.tap(find.text('Performance'));
     await tester.pumpAndSettle();
-    expect(find.text('Staff Performance'), findsOneWidget);
+    expect(find.text('Staff'), findsOneWidget);
+    expect(find.text('Staff list'), findsOneWidget);
     expect(find.text('Add staff'), findsOneWidget);
-    final title = tester.getRect(find.text('Staff Performance'));
+    final title = tester.getRect(find.text('Staff'));
     final addButton = tester.getRect(find.text('Add staff'));
+    final staffTab = tester.getRect(find.text('Staff list'));
+    final performanceTab = tester.getRect(find.text('Performance'));
     expect((title.center.dy - addButton.center.dy).abs(), lessThan(30));
+    expect(staffTab.top, greaterThan(title.bottom));
+    expect((staffTab.center.dy - performanceTab.center.dy).abs(), lessThan(1));
 
     await tester.tap(find.text('Staff list'));
     await tester.pumpAndSettle();
     expect(find.text('Jomar Villanueva'), findsOneWidget);
-    expect(find.text('Staff Performance'), findsNothing);
+    expect(find.text('Staff'), findsOneWidget);
   });
 
   testWidgets('role choices fit the compact staff drawer', (tester) async {

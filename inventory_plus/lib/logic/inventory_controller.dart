@@ -528,18 +528,21 @@ class InventoryController {
     required String gcashMerchantId,
     required Map<String, double> cashierLimits,
   }) async {
-    await supabase.rpc('update_settings_dashboard_v1', params: {
-      'p_session_token': _requireSessionToken(),
-      'p_auto_assign_orders': autoAssignOrders,
-      'p_max_helper_orders': maxHelperOrders,
-      'p_max_approved_discount': maxApprovedDiscount,
-      'p_default_cashier_limit': defaultCashierLimit,
-      'p_gcash_enabled': acceptGcash,
-      'p_gcash_account_name': gcashAccountName.trim(),
-      'p_gcash_number': gcashNumber.trim(),
-      'p_gcash_merchant_id': gcashMerchantId.trim(),
-      'p_cashier_limits': cashierLimits,
-    });
+    await supabase.rpc(
+      'update_settings_dashboard_v1',
+      params: {
+        'p_session_token': _requireSessionToken(),
+        'p_auto_assign_orders': autoAssignOrders,
+        'p_max_helper_orders': maxHelperOrders,
+        'p_max_approved_discount': maxApprovedDiscount,
+        'p_default_cashier_limit': defaultCashierLimit,
+        'p_gcash_enabled': acceptGcash,
+        'p_gcash_account_name': gcashAccountName.trim(),
+        'p_gcash_number': gcashNumber.trim(),
+        'p_gcash_merchant_id': gcashMerchantId.trim(),
+        'p_cashier_limits': cashierLimits,
+      },
+    );
     gcashEnabled = acceptGcash;
     cashierAutoApprovedDiscountLimitPct = defaultCashierLimit;
     _paymentSettingsLoaded = false;
@@ -854,7 +857,9 @@ class InventoryController {
       try {
         response = await supabase
             .from('store_settings')
-            .select('gcash_qr_url, cashier_auto_approved_discount_limit_pct, gcash_enabled')
+            .select(
+              'gcash_qr_url, cashier_auto_approved_discount_limit_pct, gcash_enabled',
+            )
             .eq('location_id', locationId)
             .maybeSingle();
       } catch (_) {
@@ -873,8 +878,8 @@ class InventoryController {
               .eq('id', accountId)
               .eq('location_id', locationId)
               .maybeSingle();
-          cashierOverride =
-              (profile?['cashier_discount_limit_pct'] as num?)?.toDouble();
+          cashierOverride = (profile?['cashier_discount_limit_pct'] as num?)
+              ?.toDouble();
         } catch (_) {
           // Older databases have no per-cashier override column yet.
         }
@@ -884,7 +889,8 @@ class InventoryController {
       }
       gcashQrUrl = response?['gcash_qr_url']?.toString() ?? '';
       gcashEnabled = response?['gcash_enabled'] != false;
-      cashierAutoApprovedDiscountLimitPct = cashierOverride ??
+      cashierAutoApprovedDiscountLimitPct =
+          cashierOverride ??
           (response?['cashier_auto_approved_discount_limit_pct'] as num?)
               ?.toDouble() ??
           10.0;
@@ -1106,13 +1112,13 @@ class InventoryController {
     try {
       final path = _productImagePath(uploadKey, fileName);
       await supabase.storage
-          .from('product_images')
+          .from('store_assets')
           .upload(
             path,
             imageFile,
             fileOptions: const FileOptions(upsert: true, cacheControl: '0'),
           );
-      return supabase.storage.from('product_images').getPublicUrl(path);
+      return _productImageUrl(path);
     } catch (error, stackTrace) {
       AppLogger.error(
         'Product image upload failed',
@@ -1148,8 +1154,11 @@ class InventoryController {
         ? rawExtension
         : 'jpg';
     final digest = sha256.convert(utf8.encode(normalizedKey)).toString();
-    return 'public/$locationId/$digest.$extension';
+    return 'public/$locationId/products/$digest.$extension';
   }
+
+  String _productImageUrl(String path) =>
+      '${supabase.storage.from('store_assets').getPublicUrl(path)}?v=${DateTime.now().microsecondsSinceEpoch}';
 
   Future<void> writeOffStock(
     String id,
@@ -1653,13 +1662,13 @@ class InventoryController {
     try {
       final path = _productImagePath(uploadKey, fileName);
       await supabase.storage
-          .from('product_images')
+          .from('store_assets')
           .uploadBinary(
             path,
             imageBytes,
             fileOptions: const FileOptions(upsert: true, cacheControl: '0'),
           );
-      return supabase.storage.from('product_images').getPublicUrl(path);
+      return _productImageUrl(path);
     } catch (error, stackTrace) {
       AppLogger.error(
         'Product image upload failed',
@@ -1685,23 +1694,32 @@ class InventoryController {
 
     // Product details remain a normal save. Quantity and its history entry are
     // committed together by adjust_inventory_quantity_v1 below.
-    await supabase
+    final savedProduct = await supabase
         .from('products')
         .update({
           'product_name': updatedItem.name,
           'sku': updatedItem.sku,
+          'category': updatedItem.category,
           'product_price': updatedItem.price,
           'description': updatedItem.description,
           'manufacturer': updatedItem.manufacturer,
           'model': updatedItem.model,
           'product_size': updatedItem.productSize,
           'shelf_level': updatedItem.shelfLevel,
+          'bin_number': updatedItem.binNumber,
           'image_url': updatedItem.imageUrl,
           'unit': updatedItem.unit,
           'max_quantity': updatedItem.maxQuantity,
         })
         .eq('id', updatedItem.id)
-        .eq('location_id', locationId);
+        .eq('location_id', locationId)
+        .select('id')
+        .maybeSingle();
+    if (savedProduct == null) {
+      throw const AppUserFacingException(
+        'Product was not saved. Refresh inventory and try again.',
+      );
+    }
 
     String? transactionId;
     var authoritativeQuantity = oldItem.quantity;
@@ -2027,7 +2045,9 @@ class InventoryController {
     String? manufacturer,
     String? model,
     String? productSize,
+    String? category,
     String? shelfLevel,
+    String? binNumber,
     String? imageUrl,
     String? unit,
   }) {
@@ -2041,7 +2061,9 @@ class InventoryController {
       manufacturer: manufacturer,
       model: model,
       productSize: productSize,
+      category: category,
       shelfLevel: shelfLevel,
+      binNumber: binNumber,
       imageUrl: imageUrl,
       unit: unit,
     );

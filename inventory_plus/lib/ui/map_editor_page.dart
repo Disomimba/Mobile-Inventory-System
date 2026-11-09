@@ -623,7 +623,7 @@ class _MapEditorPageState extends State<MapEditorPage> {
         backgroundColor: selected
             ? const Color(0xFF1C1C1C)
             : Colors.transparent,
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       ),
       icon: Icon(icon, size: 15),
       label: Text(label, style: const TextStyle(fontSize: 12)),
@@ -631,18 +631,15 @@ class _MapEditorPageState extends State<MapEditorPage> {
   }
 
   Widget _buildMapToolbar() {
-    final editingTools = Wrap(
-      spacing: 10,
-      runSpacing: 10,
-      crossAxisAlignment: WrapCrossAlignment.center,
+    final editingTools = Row(
+      mainAxisSize: MainAxisSize.min,
       children: [
         if (_mode == MapMode.manage)
           Container(
             padding: const EdgeInsets.all(3),
             decoration: _mapPanelDecoration(),
-            child: Wrap(
-              spacing: 2,
-              runSpacing: 2,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
               children: [
                 _mapTool('Select', LucideIcons.mousePointer2, null),
                 for (final type in ElementType.values)
@@ -650,6 +647,7 @@ class _MapEditorPageState extends State<MapEditorPage> {
               ],
             ),
           ),
+        if (_mode == MapMode.manage) const SizedBox(width: 10),
         if (_mode == MapMode.manage)
           Container(
             padding: const EdgeInsets.all(3),
@@ -660,17 +658,30 @@ class _MapEditorPageState extends State<MapEditorPage> {
                 IconButton(
                   tooltip: 'Undo',
                   onPressed: _undoStack.isEmpty ? null : _undo,
+                  constraints: const BoxConstraints.tightFor(
+                    width: 34,
+                    height: 34,
+                  ),
+                  padding: EdgeInsets.zero,
                   icon: const Icon(LucideIcons.undo2, size: 17),
                 ),
                 IconButton(
                   tooltip: 'Redo',
                   onPressed: _redoStack.isEmpty ? null : _redo,
+                  constraints: const BoxConstraints.tightFor(
+                    width: 34,
+                    height: 34,
+                  ),
+                  padding: EdgeInsets.zero,
                   icon: const Icon(LucideIcons.redo2, size: 17),
                 ),
                 TextButton.icon(
                   onPressed: _draftLayout.isEmpty || _isSaving
                       ? null
                       : _confirmClearDraft,
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                  ),
                   icon: const Icon(LucideIcons.eraser, size: 17),
                   label: const Text('Clear'),
                 ),
@@ -690,40 +701,57 @@ class _MapEditorPageState extends State<MapEditorPage> {
         ],
       ),
     );
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        if (constraints.maxWidth < 1100) {
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              if (_mode == MapMode.manage)
-                Align(alignment: Alignment.centerLeft, child: editingTools),
-              if (_mode == MapMode.manage) const SizedBox(height: 10),
-              SizedBox(
-                width: double.infinity,
-                child: Wrap(
-                  alignment: WrapAlignment.end,
-                  spacing: 10,
-                  runSpacing: 10,
-                  children: [_buildModeTabs(), viewToggle],
-                ),
-              ),
-            ],
-          );
-        }
-        return Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(child: editingTools),
-            const SizedBox(width: 10),
-            _buildModeTabs(),
-            const SizedBox(width: 10),
-            viewToggle,
-          ],
-        );
-      },
+    final zoomControls = Container(
+      padding: const EdgeInsets.all(3),
+      decoration: _mapPanelDecoration(),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _mapZoomButton(
+            'Zoom in',
+            LucideIcons.plus,
+            () => _storeMapKey.currentState?.zoomIn(),
+          ),
+          _mapZoomButton(
+            'Zoom out',
+            LucideIcons.minus,
+            () => _storeMapKey.currentState?.zoomOut(),
+          ),
+          _mapZoomButton(
+            'Center map',
+            LucideIcons.focus,
+            () => _storeMapKey.currentState?.recenterMap(),
+          ),
+        ],
+      ),
+    );
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: [
+          if (_mode == MapMode.manage) editingTools,
+          if (_mode == MapMode.manage) const SizedBox(width: 10),
+          zoomControls,
+          const SizedBox(width: 10),
+          viewToggle,
+          const SizedBox(width: 10),
+          _buildModeTabs(),
+        ],
+      ),
     );
   }
+
+  Widget _mapZoomButton(
+    String tooltip,
+    IconData icon,
+    VoidCallback onPressed,
+  ) => IconButton(
+    tooltip: tooltip,
+    onPressed: onPressed,
+    constraints: const BoxConstraints.tightFor(width: 34, height: 34),
+    padding: EdgeInsets.zero,
+    icon: Icon(icon, size: 17, color: const Color(0xFF302C29)),
+  );
 
   Widget _mapTool(String label, IconData icon, ElementType? type) {
     final selected = _placementType == type;
@@ -735,7 +763,7 @@ class _MapEditorPageState extends State<MapEditorPage> {
         backgroundColor: selected
             ? const Color(0xFF1C1C1C)
             : Colors.transparent,
-        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 10),
       ),
       icon: Icon(icon, size: 15),
       label: Text(label, style: const TextStyle(fontSize: 12)),
@@ -832,6 +860,7 @@ class _MapEditorPageState extends State<MapEditorPage> {
             viewStyle: _viewStyle,
             hideWalls: _hideWalls,
             fitEntireMap: true,
+            showZoomControls: false,
             showMobileToolbar: false,
             placementType: _mode == MapMode.manage ? _placementType : null,
             selectedItemId: _mode == MapMode.selection ? _selectedItemId : null,

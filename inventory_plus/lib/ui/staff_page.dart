@@ -192,6 +192,90 @@ class _StaffPageState extends State<StaffPage> {
     return (a['name']?.toString() ?? '').compareTo(b['name']?.toString() ?? '');
   }
 
+  Widget _buildPageHeader(int online) => LayoutBuilder(
+    builder: (context, limits) {
+      final heading = Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Staff',
+            style: TextStyle(
+              fontSize: 23,
+              fontWeight: FontWeight.w700,
+              color: _ink,
+            ),
+          ),
+          const SizedBox(height: 5),
+          Text(
+            '${_staff.length} accounts · $online online now',
+            style: const TextStyle(fontSize: 14, color: _muted),
+          ),
+        ],
+      );
+      final add = FilledButton.icon(
+        onPressed: () => _openEditor(),
+        style: FilledButton.styleFrom(
+          backgroundColor: _orange,
+          foregroundColor: Colors.white,
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+        ),
+        icon: const Icon(LucideIcons.userRoundPlus, size: 17),
+        label: const Text('Add staff'),
+      );
+      return limits.maxWidth < 620
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [heading, const SizedBox(height: 16), add],
+            )
+          : Row(
+              children: [
+                Expanded(child: heading),
+                add,
+              ],
+            );
+    },
+  );
+
+  Widget _buildViewTabs() => DecoratedBox(
+    decoration: const BoxDecoration(
+      border: Border(bottom: BorderSide(color: _line)),
+    ),
+    child: Row(
+      children: [
+        _viewTab('Staff list', showPerformance: false),
+        _viewTab('Performance', showPerformance: true),
+      ],
+    ),
+  );
+
+  Widget _viewTab(String label, {required bool showPerformance}) {
+    final selected = _showPerformance == showPerformance;
+    return InkWell(
+      onTap: selected
+          ? null
+          : () => setState(() => _showPerformance = showPerformance),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(14, 12, 14, 13),
+        decoration: BoxDecoration(
+          border: Border(
+            bottom: BorderSide(
+              color: selected ? _orange : Colors.transparent,
+              width: 2,
+            ),
+          ),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: selected ? _ink : _muted,
+            fontSize: 13,
+            fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final online = widget.presence?.activeStaff.length ?? 0;
@@ -204,77 +288,13 @@ class _StaffPageState extends State<StaffPage> {
             children: [
               Padding(
                 padding: const EdgeInsets.fromLTRB(32, 32, 32, 0),
-                child: LayoutBuilder(
-                  builder: (context, limits) {
-                    final heading = Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: const [
-                        Text(
-                          'Staff Performance',
-                          style: TextStyle(
-                            fontSize: 23,
-                            fontWeight: FontWeight.w700,
-                            color: _ink,
-                          ),
-                        ),
-                        SizedBox(height: 5),
-                        Text(
-                          'Monitor employee workload, efficiency, and service performance',
-                          style: TextStyle(fontSize: 14, color: _muted),
-                        ),
-                      ],
-                    );
-                    final actions = Wrap(
-                      spacing: 10,
-                      runSpacing: 10,
-                      children: [
-                        OutlinedButton.icon(
-                          onPressed: () =>
-                              setState(() => _showPerformance = false),
-                          icon: const Icon(LucideIcons.usersRound, size: 17),
-                          label: const Text('Staff list'),
-                        ),
-                        FilledButton.icon(
-                          onPressed: null,
-                          style: FilledButton.styleFrom(
-                            disabledBackgroundColor: const Color(0xFFFFEDE5),
-                            disabledForegroundColor: _orange,
-                          ),
-                          icon: const Icon(LucideIcons.barChart2, size: 17),
-                          label: const Text('Performance'),
-                        ),
-                        FilledButton.icon(
-                          onPressed: () => _openEditor(),
-                          style: FilledButton.styleFrom(
-                            backgroundColor: _orange,
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 18,
-                              vertical: 14,
-                            ),
-                          ),
-                          icon: const Icon(LucideIcons.userRoundPlus, size: 17),
-                          label: const Text('Add staff'),
-                        ),
-                      ],
-                    );
-                    return limits.maxWidth < 750
-                        ? Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              heading,
-                              const SizedBox(height: 16),
-                              actions,
-                            ],
-                          )
-                        : Row(
-                            children: [
-                              Expanded(child: heading),
-                              const SizedBox(width: 12),
-                              actions,
-                            ],
-                          );
-                  },
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _buildPageHeader(online),
+                    const SizedBox(height: 28),
+                    _buildViewTabs(),
+                  ],
                 ),
               ),
               Expanded(
@@ -297,68 +317,10 @@ class _StaffPageState extends State<StaffPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              LayoutBuilder(
-                builder: (context, limits) {
-                  final heading = Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Staff',
-                        style: TextStyle(
-                          fontSize: 23,
-                          fontWeight: FontWeight.w700,
-                          color: _ink,
-                        ),
-                      ),
-                      const SizedBox(height: 5),
-                      Text(
-                        '${_staff.length} accounts · $online online now',
-                        style: const TextStyle(fontSize: 14, color: _muted),
-                      ),
-                    ],
-                  );
-                  final add = FilledButton.icon(
-                    onPressed: () => _openEditor(),
-                    style: FilledButton.styleFrom(
-                      backgroundColor: _orange,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 18,
-                        vertical: 14,
-                      ),
-                    ),
-                    icon: const Icon(LucideIcons.userRoundPlus, size: 17),
-                    label: const Text('Add staff'),
-                  );
-                  final performance = OutlinedButton.icon(
-                    onPressed: () => setState(() => _showPerformance = true),
-                    icon: const Icon(LucideIcons.barChart2, size: 17),
-                    label: const Text('Performance'),
-                  );
-                  return limits.maxWidth < 620
-                      ? Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            heading,
-                            const SizedBox(height: 16),
-                            Wrap(
-                              spacing: 10,
-                              runSpacing: 10,
-                              children: [performance, add],
-                            ),
-                          ],
-                        )
-                      : Row(
-                          children: [
-                            Expanded(child: heading),
-                            performance,
-                            const SizedBox(width: 10),
-                            add,
-                          ],
-                        );
-                },
-              ),
+              _buildPageHeader(online),
               const SizedBox(height: 28),
+              _buildViewTabs(),
+              const SizedBox(height: 20),
               LayoutBuilder(
                 builder: (context, limits) => Wrap(
                   spacing: 10,

@@ -1903,13 +1903,21 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
 
   Future<void> _handleUpdateItem(InventoryItem item) async {
     await widget.controller.updateItem(item);
-    await _scanInventoryStockAlerts();
 
     if (mounted) {
       setState(() {
         _selectedItemId = item.id;
       });
     }
+    unawaited(
+      _scanInventoryStockAlerts().catchError((Object error, StackTrace stackTrace) {
+        AppLogger.error(
+          'Stock alert refresh failed after item save',
+          error: error,
+          stackTrace: stackTrace,
+        );
+      }),
+    );
   }
 
   Future<void> _handleDeleteItem(String id) async {

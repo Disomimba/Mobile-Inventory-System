@@ -71,9 +71,11 @@ class StoreMap extends StatefulWidget {
   final bool hideWalls;
   final bool showMobileToolbar;
   final String? selectedItemId;
+  final bool showItemPopup;
   final bool centerOnSelectedItem;
   final bool fitEntireMap;
   final bool compactZoomControls;
+  final bool showZoomControls;
   final List<MapElement>? layout;
   final bool itemAssignmentEnabled;
   final VoidCallback? onSelectionAssigned;
@@ -93,9 +95,11 @@ class StoreMap extends StatefulWidget {
     this.hideWalls = false,
     this.showMobileToolbar = true,
     this.selectedItemId,
+    this.showItemPopup = true,
     this.centerOnSelectedItem = false,
     this.fitEntireMap = false,
     this.compactZoomControls = false,
+    this.showZoomControls = true,
     this.layout,
     this.itemAssignmentEnabled = true,
     this.onSelectionAssigned,
@@ -112,6 +116,12 @@ class StoreMap extends StatefulWidget {
 
 class StoreMapState extends State<StoreMap>
     with SingleTickerProviderStateMixin {
+  void zoomIn() => _zoom(1.2);
+
+  void zoomOut() => _zoom(0.8);
+
+  void recenterMap() => setState(() => _recenterMap(preserveScale: true));
+
   late AnimationController _animController;
   late Animation<double> _bounceAnimation;
   String? _activeElementId;
@@ -298,7 +308,7 @@ class StoreMapState extends State<StoreMap>
     _bounceAnimation = Tween<double>(begin: 0, end: -8).animate(
       CurvedAnimation(parent: _animController, curve: Curves.easeInOut),
     );
-    if (widget.selectedItemId != null) {
+    if (widget.showItemPopup && widget.selectedItemId != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _autoOpenItemCard(widget.selectedItemId!);
       });
@@ -313,7 +323,7 @@ class StoreMapState extends State<StoreMap>
       setState(() => _mapLayoutLoadFailed = false);
 
       final selectedItemId = widget.selectedItemId;
-      if (selectedItemId != null) {
+      if (widget.showItemPopup && selectedItemId != null) {
         _autoOpenItemCard(selectedItemId);
         if (widget.centerOnSelectedItem || widget.fitEntireMap) {
           WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -348,7 +358,9 @@ class StoreMapState extends State<StoreMap>
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         final selectedItemId = widget.selectedItemId;
-        if (selectedItemId != null) _autoOpenItemCard(selectedItemId);
+        if (widget.showItemPopup && selectedItemId != null) {
+          _autoOpenItemCard(selectedItemId);
+        }
         _recenterMap(preserveScale: _isInitialScaleSet);
       });
     }
@@ -393,7 +405,7 @@ class StoreMapState extends State<StoreMap>
     _inventorySubscription = widget.controller.inventorySnapshots.listen((_) {
       if (!mounted) return;
       final String? selectedItemId = widget.selectedItemId;
-      if (selectedItemId != null) {
+      if (widget.showItemPopup && selectedItemId != null) {
         final previousLocationId = _selectedPopupElement?.id;
         _autoOpenItemCard(selectedItemId);
         if (widget.centerOnSelectedItem &&
@@ -2243,7 +2255,8 @@ class StoreMapState extends State<StoreMap>
                           ...visibleLayout.map(
                             (el) => _buildPhysicalElement(el, minX, minY),
                           ),
-                          if (widget.mode == MapMode.view &&
+                           if (widget.mode == MapMode.view &&
+                               widget.showItemPopup &&
                               _selectedPopupElement != null)
                             _buildFloatingPopup(mapWidth, minX, minY),
                         ],
@@ -2277,7 +2290,7 @@ class StoreMapState extends State<StoreMap>
           _buildLeftToolbar(),
         ],
 
-        _buildZoomControls(),
+        if (widget.showZoomControls) _buildZoomControls(),
       ],
     );
 
@@ -2909,7 +2922,9 @@ class StoreMapState extends State<StoreMap>
                   hitBottomExtra +
                   hitPadding * 2,
               child: MouseRegion(
-                cursor: SystemMouseCursors.click,
+                 cursor: widget.mode == MapMode.view && !widget.showItemPopup
+                     ? SystemMouseCursors.basic
+                     : SystemMouseCursors.click,
                 opaque: false,
                 hitTestBehavior: HitTestBehavior.deferToChild,
                 onEnter: (_) => _hoverPhysicalElement(sourceId),
@@ -2975,7 +2990,8 @@ class StoreMapState extends State<StoreMap>
                       if (widget.onElementSelected != null) {
                         widget.onElementSelected!(interactiveEl);
                       }
-                    } else if (widget.mode == MapMode.view) {
+                     } else if (widget.mode == MapMode.view &&
+                         widget.showItemPopup) {
                       if (el.type != ElementType.door &&
                           el.type != ElementType.cashier &&
                           el.type != ElementType.wall) {

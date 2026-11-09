@@ -17,6 +17,11 @@ const _ink = Color(0xFF172033);
 const _slate = Color(0xFF64748B);
 const _border = Color(0xFFE6EBF2);
 const _font = 'Hellix';
+const _warmBackground = Color(0xFFF7F6F4);
+const _warmBorder = Color(0xFFE6E1DC);
+const _warmMuted = Color(0xFF817A75);
+const _warmOrange = Color(0xFFC83D08);
+const _warmRed = Color(0xFFDC2626);
 
 String _qty(double value) => value == value.roundToDouble()
     ? value.toInt().toString()
@@ -61,7 +66,7 @@ class InventoryRedesign extends StatefulWidget {
   final ValueChanged<InventoryItem> onSelectItem;
   final Future<void> Function(InventoryItem) onUpdateItem;
   final VoidCallback onExport;
-  final VoidCallback onQrLabels;
+  final void Function(List<InventoryItem>?) onQrLabels;
   final VoidCallback onNewItem;
   final bool exportDue;
 
@@ -551,6 +556,15 @@ class _InventoryRedesignState extends State<InventoryRedesign> {
               selectedCategory: selectedCategory,
             );
           }
+          if (constraints.maxWidth >= 900) {
+            return _buildReferenceDesktop(
+              active: active,
+              disabled: disabled,
+              categories: categories,
+              selectedCategory: selectedCategory,
+              width: constraints.maxWidth,
+            );
+          }
           return SingleChildScrollView(
             padding: const EdgeInsets.all(20),
             child: Column(
@@ -599,7 +613,7 @@ class _InventoryRedesignState extends State<InventoryRedesign> {
                           style: _outlineStyle,
                         ),
                         OutlinedButton.icon(
-                          onPressed: widget.onQrLabels,
+                          onPressed: () => widget.onQrLabels(null),
                           icon: const Icon(LucideIcons.qrCode, size: 15),
                           label: const Text('QR labels'),
                           style: _outlineStyle,
@@ -958,6 +972,553 @@ class _InventoryRedesignState extends State<InventoryRedesign> {
     );
   }
 
+  Widget _buildReferenceDesktop({
+    required List<InventoryItem> active,
+    required List<InventoryItem> disabled,
+    required List<String> categories,
+    required String selectedCategory,
+    required double width,
+  }) {
+    final disabledIds = disabled.map((item) => item.id).toSet();
+    final allItems = <InventoryItem>[...active, ...disabled];
+    final query = _search.text.trim().toLowerCase();
+    final filtered = allItems.where((item) {
+      final inactive = disabledIds.contains(item.id);
+      final matchesStatus = switch (_stockFilter) {
+        'inactive' => inactive,
+        'all' || 'ok' => true,
+        _ => !inactive && _matchesStatusFilter(item, _stockFilter),
+      };
+      return matchesStatus &&
+          (selectedCategory == 'All' || item.category == selectedCategory) &&
+          (query.isEmpty ||
+              item.name.toLowerCase().contains(query) ||
+              item.sku.toLowerCase().contains(query) ||
+              (item.manufacturer ?? '').toLowerCase().contains(query) ||
+              (item.model ?? '').toLowerCase().contains(query));
+    }).toList();
+    if (_sortBy != 'none') filtered.sort(_compareItems);
+    final pageCount = math.max(1, (filtered.length + _perPage - 1) ~/ _perPage);
+    final page = _page.clamp(0, pageCount - 1).toInt();
+    final visible = filtered.skip(page * _perPage).take(_perPage).toList();
+    final viewValue = filtered
+        .where((item) => !disabledIds.contains(item.id))
+        .fold<double>(0, (sum, item) => sum + item.quantity * item.price);
+    final counts = <String, int>{
+      'all': allItems.length,
+      'ok': active
+          .where((i) => widget.controller.stockStatusFor(i) == StockStatus.ok)
+          .length,
+      'low': active
+          .where((i) => widget.controller.stockStatusFor(i) == StockStatus.low)
+          .length,
+      'critical': active
+          .where(
+            (i) => widget.controller.stockStatusFor(i) == StockStatus.critical,
+          )
+          .length,
+      'out': active
+          .where((i) => widget.controller.stockStatusFor(i) == StockStatus.out)
+          .length,
+      'inactive': disabled.length,
+    };
+
+    return ColoredBox(
+      color: _warmBackground,
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(32, 32, 32, 48),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Inventory',
+                        style: TextStyle(
+                          fontSize: 23,
+                          fontWeight: FontWeight.w700,
+                          color: _ink,
+                        ),
+                      ),
+                      const SizedBox(height: 5),
+                      Text(
+                        '${filtered.length} products · ${_money(viewValue)} on hand at retail value',
+                        style: const TextStyle(fontSize: 14, color: _warmMuted),
+                      ),
+                    ],
+                  ),
+                ),
+                if (widget.controller.isAdmin) ...[
+                  OutlinedButton.icon(
+                    onPressed: widget.onExport,
+                    icon: const Icon(LucideIcons.download, size: 17),
+                    label: const Text('Export report'),
+                  ),
+                  const SizedBox(width: 10),
+                  OutlinedButton.icon(
+                    onPressed: filtered.isEmpty
+                        ? null
+                        : () => widget.onQrLabels(filtered),
+                    icon: const Icon(LucideIcons.qrCode, size: 17),
+                    label: const Text('Print labels'),
+                  ),
+                  const SizedBox(width: 10),
+                  FilledButton.icon(
+                    onPressed: widget.onNewItem,
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFF1C1C1C),
+                    ),
+                    icon: const Icon(LucideIcons.plus, size: 17),
+                    label: const Text('New product'),
+                  ),
+                ],
+              ],
+            ),
+            const SizedBox(height: 28),
+            LayoutBuilder(
+              builder: (context, limits) {
+                final tabs = Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _inventoryStatusTab('All', 'all', counts['all']!),
+                    const SizedBox(width: 8),
+                    _inventoryStatusTab('Low', 'low', counts['low']!),
+                    const SizedBox(width: 8),
+                    _inventoryStatusTab(
+                      'Critical',
+                      'critical',
+                      counts['critical']!,
+                    ),
+                    const SizedBox(width: 8),
+                    _inventoryStatusTab('Out of stock', 'out', counts['out']!),
+                    const SizedBox(width: 8),
+                    _inventoryStatusTab(
+                      'Inactive',
+                      'inactive',
+                      counts['inactive']!,
+                    ),
+                  ],
+                );
+                final searchAndCategory = Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    SizedBox(
+                      width: 290,
+                      height: 44,
+                      child: TextField(
+                        controller: _search,
+                        onChanged: (_) => setState(() => _page = 0),
+                        decoration: InputDecoration(
+                          hintText: 'Name, SKU, brand, model',
+                          prefixIcon: const Icon(LucideIcons.search, size: 18),
+                          filled: true,
+                          fillColor: Colors.white,
+                          contentPadding: const EdgeInsets.symmetric(
+                            vertical: 8,
+                          ),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(9),
+                            borderSide: const BorderSide(color: _warmBorder),
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(9),
+                            borderSide: const BorderSide(color: _warmBorder),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    SizedBox(
+                      width: 170,
+                      height: 44,
+                      child: DropdownButtonFormField<String>(
+                        initialValue: selectedCategory,
+                        isExpanded: true,
+                        decoration: InputDecoration(
+                          filled: true,
+                          fillColor: Colors.white,
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 9,
+                          ),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(9),
+                            borderSide: const BorderSide(color: _warmBorder),
+                          ),
+                        ),
+                        items: categories
+                            .map(
+                              (category) => DropdownMenuItem(
+                                value: category,
+                                child: Text(
+                                  category == 'All'
+                                      ? 'All categories'
+                                      : category,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            )
+                            .toList(),
+                        onChanged: (value) {
+                          if (value != null) _chooseCategory(value);
+                        },
+                      ),
+                    ),
+                  ],
+                );
+                return limits.maxWidth < 1000
+                    ? Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          SingleChildScrollView(
+                            scrollDirection: Axis.horizontal,
+                            child: tabs,
+                          ),
+                          const SizedBox(height: 12),
+                          searchAndCategory,
+                        ],
+                      )
+                    : Row(children: [tabs, const Spacer(), searchAndCategory]);
+              },
+            ),
+            const SizedBox(height: 20),
+            Container(
+              decoration: BoxDecoration(
+                color: Colors.white,
+                border: Border.all(color: _warmBorder),
+                borderRadius: BorderRadius.circular(14),
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: Column(
+                children: [
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: SizedBox(
+                      width: math.max(1180, width - 64),
+                      child: Column(
+                        children: [
+                          Container(
+                            height: 46,
+                            padding: const EdgeInsets.symmetric(horizontal: 16),
+                            decoration: const BoxDecoration(
+                              color: _warmBackground,
+                              border: Border(
+                                bottom: BorderSide(color: _warmBorder),
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                _inventoryHeading('Product', 5),
+                                _inventoryHeading('Category', 2),
+                                _inventoryHeading('Location', 3),
+                                _inventoryHeading('Stock', 4),
+                                _inventoryHeading('Price', 2, right: 16),
+                                _inventoryHeading('Status', 2),
+                              ],
+                            ),
+                          ),
+                          if (visible.isEmpty)
+                            const Padding(
+                              padding: EdgeInsets.all(42),
+                              child: Text('No products match your filters.'),
+                            )
+                          else
+                            ...visible.map(
+                              (item) => _inventoryReferenceRow(
+                                item,
+                                disabledIds.contains(item.id),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  if (pageCount > 1)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 8,
+                      ),
+                      child: Row(
+                        children: [
+                          Text(
+                            'Showing ${page * _perPage + 1}–${page * _perPage + visible.length} of ${filtered.length}',
+                            style: const TextStyle(
+                              color: _warmMuted,
+                              fontSize: 12,
+                            ),
+                          ),
+                          const Spacer(),
+                          IconButton(
+                            tooltip: 'Previous page',
+                            onPressed: page == 0
+                                ? null
+                                : () => setState(() => _page = page - 1),
+                            icon: const Icon(LucideIcons.chevronLeft, size: 18),
+                          ),
+                          Text(
+                            '${page + 1} / $pageCount',
+                            style: const TextStyle(fontSize: 12),
+                          ),
+                          IconButton(
+                            tooltip: 'Next page',
+                            onPressed: page + 1 == pageCount
+                                ? null
+                                : () => setState(() => _page = page + 1),
+                            icon: const Icon(
+                              LucideIcons.chevronRight,
+                              size: 18,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _inventoryStatusTab(String label, String value, int count) {
+    final selected =
+        _stockFilter == value || (value == 'all' && _stockFilter == 'ok');
+    return InkWell(
+      onTap: () => setState(() {
+        _stockFilter = value;
+        _page = 0;
+      }),
+      borderRadius: BorderRadius.circular(7),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: selected ? const Color(0xFF1C1C1C) : Colors.white,
+          border: Border.all(
+            color: selected ? const Color(0xFF1C1C1C) : _warmBorder,
+          ),
+          borderRadius: BorderRadius.circular(7),
+        ),
+        child: Text(
+          '$label  $count',
+          style: TextStyle(
+            fontSize: 12,
+            color: selected ? Colors.white : _ink,
+            fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _inventoryHeading(String label, int flex, {double right = 0}) =>
+      Expanded(
+        flex: flex,
+        child: Padding(
+          padding: EdgeInsets.only(right: right),
+          child: Text(
+            label,
+            textAlign: right > 0 ? TextAlign.right : TextAlign.left,
+            style: const TextStyle(fontSize: 11, color: _warmMuted),
+          ),
+        ),
+      );
+
+  String _inventoryLocation(InventoryItem item) {
+    String? fixture;
+    for (final element in widget.controller.storeLayout) {
+      if (element.id == item.locationId) {
+        fixture = element.label;
+        break;
+      }
+    }
+    final shelf = item.shelfLevel?.trim();
+    final parts = [
+      fixture,
+      if (shelf != null && shelf.isNotEmpty)
+        int.tryParse(shelf) != null ? 'Level $shelf' : shelf,
+    ].where((part) => part != null && part.trim().isNotEmpty).toList();
+    return parts.isEmpty ? '—' : parts.join(' · ');
+  }
+
+  Widget _inventoryThumbnail(InventoryItem item, {double size = 36}) =>
+      Container(
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+          color: const Color(0xFFF2F0EC),
+          border: Border.all(color: _warmBorder),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: item.imageUrl.isEmpty
+            ? const Icon(LucideIcons.package, size: 19, color: _warmMuted)
+            : Image.network(
+                item.imageUrl,
+                 fit: BoxFit.contain,
+                errorBuilder: (_, __, ___) => const Icon(
+                  LucideIcons.package,
+                  size: 19,
+                  color: _warmMuted,
+                ),
+              ),
+      );
+
+  Widget _inventoryReferenceRow(InventoryItem item, bool disabled) {
+    final status = widget.controller.stockStatusFor(item);
+    final color = disabled ? _warmMuted : _statusColor(status);
+    final label = disabled
+        ? 'Inactive'
+        : status == StockStatus.ok
+        ? 'In stock'
+        : status == StockStatus.low
+        ? 'Low'
+        : _statusLabel(status);
+    final fraction = item.maxQuantity <= 0
+        ? 0.0
+        : (item.quantity / item.maxQuantity).clamp(0.0, 1.0);
+    return Material(
+      color: Colors.white,
+      child: InkWell(
+        onTap: () => _openDetails(item),
+        child: Container(
+          height: 66,
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          decoration: const BoxDecoration(
+            border: Border(bottom: BorderSide(color: _warmBorder)),
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                flex: 5,
+                child: Row(
+                  children: [
+                    _inventoryThumbnail(item),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            item.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: _ink,
+                            ),
+                          ),
+                          Text(
+                            [item.sku, item.manufacturer, item.model]
+                                .where(
+                                  (part) => part != null && part.isNotEmpty,
+                                )
+                                .join(' · '),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 10,
+                              color: _warmMuted,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Expanded(
+                flex: 2,
+                child: Text(
+                  item.category.isEmpty ? '—' : item.category,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 11, color: _ink),
+                ),
+              ),
+              Expanded(
+                flex: 3,
+                child: Text(
+                  _inventoryLocation(item),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 11, color: _ink),
+                ),
+              ),
+              Expanded(
+                flex: 4,
+                child: Padding(
+                  padding: const EdgeInsets.only(right: 20),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(4),
+                          child: LinearProgressIndicator(
+                            value: fraction,
+                            minHeight: 5,
+                            backgroundColor: const Color(0xFFEEECE8),
+                            valueColor: AlwaysStoppedAnimation<Color>(color),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 24),
+                      Text(
+                        '${_qty(item.quantity)} / ${_qty(item.maxQuantity)}',
+                        style: const TextStyle(fontSize: 11, color: _ink),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              Expanded(
+                flex: 2,
+                child: Padding(
+                  padding: const EdgeInsets.only(right: 16),
+                  child: Text(
+                    '${_money(item.price)} /${item.unit}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.right,
+                    style: const TextStyle(fontSize: 11, color: _ink),
+                  ),
+                ),
+              ),
+              Expanded(
+                flex: 2,
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: _inventoryTableBadge(label, color),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _inventoryTableBadge(String label, Color color) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+    decoration: BoxDecoration(
+      color: color.withValues(alpha: 0.09),
+      border: Border.all(color: color.withValues(alpha: 0.25)),
+      borderRadius: BorderRadius.circular(6),
+    ),
+    child: Text(
+      label,
+      maxLines: 1,
+      style: TextStyle(fontSize: 11, color: color, fontWeight: FontWeight.w600),
+    ),
+  );
+
   Widget _buildMobileView({
     required List<InventoryItem> items,
     required List<InventoryItem> source,
@@ -1224,7 +1785,7 @@ class _InventoryRedesignState extends State<InventoryRedesign> {
                           )
                         : Image.network(
                             item.imageUrl,
-                            fit: BoxFit.cover,
+                             fit: BoxFit.contain,
                             errorBuilder: (context, error, stackTrace) =>
                                 const ColoredBox(
                                   color: Color(0xFFEFF6FF),
@@ -1666,7 +2227,7 @@ class _InventoryRedesignState extends State<InventoryRedesign> {
                 onTap: () {
                   Navigator.pop(sheetContext);
                   WidgetsBinding.instance.addPostFrameCallback((_) {
-                    if (mounted) widget.onQrLabels();
+                    if (mounted) widget.onQrLabels(null);
                   });
                 },
               ),
@@ -1963,6 +2524,8 @@ class _InventoryRedesignState extends State<InventoryRedesign> {
         child: SizedBox(
           width: MediaQuery.of(dialogContext).size.width < 500
               ? MediaQuery.of(dialogContext).size.width
+              : MediaQuery.of(dialogContext).size.width >= 900
+              ? math.min(820, MediaQuery.of(dialogContext).size.width * 0.52)
               : 440,
           height: double.infinity,
           child: Material(
@@ -1972,6 +2535,7 @@ class _InventoryRedesignState extends State<InventoryRedesign> {
               controller: widget.controller,
               onClose: () => Navigator.of(dialogContext).pop(),
               onSave: widget.onUpdateItem,
+              onQrLabel: () => widget.onQrLabels([item]),
             ),
           ),
         ),
@@ -2010,12 +2574,14 @@ class _ItemDetailsDrawer extends StatefulWidget {
   final InventoryController controller;
   final VoidCallback onClose;
   final Future<void> Function(InventoryItem) onSave;
+  final VoidCallback onQrLabel;
 
   const _ItemDetailsDrawer({
     required this.item,
     required this.controller,
     required this.onClose,
     required this.onSave,
+    required this.onQrLabel,
   });
 
   @override
@@ -2023,6 +2589,7 @@ class _ItemDetailsDrawer extends StatefulWidget {
 }
 
 class _ItemDetailsDrawerState extends State<_ItemDetailsDrawer> {
+  static const int _historyPageSize = 10;
   StreamSubscription<void>? _historySubscription;
   final ValueNotifier<List<Map<String, dynamic>>> _historyNotifier =
       ValueNotifier<List<Map<String, dynamic>>>(const []);
@@ -2030,8 +2597,11 @@ class _ItemDetailsDrawerState extends State<_ItemDetailsDrawer> {
   bool _historyLoading = true;
   bool _historyFailed = false;
   int _historyRequestVersion = 0;
+  int _historyPage = 0;
+  final _historyPageTopKey = GlobalKey();
   final _nameController = TextEditingController();
   final _priceController = TextEditingController();
+  final _maxStockController = TextEditingController();
   final _skuController = TextEditingController();
   final _stockDisplayController = TextEditingController();
   final _descriptionController = TextEditingController();
@@ -2039,6 +2609,11 @@ class _ItemDetailsDrawerState extends State<_ItemDetailsDrawer> {
   final _modelController = TextEditingController();
   final _sizeController = TextEditingController();
   final _imageUrlController = TextEditingController();
+  final _shelfController = TextEditingController();
+  final _binController = TextEditingController();
+  String _categoryValue = '';
+  String? _locationValue;
+  int _referenceTab = 0;
   bool _isEditing = false;
   bool _isSaving = false;
   String? _editError;
@@ -2048,6 +2623,21 @@ class _ItemDetailsDrawerState extends State<_ItemDetailsDrawer> {
   @override
   void initState() {
     super.initState();
+    _nameController.text = widget.item.name;
+    _priceController.text = widget.item.price.toStringAsFixed(2);
+    _maxStockController.text = _qty(widget.item.maxQuantity);
+    _stockDisplayController.text =
+        '${_qty(widget.item.quantity)} ${widget.item.unit}';
+    _skuController.text = widget.item.sku;
+    _descriptionController.text = widget.item.description;
+    _manufacturerController.text = widget.item.manufacturer ?? '';
+    _modelController.text = widget.item.model ?? '';
+    _sizeController.text = widget.item.productSize ?? '';
+    _imageUrlController.text = widget.item.imageUrl;
+    _shelfController.text = widget.item.shelfLevel ?? '';
+    _binController.text = widget.item.binNumber ?? '';
+    _categoryValue = widget.item.category;
+    _locationValue = widget.item.locationId;
     _subscribeToHistory();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) unawaited(_loadHistory());
@@ -2105,6 +2695,7 @@ class _ItemDetailsDrawerState extends State<_ItemDetailsDrawer> {
         oldWidget.controller != widget.controller) {
       _historyRequestVersion++;
       _history = const [];
+      _historyPage = 0;
       _historyNotifier.value = const [];
       unawaited(_loadHistory());
     }
@@ -2117,6 +2708,7 @@ class _ItemDetailsDrawerState extends State<_ItemDetailsDrawer> {
     _historyNotifier.dispose();
     _nameController.dispose();
     _priceController.dispose();
+    _maxStockController.dispose();
     _skuController.dispose();
     _stockDisplayController.dispose();
     _descriptionController.dispose();
@@ -2124,12 +2716,15 @@ class _ItemDetailsDrawerState extends State<_ItemDetailsDrawer> {
     _modelController.dispose();
     _sizeController.dispose();
     _imageUrlController.dispose();
+    _shelfController.dispose();
+    _binController.dispose();
     super.dispose();
   }
 
   void _startEdit(InventoryItem item) {
     _nameController.text = item.name;
     _priceController.text = item.price.toStringAsFixed(2);
+    _maxStockController.text = _qty(item.maxQuantity);
     _skuController.text = item.sku;
     _stockDisplayController.text = '${_qty(item.quantity)} ${item.unit}';
     _descriptionController.text = item.description;
@@ -2137,6 +2732,10 @@ class _ItemDetailsDrawerState extends State<_ItemDetailsDrawer> {
     _modelController.text = item.model ?? '';
     _sizeController.text = item.productSize ?? '';
     _imageUrlController.text = item.imageUrl;
+    _shelfController.text = item.shelfLevel ?? '';
+    _binController.text = item.binNumber ?? '';
+    _categoryValue = item.category;
+    _locationValue = item.locationId;
     setState(() {
       _chosenImage = null;
       _chosenImageBytes = null;
@@ -2175,11 +2774,16 @@ class _ItemDetailsDrawerState extends State<_ItemDetailsDrawer> {
     if (_isSaving) return;
     final name = _nameController.text.trim();
     final price = double.tryParse(_priceController.text.trim());
+    final maxStock = double.tryParse(_maxStockController.text.trim());
     final imageUrl = _imageUrlController.text.trim();
     final imageUri = Uri.tryParse(imageUrl);
 
     if (name.isEmpty || price == null || !price.isFinite || price < 0) {
       setState(() => _editError = 'Enter a product name and a valid price.');
+      return;
+    }
+    if (maxStock == null || !maxStock.isFinite || maxStock < 0) {
+      setState(() => _editError = 'Enter a valid max stock of 0 or more.');
       return;
     }
     if (_chosenImageBytes == null &&
@@ -2210,24 +2814,29 @@ class _ItemDetailsDrawerState extends State<_ItemDetailsDrawer> {
         savedImageUrl = uploaded;
       }
 
-      // Retain quantity, SKU, max stock and map placement; editing must not
-      // bypass the inventory restock / write-off approval workflow.
+      // Retain quantity and SKU; stock changes must use the approval workflow.
       final updated = widget.controller.prepareUpdatedItem(
         originalItem: item,
         newName: name,
         newSku: item.sku,
         newPrice: price.toString(),
         newStock: item.quantity.toString(),
-        newMaxStock: item.maxQuantity.toString(),
+        newMaxStock: maxStock.toString(),
         newDesc: _descriptionController.text.trim(),
         manufacturer: _manufacturerController.text.trim(),
         model: _modelController.text.trim(),
         productSize: _sizeController.text.trim(),
-        shelfLevel: item.shelfLevel,
+        category: _categoryValue,
+        shelfLevel: _shelfController.text.trim(),
+        binNumber: _binController.text.trim(),
         imageUrl: savedImageUrl,
       );
       await widget.onSave(updated);
+      if (_locationValue != item.locationId) {
+        await widget.controller.assignItemToLocation(item.id, _locationValue);
+      }
       if (!mounted) return;
+      _imageUrlController.text = savedImageUrl;
       setState(() {
         _isEditing = false;
         _chosenImage = null;
@@ -2257,6 +2866,9 @@ class _ItemDetailsDrawerState extends State<_ItemDetailsDrawer> {
             widget.controller.findAnyItemById(widget.item.id) ?? widget.item;
         final status = widget.controller.stockStatusFor(item);
         final disabled = widget.controller.isDisabled(item.id);
+        if (MediaQuery.of(context).size.width >= 900) {
+          return _buildReferenceDrawer(item, status, disabled);
+        }
         return SafeArea(
           child: Column(
             children: [
@@ -2589,6 +3201,824 @@ class _ItemDetailsDrawerState extends State<_ItemDetailsDrawer> {
     );
   }
 
+  Widget _buildReferenceDrawer(
+    InventoryItem item,
+    StockStatus status,
+    bool disabled,
+  ) {
+    final statusLabel = disabled
+        ? 'Inactive'
+        : status == StockStatus.ok
+        ? 'Available'
+        : status == StockStatus.low
+        ? 'Low'
+        : _statusLabel(status);
+    final statusColor = disabled ? _warmMuted : _statusColor(status);
+    final fraction = item.maxQuantity <= 0
+        ? 0.0
+        : (item.quantity / item.maxQuantity).clamp(0.0, 1.0);
+    final canEdit = widget.controller.isAdmin;
+    return SafeArea(
+      child: Column(
+        children: [
+          Container(
+            height: 92,
+            padding: const EdgeInsets.symmetric(horizontal: 28),
+            decoration: const BoxDecoration(
+              border: Border(bottom: BorderSide(color: _warmBorder)),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        item.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 19,
+                          fontWeight: FontWeight.w700,
+                          color: _ink,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        item.sku,
+                        style: const TextStyle(
+                          fontFamily: 'monospace',
+                          fontSize: 14,
+                          color: _warmMuted,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Close details',
+                  onPressed: widget.onClose,
+                  icon: const Icon(LucideIcons.x, size: 19, color: _warmMuted),
+                ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(28, 24, 28, 36),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _referencePhoto(item),
+                      const SizedBox(width: 20),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 6,
+                              crossAxisAlignment: WrapCrossAlignment.center,
+                              children: [
+                                _badge(statusLabel, statusColor),
+                                Text(
+                                  [
+                                        item.manufacturer,
+                                        item.model,
+                                        item.productSize,
+                                      ]
+                                      .where(
+                                        (part) =>
+                                            part != null &&
+                                            part.trim().isNotEmpty,
+                                      )
+                                      .join(' · '),
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    color: _warmMuted,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 12),
+                            Text.rich(
+                              TextSpan(
+                                children: [
+                                  TextSpan(
+                                    text: _money(item.price),
+                                    style: const TextStyle(
+                                      fontSize: 28,
+                                      fontWeight: FontWeight.w700,
+                                      color: _ink,
+                                    ),
+                                  ),
+                                  TextSpan(
+                                    text: ' / ${item.unit}',
+                                    style: const TextStyle(
+                                      fontSize: 13,
+                                      color: _warmMuted,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 14),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: ClipRRect(
+                                    borderRadius: BorderRadius.circular(4),
+                                    child: LinearProgressIndicator(
+                                      value: fraction,
+                                      minHeight: 7,
+                                      backgroundColor: const Color(0xFFEEECE8),
+                                      valueColor: AlwaysStoppedAnimation<Color>(
+                                        statusColor,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 20),
+                                Text(
+                                  '${_qty(item.quantity)} / ${_qty(item.maxQuantity)}',
+                                  style: const TextStyle(
+                                    fontSize: 13,
+                                    color: _warmMuted,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 26),
+                  Container(
+                    padding: const EdgeInsets.all(3),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFEEECE8),
+                      borderRadius: BorderRadius.circular(9),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        _referenceTabButton('Details', 0),
+                        _referenceTabButton('Location', 1),
+                        _referenceTabButton(
+                          'Stock history ${_history.length}',
+                          2,
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 26),
+                  if (_referenceTab == 0) _referenceDetails(item, canEdit),
+                  if (_referenceTab == 1) _referenceLocation(item, canEdit),
+                  if (_referenceTab == 2) _referenceHistory(),
+                ],
+              ),
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.fromLTRB(28, 12, 28, 12),
+            decoration: const BoxDecoration(
+              color: _warmBackground,
+              border: Border(top: BorderSide(color: _warmBorder)),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (_editError != null) ...[
+                  Text(
+                    _editError!,
+                    style: const TextStyle(color: _warmRed, fontSize: 12),
+                  ),
+                  const SizedBox(height: 8),
+                ],
+                Row(
+                  children: [
+                    if (canEdit)
+                      OutlinedButton(
+                        onPressed: _isSaving
+                            ? null
+                            : () => _toggleReferenceStatus(item, disabled),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: _warmRed,
+                        ),
+                        child: Text(
+                          disabled ? 'Restore product' : 'Disable product',
+                        ),
+                      ),
+                    const Spacer(),
+                    OutlinedButton.icon(
+                      onPressed: widget.onQrLabel,
+                      icon: const Icon(LucideIcons.qrCode, size: 16),
+                      label: const Text('QR label'),
+                    ),
+                    if (canEdit) ...[
+                      const SizedBox(width: 10),
+                      FilledButton(
+                        onPressed: _isSaving ? null : () => _saveEdit(item),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: const Color(0xFF1C1C1C),
+                        ),
+                        child: Text(_isSaving ? 'Saving…' : 'Save changes'),
+                      ),
+                    ],
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _referencePhoto(InventoryItem item) {
+    final imageUrl = _imageUrlController.text.trim();
+    return Container(
+      width: 80,
+      height: 80,
+      decoration: BoxDecoration(
+        color: const Color(0xFFF2F0EC),
+        border: Border.all(color: _warmBorder),
+        borderRadius: BorderRadius.circular(9),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: _chosenImageBytes != null
+           ? Image.memory(_chosenImageBytes!, fit: BoxFit.contain)
+          : imageUrl.isEmpty
+          ? const Icon(LucideIcons.package, color: _warmMuted, size: 32)
+          : Image.network(
+              imageUrl,
+               fit: BoxFit.contain,
+              errorBuilder: (_, __, ___) =>
+                  const Icon(LucideIcons.package, color: _warmMuted, size: 32),
+            ),
+    );
+  }
+
+  Widget _referenceTabButton(String label, int index) => InkWell(
+    onTap: () => setState(() => _referenceTab = index),
+    borderRadius: BorderRadius.circular(7),
+    child: Container(
+      padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 10),
+      decoration: BoxDecoration(
+        color: _referenceTab == index ? Colors.white : Colors.transparent,
+        borderRadius: BorderRadius.circular(7),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 12,
+          color: _referenceTab == index ? _ink : _warmMuted,
+          fontWeight: _referenceTab == index
+              ? FontWeight.w600
+              : FontWeight.normal,
+        ),
+      ),
+    ),
+  );
+
+  Widget _referenceDetails(InventoryItem item, bool canEdit) {
+    final categories = <String>{
+      item.category,
+      ...widget.controller.allItems.map((product) => product.category),
+    }.toList()..sort();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Identity',
+          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+        ),
+        const SizedBox(height: 16),
+        _referenceField('Product name', _nameController, readOnly: !canEdit),
+        const SizedBox(height: 16),
+        Row(
+          children: [
+            Expanded(
+              child: _referenceField('SKU', _skuController, readOnly: true),
+            ),
+            const SizedBox(width: 18),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Category',
+                    style: TextStyle(fontSize: 12, color: _ink),
+                  ),
+                  const SizedBox(height: 7),
+                  DropdownButtonFormField<String>(
+                    initialValue: categories.contains(_categoryValue)
+                        ? _categoryValue
+                        : item.category,
+                    isExpanded: true,
+                    decoration: _referenceInputDecoration(),
+                    items: categories
+                        .map(
+                          (category) => DropdownMenuItem(
+                            value: category,
+                            child: Text(category),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: canEdit
+                        ? (value) => setState(
+                            () => _categoryValue = value ?? item.category,
+                          )
+                        : null,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        Row(
+          children: [
+            Expanded(
+              child: _referenceField(
+                'Manufacturer',
+                _manufacturerController,
+                readOnly: !canEdit,
+              ),
+            ),
+            const SizedBox(width: 18),
+            Expanded(
+              child: _referenceField(
+                'Model',
+                _modelController,
+                readOnly: !canEdit,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        Row(
+          children: [
+            Expanded(
+              child: _referenceField(
+                'Size',
+                _sizeController,
+                readOnly: !canEdit,
+              ),
+            ),
+            const SizedBox(width: 18),
+            Expanded(
+              child: _referenceField(
+                'Price (₱)',
+                _priceController,
+                readOnly: !canEdit,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        Row(
+          children: [
+            Expanded(
+              child: _referenceField(
+                'On hand',
+                _stockDisplayController,
+                readOnly: true,
+              ),
+            ),
+            const SizedBox(width: 18),
+            Expanded(
+              child: _referenceField(
+                'Max stock',
+                _maxStockController,
+                readOnly: !canEdit,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+              ),
+            ),
+          ],
+        ),
+        if (item.quantity > item.maxQuantity) ...[
+          const SizedBox(height: 6),
+          Text(
+            'On hand is above the current max stock. Set a higher max if this is expected.',
+            style: const TextStyle(fontSize: 12, color: _warmMuted),
+          ),
+        ],
+        const SizedBox(height: 16),
+        _referenceField(
+          'Image URL',
+          _imageUrlController,
+          readOnly: !canEdit,
+          onChanged: (_) => setState(() {
+            _chosenImage = null;
+            _chosenImageBytes = null;
+          }),
+        ),
+        if (canEdit) ...[
+          const SizedBox(height: 8),
+          TextButton.icon(
+            onPressed: _pickEditImage,
+            icon: const Icon(LucideIcons.imagePlus, size: 16),
+            label: Text(_chosenImage?.name ?? 'Upload image'),
+          ),
+        ],
+        const SizedBox(height: 16),
+        _referenceField(
+          'Description',
+          _descriptionController,
+          readOnly: !canEdit,
+          maxLines: 4,
+        ),
+      ],
+    );
+  }
+
+  InputDecoration _referenceInputDecoration() => InputDecoration(
+    isDense: true,
+    filled: true,
+    fillColor: Colors.white,
+    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+    enabledBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(9),
+      borderSide: const BorderSide(color: _warmBorder),
+    ),
+    focusedBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(9),
+      borderSide: const BorderSide(color: _warmOrange),
+    ),
+    disabledBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(9),
+      borderSide: const BorderSide(color: _warmBorder),
+    ),
+  );
+
+  Widget _referenceField(
+    String label,
+    TextEditingController controller, {
+    bool readOnly = false,
+    int maxLines = 1,
+    TextInputType? keyboardType,
+    ValueChanged<String>? onChanged,
+  }) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text(label, style: const TextStyle(fontSize: 12, color: _ink)),
+      const SizedBox(height: 7),
+      TextField(
+        controller: controller,
+        readOnly: readOnly,
+        maxLines: maxLines,
+        keyboardType: keyboardType,
+        onChanged: onChanged,
+        style: const TextStyle(fontSize: 13, color: _ink),
+        decoration: _referenceInputDecoration(),
+      ),
+    ],
+  );
+
+  Widget _referenceLocation(InventoryItem item, bool canEdit) {
+    final fixtures = widget.controller.storeLayout
+        .where(
+          (element) =>
+              element.type == ElementType.rack ||
+              element.type == ElementType.shelf,
+        )
+        .toList();
+    final currentFixture = fixtures
+        .where((element) => element.id == _locationValue)
+        .firstOrNull;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Aisle',
+                    style: TextStyle(fontSize: 12, color: _ink),
+                  ),
+                  const SizedBox(height: 7),
+                  InputDecorator(
+                    decoration: _referenceInputDecoration(),
+                    child: Text(
+                      currentFixture?.label ?? '—',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 13, color: _ink),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _referenceField(
+                'Shelf',
+                _shelfController,
+                readOnly: !canEdit,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _referenceField('Bin', _binController, readOnly: !canEdit),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Map fixture',
+                    style: TextStyle(fontSize: 12, color: _ink),
+                  ),
+                  const SizedBox(height: 7),
+                  DropdownButtonFormField<String?>(
+                    initialValue:
+                        fixtures.any((element) => element.id == _locationValue)
+                        ? _locationValue
+                        : null,
+                    isExpanded: true,
+                    decoration: _referenceInputDecoration(),
+                    items: [
+                      const DropdownMenuItem<String?>(
+                        value: null,
+                        child: Text('Unassigned'),
+                      ),
+                      ...fixtures.map(
+                        (fixture) => DropdownMenuItem<String?>(
+                          value: fixture.id,
+                          child: Text(
+                            fixture.label.isEmpty
+                                ? fixture.type.name
+                                : fixture.label,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ),
+                    ],
+                    onChanged: canEdit
+                        ? (value) => setState(() => _locationValue = value)
+                        : null,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 20),
+        Container(
+          height: 380,
+          decoration: BoxDecoration(
+            border: Border.all(color: _warmBorder),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: StoreMap(
+            controller: widget.controller,
+            mode: MapMode.view,
+            viewStyle: MapViewStyle.twoD,
+            highlightId: _locationValue,
+            showItemPopup: false,
+            fitEntireMap: true,
+            compactZoomControls: true,
+            showMobileToolbar: false,
+          ),
+        ),
+      ],
+    );
+  }
+
+  void _changeHistoryPage(int page) {
+    setState(() => _historyPage = page);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final anchor = _historyPageTopKey.currentContext;
+      if (mounted && anchor != null) {
+        Scrollable.ensureVisible(
+          anchor,
+          alignment: 0.05,
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOut,
+        );
+      }
+    });
+  }
+
+  Widget _referenceHistory() {
+    if (_historyLoading) {
+      return const Padding(
+        padding: EdgeInsets.all(24),
+        child: CircularProgressIndicator(),
+      );
+    }
+    if (_historyFailed) {
+      return TextButton(
+        onPressed: () => unawaited(_loadHistory(force: true)),
+        child: const Text('Could not load stock history. Retry'),
+      );
+    }
+    if (_history.isEmpty) {
+      return const Padding(
+        padding: EdgeInsets.all(24),
+        child: Text('No stock history yet.'),
+      );
+    }
+
+    final pageCount =
+        (_history.length + _historyPageSize - 1) ~/ _historyPageSize;
+    final page = _historyPage.clamp(0, pageCount - 1);
+    final start = page * _historyPageSize;
+    final entries = _history.skip(start).take(_historyPageSize);
+    return Column(
+      key: _historyPageTopKey,
+      children: [
+        ...entries.map(_referenceHistoryTile),
+        if (pageCount > 1)
+          Padding(
+            padding: const EdgeInsets.only(top: 16),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Showing ${start + 1}–${start + entries.length} of ${_history.length}',
+                    style: const TextStyle(fontSize: 11, color: _warmMuted),
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'First page',
+                  onPressed: page == 0 ? null : () => _changeHistoryPage(0),
+                  icon: const Icon(LucideIcons.chevronsLeft, size: 17),
+                ),
+                IconButton(
+                  tooltip: 'Previous page',
+                  onPressed: page == 0
+                      ? null
+                      : () => _changeHistoryPage(page - 1),
+                  icon: const Icon(LucideIcons.chevronLeft, size: 17),
+                ),
+                Text(
+                  '${page + 1} / $pageCount',
+                  style: const TextStyle(fontSize: 12, color: _ink),
+                ),
+                IconButton(
+                  tooltip: 'Next page',
+                  onPressed: page + 1 == pageCount
+                      ? null
+                      : () => _changeHistoryPage(page + 1),
+                  icon: const Icon(LucideIcons.chevronRight, size: 17),
+                ),
+                IconButton(
+                  tooltip: 'Last page',
+                  onPressed: page + 1 == pageCount
+                      ? null
+                      : () => _changeHistoryPage(pageCount - 1),
+                  icon: const Icon(LucideIcons.chevronsRight, size: 17),
+                ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _referenceHistoryTile(Map<String, dynamic> transaction) {
+    final change = _transactionNumber(transaction['quantity_change']);
+    final type = transaction['transaction_type']?.toString() ?? 'adjustment';
+    final label = type == 'checkout' || type == 'sale'
+        ? 'Sale'
+        : type == 'stock_in'
+        ? 'Restock'
+        : type.replaceAll('_', ' ');
+    final profile = transaction['profiles'];
+    final by =
+        (profile is Map ? profile['name'] : null) ??
+        transaction['user_name'] ??
+        'Unknown';
+    final balance = _transactionNumber(transaction['new_quantity']);
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 16),
+      decoration: const BoxDecoration(
+        border: Border(bottom: BorderSide(color: _warmBorder)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 34,
+            height: 34,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: const Color(0xFFF2F0EC),
+              borderRadius: BorderRadius.circular(7),
+            ),
+            child: Icon(
+              change < 0
+                  ? LucideIcons.arrowDownRight
+                  : LucideIcons.arrowUpRight,
+              size: 16,
+              color: _warmMuted,
+            ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  '${_transactionDate(transaction['created_at'])} · $by',
+                  style: const TextStyle(fontSize: 11, color: _warmMuted),
+                ),
+              ],
+            ),
+          ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                '${change > 0 ? '+' : ''}${_qty(change)}',
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              Text(
+                'bal. ${_qty(balance)}',
+                style: const TextStyle(fontSize: 11, color: _warmMuted),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _toggleReferenceStatus(InventoryItem item, bool disabled) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(disabled ? 'Restore product?' : 'Disable product?'),
+        content: Text(
+          disabled
+              ? 'This product will return to the active inventory.'
+              : 'This product will be hidden from active inventory.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: Text(disabled ? 'Restore' : 'Disable'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _isSaving = true);
+    try {
+      if (disabled) {
+        await widget.controller.restoreItem(item.id);
+      } else {
+        await widget.controller.disableItem(item.id);
+      }
+      if (!mounted) return;
+      AppToast.success(
+        context,
+        disabled ? 'Product restored' : 'Product disabled',
+      );
+      widget.onClose();
+    } catch (error) {
+      if (mounted)
+        AppToast.error(
+          context,
+          AppErrorMapper.message(error, fallback: AppErrorCategory.dataSave),
+        );
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
+    }
+  }
+
   Widget _buildEditForm() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -2907,7 +4337,8 @@ class _ItemDetailsDrawerState extends State<_ItemDetailsDrawer> {
                       child: StoreMap(
                         controller: widget.controller,
                         mode: MapMode.view,
-                        selectedItemId: item.id,
+                         highlightId: _locationValue,
+                         showItemPopup: false,
                         fitEntireMap: true,
                         compactZoomControls: true,
                         showMobileToolbar: false,
@@ -2976,7 +4407,8 @@ class _ItemDetailsDrawerState extends State<_ItemDetailsDrawer> {
                   child: StoreMap(
                     controller: widget.controller,
                     mode: MapMode.view,
-                    selectedItemId: item.id,
+                     highlightId: _locationValue,
+                     showItemPopup: false,
                     fitEntireMap: true,
                   ),
                 ),
